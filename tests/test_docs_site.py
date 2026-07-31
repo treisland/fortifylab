@@ -66,6 +66,9 @@ class DocumentationSiteTests(unittest.TestCase):
             "repo_url:",
             "edit_uri:",
             "strict: true",
+            "Architecture decisions:",
+            "adr/README.md",
+            "adr/0001-mkdocs-authoritative-documentation.md",
         )
         for setting in expected:
             with self.subTest(setting=setting):

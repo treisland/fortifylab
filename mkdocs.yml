@@ -78,3 +78,6 @@ nav:
       - Backup and recovery: operations/backup-and-recovery.md
       - Versions and compatibility: operations/versions-and-compatibility.md
       - First scan: operations/first-scan.md
+  - Architecture decisions:
+      - Overview: adr/README.md
+      - "ADR 0001: MkDocs documentation architecture": adr/0001-mkdocs-authoritative-documentation.md
