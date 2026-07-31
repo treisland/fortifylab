@@ -1,7 +1,17 @@
 #!/bin/bash
 # Read-only, offline Help Center for the Fortify Lab wizard.
 
-HELP_TOPIC_ID=(overview architecture ssc sast dast lim mysql postgresql dashboard roles glossary urls lab-scope)
+# Stable topic IDs are a public wizard contract. Keep aliases below when an ID is
+# superseded; released wizards and copied support instructions may still use it.
+HELP_TOPIC_ID=(
+    overview architecture ssc sast dast lim mysql postgresql dashboard roles glossary urls lab-scope
+    guided/prerequisites guided/inputs guided/preflight guided/tls guided/dashboard guided/secrets
+    guided/mysql guided/postgresql guided/ssc guided/lim guided/sast guided/dast guided/configuration
+    troubleshooting/deployment troubleshooting/pending-pods troubleshooting/restarting-pods
+    troubleshooting/url troubleshooting/tls troubleshooting/database troubleshooting/ssc
+    troubleshooting/sast troubleshooting/dast troubleshooting/dashboard troubleshooting/license
+    troubleshooting/registry
+)
 HELP_TOPIC_LABEL=(
     "System overview" "Dependencies and data flow" "Software Security Center (SSC)"
     "ScanCentral SAST" "ScanCentral DAST" "License and Infrastructure Manager (LIM)"
@@ -11,6 +21,25 @@ HELP_TOPIC_LABEL=(
 HELP_TOPIC_FILE=(
     overview.txt architecture.txt ssc.txt sast.txt dast.txt lim.txt mysql.txt
     postgresql.txt dashboard.txt roles.txt glossary.txt urls.txt lab-scope.txt
+    overview.txt overview.txt overview.txt urls.txt dashboard.txt overview.txt
+    mysql.txt postgresql.txt ssc.txt lim.txt sast.txt dast.txt urls.txt
+    overview.txt architecture.txt architecture.txt urls.txt urls.txt architecture.txt ssc.txt
+    sast.txt dast.txt dashboard.txt lab-scope.txt architecture.txt
+)
+HELP_TOPIC_ROUTE=(
+    index.html fortify/architecture-and-flows/ fortify/ssc/ fortify/scancentral-sast/
+    fortify/scancentral-dast/ fortify/lim/ fortify/mysql/ fortify/postgresql/
+    fortify/kubernetes-dashboard/ fortify/ fortify/ operations/networking-and-tls/ safety/
+    getting-started/ getting-started/#1-clone-and-prepare-configuration getting-started/#2-start-the-wizard
+    operations/networking-and-tls/ fortify/kubernetes-dashboard/ operations/secrets-and-licenses/
+    fortify/mysql/ fortify/postgresql/ fortify/ssc/ fortify/lim/ fortify/scancentral-sast/
+    fortify/scancentral-dast/ operations/deployment-and-lifecycle/
+    operations/troubleshooting/ operations/troubleshooting/#pods-remain-pending
+    operations/troubleshooting/#pods-restart-or-never-become-ready operations/troubleshooting/#dns-ingress-urls-and-tls
+    operations/troubleshooting/#dns-ingress-urls-and-tls operations/troubleshooting/#mysql-and-ssc
+    operations/troubleshooting/#mysql-and-ssc operations/troubleshooting/#scancentral-sast
+    operations/troubleshooting/#postgresql-lim-and-scancentral-dast operations/troubleshooting/#kubernetes-dashboard
+    operations/secrets-and-licenses/ operations/troubleshooting/#image-pull-failures
 )
 
 help_topic_index() {
@@ -23,21 +52,39 @@ help_topic_index() {
 
 help_guided_topic() {
     case "$1" in
-        prereqs|inputs|preflight|certs|secrets) printf '%s\n' overview ;;
-        dashboard) printf '%s\n' dashboard ;;
-        mysql) printf '%s\n' mysql ;;
-        postgresql) printf '%s\n' postgresql ;;
-        ssc) printf '%s\n' ssc ;;
-        lim) printf '%s\n' lim ;;
-        sast) printf '%s\n' sast ;;
-        dast) printf '%s\n' dast ;;
-        configure) printf '%s\n' urls ;;
-        *) printf '%s\n' overview ;;
+        prereqs) printf '%s\n' guided/prerequisites ;;
+        inputs) printf '%s\n' guided/inputs ;;
+        preflight) printf '%s\n' guided/preflight ;;
+        certs) printf '%s\n' guided/tls ;;
+        dashboard|secrets|mysql|postgresql|ssc|lim|sast|dast) printf 'guided/%s\n' "$1" ;;
+        configure) printf '%s\n' guided/configuration ;;
+        *) return 2 ;;
     esac
 }
 
+help_failure_topic() {
+    case "$1" in
+        failed-deploy) printf '%s\n' troubleshooting/deployment ;;
+        pending-pods|restarting-pods|url|tls|database|ssc|sast|dast|dashboard|license|registry)
+            printf 'troubleshooting/%s\n' "$1" ;;
+        *) return 2 ;;
+    esac
+}
+
+help_topic_online_url() {
+    local topic="$1" index base
+    index=$(help_topic_index "$topic") || return 2
+    base="${FORTIFY_DOCS_BASE_URL:-https://treisland.github.io/fortifylab}"
+    base="${base%/}"
+    case "$base" in
+        http://*|https://*) ;;
+        *) error "FORTIFY_DOCS_BASE_URL must use http:// or https://"; return 2 ;;
+    esac
+    printf '%s/%s\n' "$base" "${HELP_TOPIC_ROUTE[$index]}"
+}
+
 help_render_topic() {
-    local topic="$1" index file
+    local topic="$1" index file online_url
     index=$(help_topic_index "$topic") || {
         error "Unknown help topic: $topic"
         return 2
@@ -51,6 +98,20 @@ help_render_topic() {
     fi
     printf '\n'
     sed 's/^/  /' "$file"
+    if online_url=$(help_topic_online_url "$topic"); then
+        printf '\n  Online topic: %s\n' "$online_url"
+    else
+        warning "Online documentation link is unavailable; offline help above is still valid."
+    fi
+}
+
+help_print_topic_reference() {
+    local topic="$1" index online_url
+    index=$(help_topic_index "$topic") || return 2
+    printf '  Help topic: %s (offline: docs/help/%s)\n' "$topic" "${HELP_TOPIC_FILE[$index]}"
+    if online_url=$(help_topic_online_url "$topic"); then
+        printf '  Online guide: %s\n' "$online_url"
+    fi
 }
 
 help_show_topic() {

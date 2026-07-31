@@ -40,14 +40,52 @@ class HelpCenterTests(unittest.TestCase):
 
     def test_guided_steps_have_context_sensitive_topic_mapping(self) -> None:
         expected = {
-            "prereqs": "overview", "inputs": "overview", "preflight": "overview",
-            "certs": "overview", "dashboard": "dashboard", "secrets": "overview",
-            "mysql": "mysql", "postgresql": "postgresql", "ssc": "ssc",
-            "lim": "lim", "sast": "sast", "dast": "dast", "configure": "urls",
+            "prereqs": "guided/prerequisites", "inputs": "guided/inputs",
+            "preflight": "guided/preflight", "certs": "guided/tls",
+            "dashboard": "guided/dashboard", "secrets": "guided/secrets",
+            "mysql": "guided/mysql", "postgresql": "guided/postgresql",
+            "ssc": "guided/ssc", "lim": "guided/lim", "sast": "guided/sast",
+            "dast": "guided/dast", "configure": "guided/configuration",
         }
         for step, topic in expected.items():
             result = self.run_functions(f"help_guided_topic {step}")
             self.assertEqual(result.stdout.strip(), topic)
+
+    def test_every_guided_step_and_failure_has_a_registered_topic(self) -> None:
+        result = self.run_functions(
+            'for step in "${GUIDED_STEP_ID[@]}"; do '
+            'topic=$(help_guided_topic "$step") || exit 10; '
+            'help_topic_index "$topic" >/dev/null || exit 11; done; '
+            'for failure in failed-deploy pending-pods restarting-pods url tls database '
+            'ssc sast dast dashboard license registry; do '
+            'topic=$(help_failure_topic "$failure") || exit 12; '
+            'help_topic_index "$topic" >/dev/null || exit 13; done'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_topic_registry_columns_are_complete(self) -> None:
+        result = self.run_functions(
+            'test "${#HELP_TOPIC_ID[@]}" -eq "${#HELP_TOPIC_FILE[@]}" && '
+            'test "${#HELP_TOPIC_ID[@]}" -eq "${#HELP_TOPIC_ROUTE[@]}" && '
+            'for route in "${HELP_TOPIC_ROUTE[@]}"; do test -n "$route" || exit 14; done'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_online_url_uses_one_configurable_base_without_network_access(self) -> None:
+        result = self.run_functions(
+            'FORTIFY_DOCS_BASE_URL=https://docs.example.test/lab/; '
+            'help_topic_online_url guided/mysql'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "https://docs.example.test/lab/fortify/mysql/")
+        self.assertNotIn("curl", HELP.split("help_topic_online_url()", 1)[1].split("help_render_topic()", 1)[0])
+
+    def test_invalid_online_base_is_rejected(self) -> None:
+        result = self.run_functions(
+            'FORTIFY_DOCS_BASE_URL=/sensitive/local/path; help_topic_online_url guided/mysql'
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("/sensitive/local/path", result.stdout)
 
     def test_missing_document_is_actionable_and_nonzero(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

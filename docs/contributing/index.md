@@ -13,6 +13,11 @@ Before opening a pull request:
 4. Run the full unit-test suite.
 5. Build MkDocs in strict mode as described on the [site home](../index.md#run-the-strict-build).
 
+Wizard documentation uses the stable topic registry described in the
+[offline Help Center](../help/README.md#stable-topic-ids). A new guided step or
+troubleshooting symptom must include both offline and online mappings; tests
+intentionally fail when a registry column or step mapping is missing.
+
 Architecture decisions live under [ADRs](../adr/README.md). The
 [documentation ADR](../adr/0001-mkdocs-authoritative-documentation.md) defines
 the boundaries between the site, README, offline wizard help, and any informal
