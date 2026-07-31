@@ -70,6 +70,7 @@ nav:
       - Overview: getting-started/index.md
   - Fortify system:
       - Knowledge Center: fortify/index.md
+      - Architecture and workflows: fortify/architecture-and-flows.md
       - Software Security Center (SSC): fortify/ssc.md
       - ScanCentral SAST: fortify/scancentral-sast.md
       - ScanCentral DAST: fortify/scancentral-dast.md

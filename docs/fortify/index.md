@@ -35,6 +35,10 @@ The remaining services enable those workflows:
 
 ## Dependencies and data flow
 
+For the complete topology, exact Kubernetes workload names, scan sequences,
+secret boundaries, and recovery sequence, use the [architecture and workflow
+diagrams](architecture-and-flows.md).
+
 ```mermaid
 flowchart LR
     mysql[(MySQL)] -->|persists SSC state| ssc[SSC\napplications and findings]
