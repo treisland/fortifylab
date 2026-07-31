@@ -1153,7 +1153,7 @@ EOF
 }
 
 operational_troubleshooting_menu() {
-    local choice topic
+    local choice topic help_topic
     while true; do
         title "Troubleshooting assistant"
         cat <<'EOF'
@@ -1179,7 +1179,12 @@ EOF
         echo
         operational_troubleshooting_topic "$topic"
         echo
-        echo "  Detailed guide: docs/operations/troubleshooting.md"
+        help_topic=$(help_failure_topic "$topic") || {
+            error "No documentation mapping exists for troubleshooting topic: $topic"
+            press_any
+            continue
+        }
+        help_print_topic_reference "$help_topic"
         press_any
     done
 }
@@ -1487,6 +1492,7 @@ guided_deployment() {
                     idx=$((idx + 1))
                 else
                     error "The step is still incomplete. Correct the issue, then choose Retry."
+                    help_print_topic_reference "$(help_guided_topic "$id")"
                     [ "$result" -eq 0 ] && press_any
                 fi
                 ;;
