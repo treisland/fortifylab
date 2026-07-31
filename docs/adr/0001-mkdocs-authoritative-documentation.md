@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-31
-- Decision owners: Fortify Lab Manager maintainers
+- Decision owners: Fortify Lab maintainers
 - Related issue: [#1](https://github.com/treisland/fortifylab/issues/1)
 
 ## Context
