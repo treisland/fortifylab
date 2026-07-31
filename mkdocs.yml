@@ -1,0 +1,83 @@
+site_name: Fortify Lab
+site_description: Lab and learning documentation for the Fortify deployment toolkit
+site_url: https://treisland.github.io/fortifylab/
+repo_name: treisland/fortifylab
+repo_url: https://github.com/treisland/fortifylab
+edit_uri: edit/dev/docs/
+
+docs_dir: docs
+site_dir: site
+strict: true
+exclude_docs: |
+  **/.env
+  **/.env.*
+  **/generated/**
+  **/input/**
+  **/*.key
+  **/*.pem
+  **/*.p12
+  **/*.pfx
+  **/*.jks
+  **/*.license
+
+theme:
+  name: material
+  features:
+    - content.action.edit
+    - content.code.copy
+    - navigation.indexes
+    - navigation.sections
+    - search.highlight
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Lab use and safety: lab-use.md
+  - Offline Help Center: help/README.md
+  - Operations:
+      - Overview: operations/README.md
+      - Deployment and lifecycle: operations/deployment-and-lifecycle.md
+      - Networking and TLS: operations/networking-and-tls.md
+      - Troubleshooting: operations/troubleshooting.md
+      - Secrets and licenses: operations/secrets-and-licenses.md
+      - Diagnostics: operations/diagnostics.md
+      - Backup and recovery: operations/backup-and-recovery.md
+      - Versions and compatibility: operations/versions-and-compatibility.md
+      - First scan: operations/first-scan.md
+  - Architecture decisions:
+      - Overview: adr/README.md
+      - "ADR 0001: MkDocs documentation architecture": adr/0001-mkdocs-authoritative-documentation.md
