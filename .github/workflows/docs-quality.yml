@@ -1,0 +1,43 @@
+name: Documentation quality
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "requirements-docs.txt"
+      - "scripts/lib/help.sh"
+      - "scripts/validate-docs.sh"
+      - "scripts/validate_docs.py"
+      - "tests/**"
+      - ".github/workflows/docs-quality.yml"
+  push:
+    branches: [dev, main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "requirements-docs.txt"
+      - "scripts/lib/help.sh"
+      - "scripts/validate-docs.sh"
+      - "scripts/validate_docs.py"
+      - "tests/**"
+      - ".github/workflows/docs-quality.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+      - name: Install pinned documentation dependencies
+        run: python -m pip install --requirement requirements-docs.txt
+      - name: Validate documentation without a cluster
+        run: ./scripts/validate-docs.sh
