@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fortify-dashboard-viewer
+  namespace: ${DASHBOARD_NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fortify-dashboard-viewer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: fortify-dashboard-viewer
+    namespace: ${DASHBOARD_NAMESPACE}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fortify-dashboard-admin
+  namespace: ${DASHBOARD_NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fortify-dashboard-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: fortify-dashboard-admin
+    namespace: ${DASHBOARD_NAMESPACE}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-dashboard
+  namespace: ${DASHBOARD_NAMESPACE}
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+spec:
+  ingressClassName: public
+  tls:
+    - hosts:
+        - ${DASHBOARD_HOST}
+      secretName: kubernetes-dashboard-tls
+  rules:
+    - host: ${DASHBOARD_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ${DASHBOARD_SERVICE}
+                port:
+                  number: 443

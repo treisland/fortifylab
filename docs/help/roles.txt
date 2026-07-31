@@ -1,0 +1,15 @@
+ROLES AND LEARNING PATHS
+
+Developer: learn applications/versions in SSC, submit approved training code
+to SAST, then find and understand the resulting issues.
+
+Security analyst: review and prioritize SSC findings, compare SAST and DAST
+coverage, and practice reporting with synthetic lab data.
+
+Lab operator: follow Guided deployment, understand dependency order, monitor
+with view-only Dashboard access, and practice safe stop/retry/repair behavior.
+
+DAST learner: configure LIM and a scanner pool, select an isolated authorized
+target, and observe how DAST Core, scanners, PostgreSQL, LIM, and SSC interact.
+
+All roles should first read Lab deployment vs Fortify products and URLs.

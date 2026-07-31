@@ -1,0 +1,11 @@
+SCANCENTRAL DAST
+
+ScanCentral DAST assesses a running web application. DAST Core coordinates
+scans and stores operational data in PostgreSQL; scanners send requests to the
+authorized target. Scanners obtain licensing through LIM and communicate with
+DAST Core. SSC integration supports broader application-security workflows.
+
+Before scanning, configure a valid DAST license and the expected scanner pool
+in LIM. Scan only systems you own or have explicit permission to test. Prefer a
+deliberately vulnerable, isolated training target. DAST traffic can alter data,
+trigger workflows, or disrupt a target even when the lab itself is isolated.

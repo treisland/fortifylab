@@ -1,0 +1,14 @@
+LAB DEPLOYMENT VS FORTIFY PRODUCTS
+
+The architecture and automation in this repository are intended only for
+evaluation, demonstration, training, and isolated lab use. They are not a
+production deployment design and do not provide production-grade availability,
+hardening, monitoring, backup, disaster recovery, or support guarantees.
+
+Do not store production source, customer data, real application credentials,
+regulated data, or business-critical scan results here. Do not expose the lab
+directly to untrusted networks. Scan only explicitly authorized targets.
+
+This boundary applies to this repository's single-node lab architecture—not to
+the production capabilities of Fortify products. Consult official Fortify
+documentation and your organization's requirements for production design.

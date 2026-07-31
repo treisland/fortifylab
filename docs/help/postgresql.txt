@@ -1,0 +1,9 @@
+POSTGRESQL
+
+PostgreSQL stores ScanCentral DAST operational data. DAST Core waits for an
+authenticated database query before deployment. The persistent volume contains
+state that survives pod restarts and should not be deleted as a repair step.
+
+PostgreSQL major versions have on-disk compatibility boundaries. Keep the
+pinned lab image version and do not treat an image-tag change as a routine
+upgrade. PostgreSQL readiness does not prove DAST Core or scanners are healthy.

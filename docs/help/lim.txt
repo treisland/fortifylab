@@ -1,0 +1,10 @@
+LICENSE AND INFRASTRUCTURE MANAGER (LIM)
+
+LIM manages Fortify dynamic-testing license capacity and scanner pools. In
+this lab, DAST scanners contact LIM to acquire a seat from the configured pool.
+LIM does not replace SSC and is not the interface for reviewing findings.
+
+Open https://lim.$DOMAIN, upload the appropriate DAST license, and create the
+pool named by LIM_POOL_NAME (Default in the sample configuration). License
+files and LIM credentials are sensitive; help pages never read or display
+them. After changing LIM configuration, retry or redeploy the DAST scanner.

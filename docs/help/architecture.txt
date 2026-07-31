@@ -1,0 +1,16 @@
+COMPONENT DEPENDENCIES AND DATA FLOW
+
+  Source/client -> ScanCentral SAST controller -> SAST worker -> SSC
+  Browser/user  -> SSC -> MySQL
+  DAST user     -> DAST Core -> DAST scanner -> lab target
+  DAST Core     -> PostgreSQL
+  DAST scanner  -> LIM (license seat) and DAST Core
+  DAST services -> SSC (integration and results workflows)
+
+Deployment order reflects those dependencies: storage and Secrets first;
+MySQL before SSC; PostgreSQL before DAST; SSC before SAST; and PostgreSQL, SSC,
+and LIM before DAST. A downstream failure is often caused by an unhealthy or
+misconfigured upstream dependency.
+
+TLS ingress exposes browser-facing names. Internal services may use Kubernetes
+DNS. Persistent volumes retain database and application state across restarts.

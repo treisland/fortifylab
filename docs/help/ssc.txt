@@ -1,0 +1,14 @@
+SOFTWARE SECURITY CENTER (SSC)
+
+SSC is the central Fortify application for organizing applications and
+versions, receiving scan results, reviewing findings, managing users, and
+integrating ScanCentral services. It persists data in MySQL.
+
+Open SSC at https://ssc.$DOMAIN (substitute the configured domain). Initial
+credentials are reported by SSC startup logs. ScanCentral SAST requires a
+ControllerToken created in SSC; treat it as a secret and never paste it into
+logs or support bundles.
+
+SSC pod readiness alone does not prove login, database migration, or an
+application endpoint is healthy. Use the wizard's status and troubleshooting
+facilities when available.

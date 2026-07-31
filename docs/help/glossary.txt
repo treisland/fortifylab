@@ -1,0 +1,16 @@
+GLOSSARY
+
+Application version  SSC container for findings from a particular release.
+Controller           ScanCentral SAST service that schedules submitted jobs.
+DAST                 Dynamic testing of a running, authorized application.
+FPR                  Fortify results package commonly uploaded to SSC.
+Ingress              Kubernetes routing from a hostname to an internal service.
+LIM                  License and Infrastructure Manager used by DAST scanners.
+Namespace            Kubernetes boundary grouping this lab's resources.
+Persistent volume    Storage designed to outlive a pod restart.
+Pool                 LIM grouping from which a DAST scanner obtains capacity.
+Scanner              DAST worker that sends test traffic to a target.
+SAST                 Static analysis of source/build artifacts.
+SSC                  Software Security Center, the central results application.
+Token                Secret credential; never include its value in diagnostics.
+Worker                ScanCentral SAST process that performs analysis jobs.

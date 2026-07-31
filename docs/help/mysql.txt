@@ -1,0 +1,9 @@
+MYSQL
+
+MySQL is SSC's persistent database in this lab. SSC must not start until MySQL
+accepts an authenticated query. Its persistent volume holds important SSC
+state; stopping a workload is different from destroying it and its data.
+
+MySQL is infrastructure, not a normal learner-facing interface. Use SSC for
+Fortify data. Do not expose the database externally, reuse lab passwords, or
+manually change the schema. Database readiness does not prove SSC is healthy.

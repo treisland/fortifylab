@@ -1,0 +1,15 @@
+URLS AND INTERFACES
+
+  https://ssc.$DOMAIN        Fortify results and administration (SSC)
+  https://sast.$DOMAIN       ScanCentral SAST controller endpoint
+  https://dast.$DOMAIN       ScanCentral DAST interface/API
+  https://lim.$DOMAIN        LIM administration
+  https://dashboard.$DOMAIN Kubernetes cluster observation
+
+Replace $DOMAIN with the value in .env. Client DNS or hosts entries must point
+these names at the lab node, and the browser must trust the lab CA. A reachable
+URL does not prove every dependency is healthy.
+
+MySQL and PostgreSQL are internal persistence services, not learner-facing web
+interfaces. The wizard's URLs screen can show resolved configured addresses;
+help itself stays offline and does not query configuration or the cluster.

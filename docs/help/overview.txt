@@ -1,0 +1,14 @@
+FORTIFY LAB SYSTEM OVERVIEW
+
+This repository deploys an isolated, single-node learning environment. SSC is
+the central results and administration application. ScanCentral SAST performs
+source analysis; ScanCentral DAST tests running web applications. LIM provides
+DAST licensing. MySQL stores SSC data and PostgreSQL stores DAST data.
+
+The wizard guides deployment and configuration. Kubernetes Dashboard is a
+separate cluster viewer; it is not Fortify product administration and does not
+replace the SSC, DAST, or LIM interfaces.
+
+Typical learning path: deploy infrastructure, open SSC, connect ScanCentral
+SAST, configure LIM and DAST, then submit deliberately non-sensitive lab scans.
+Use the Dependencies topic before starting or repairing individual components.

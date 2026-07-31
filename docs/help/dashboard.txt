@@ -1,0 +1,19 @@
+KUBERNETES DASHBOARD
+
+Kubernetes Dashboard is the cluster operations viewer for pods, workloads,
+events, and resource status. It is not a Fortify product UI, does not explain
+Fortify findings, and does not replace SSC, DAST, or LIM administration.
+
+Open https://dashboard.$DOMAIN. Generate a short-lived view-only token from
+the wizard for normal observation. An administrator token grants cluster-wide
+power, including access to Secrets and destructive actions; request it only
+for a specific lab administration task.
+
+The wizard can also create persistent view-only or administrator tokens for an
+isolated lab. These legacy service-account tokens do not expire automatically:
+they remain valid until explicitly revoked or the service account is removed.
+Prefer one-hour tokens. Never commit, log, or send a persistent bearer token.
+Use Dashboard access option 5 to revoke persistent tokens when no longer needed.
+
+"Running" pods are useful evidence, but application-level checks remain
+necessary. Consult the component interface when validating product behavior.

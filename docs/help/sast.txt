@@ -1,0 +1,12 @@
+SCANCENTRAL SAST
+
+ScanCentral SAST distributes static source-code analysis. A client submits a
+job to the controller; a worker performs translation/analysis and results flow
+to SSC. This lab provides the controller and Linux workers.
+
+SAST depends on a responding SSC and an SSC-generated ControllerToken. Create
+the token in SSC under Administration, then apply it through Configure. Worker
+scaling changes capacity, not correctness; begin with the lab default.
+
+Static analysis handles source and build artifacts. Use only training or
+approved code in this lab, never production source or sensitive credentials.
