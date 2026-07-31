@@ -69,7 +69,14 @@ nav:
   - Getting started:
       - Overview: getting-started/index.md
   - Fortify system:
-      - Overview: fortify/index.md
+      - Knowledge Center: fortify/index.md
+      - Software Security Center (SSC): fortify/ssc.md
+      - ScanCentral SAST: fortify/scancentral-sast.md
+      - ScanCentral DAST: fortify/scancentral-dast.md
+      - License and Infrastructure Manager (LIM): fortify/lim.md
+      - MySQL: fortify/mysql.md
+      - PostgreSQL: fortify/postgresql.md
+      - Kubernetes Dashboard: fortify/kubernetes-dashboard.md
       - Offline Help Center: help/README.md
   - Deployment:
       - Overview: deployment/index.md
