@@ -16,6 +16,11 @@ secrets/generated/
 __pycache__/
 *.py[cod]
 
+# Documentation build and local Python environments
+site/
+.venv/
+venv/
+
 # Environment config (contains passwords)
 .env
 

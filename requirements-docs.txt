@@ -1,0 +1,4 @@
+# Documentation-only dependencies. Keep exact pins for reproducible local and CI builds.
+mkdocs==1.6.1
+mkdocs-material==9.6.16
+pymdown-extensions==10.16.1
