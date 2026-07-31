@@ -11,6 +11,7 @@ on:
       - "scripts/validate_docs.py"
       - "tests/**"
       - ".github/workflows/docs-quality.yml"
+      - ".github/workflows/docs-pages.yml"
   push:
     branches: [dev, main]
     paths:
@@ -22,6 +23,7 @@ on:
       - "scripts/validate_docs.py"
       - "tests/**"
       - ".github/workflows/docs-quality.yml"
+      - ".github/workflows/docs-pages.yml"
 
 permissions:
   contents: read

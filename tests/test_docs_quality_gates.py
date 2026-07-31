@@ -45,6 +45,33 @@ class DocumentationQualityGateTests(unittest.TestCase):
             with self.subTest(gate=gate):
                 self.assertIn(gate, source)
 
+    def test_pages_publish_is_main_only_and_least_privilege(self) -> None:
+        workflow = (ROOT / ".github/workflows/docs-pages.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("branches: [main]", workflow)
+        self.assertNotIn("pull_request:", workflow)
+        self.assertNotIn("workflow_dispatch:", workflow)
+        self.assertIn("contents: read", workflow)
+        self.assertIn("pages: write", workflow)
+        self.assertIn("id-token: write", workflow)
+        self.assertNotIn("contents: write", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("python -m mkdocs build --strict", workflow)
+        for unsafe_command in ("microk8s", "kubectl", "start_wizard.sh"):
+            self.assertNotIn(unsafe_command, workflow.lower())
+
+    def test_publishing_guidance_records_site_and_private_repo_boundary(self) -> None:
+        guidance = (ROOT / "docs/contributing/publishing.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("https://treisland.github.io/fortifylab/", guidance)
+        self.assertIn("repository is private", guidance)
+        self.assertIn("GitHub plan", guidance)
+        self.assertIn("GitHub Actions", guidance)
+        self.assertIn("./scripts/validate-docs.sh", guidance)
+        self.assertIn("lab/demo", guidance.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
