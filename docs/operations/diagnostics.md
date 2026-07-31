@@ -1,15 +1,48 @@
 # Sanitized diagnostics bundle
 
-`operational_create_diagnostics_bundle OUTPUT_DIRECTORY` creates a local
-timestamped archive containing the lab disclaimer, dependency plan, and narrow
-Kubernetes status tables. The directory must already exist and be writable.
+From the wizard, choose **Operational guidance → Create sanitized diagnostics
+bundle**. The wizard creates a private directory at
+`${XDG_STATE_HOME:-$HOME/.local/state}/fortify-lab/diagnostics`, sets mode 700,
+and calls the same function documented below.
 
-The collector is bounded and read-only against Kubernetes. It deliberately
-excludes logs, Secret and ConfigMap objects/data, environment variables,
-commands/arguments, events, license metadata, local configuration, and file
-paths. A final sanitizer redacts credential-shaped assignments, authorization
-headers, and home-directory paths. Inspect every archive before sharing;
-sanitization reduces risk but cannot prove arbitrary external text is safe.
+For a deliberate shell invocation, source the library and provide an existing,
+writable output directory:
 
-When MicroK8s is offline, the archive records that status and completes without
-trying to start it. Creating the local archive is the only mutation.
+```bash
+export FORTIFY_HOME_K8S="$PWD"
+source scripts/lib/operational-help.sh
+mkdir -p "$HOME/.local/state/fortify-lab/diagnostics"
+chmod 700 "$HOME/.local/state/fortify-lab/diagnostics"
+operational_create_diagnostics_bundle "$HOME/.local/state/fortify-lab/diagnostics"
+```
+
+The function creates a timestamped `fortify-lab-diagnostics-*.tar.gz`. Creating
+that local archive is its only mutation. Kubernetes collection is read-only and
+bounded by `FORTIFY_OPERATION_TIMEOUT` (10 seconds by default). If MicroK8s is
+offline, collection records that fact and completes without starting it.
+
+## Exact allow-list
+
+Every archive contains exactly:
+
+- `README.txt`: lab-use warning, UTC creation time, and exclusions;
+- `deployment-plan.txt`: dependency order and preview-only statement;
+- `cluster-status.txt`: either offline status or narrow tables for nodes,
+  workloads, pods, storage claims, and ingress hostnames.
+
+The collector deliberately excludes logs, Secret and ConfigMap objects/data,
+environment variables, container commands/arguments, events, license metadata,
+local configuration, and source file paths. A final sanitizer redacts
+credential-shaped assignments, authorization headers, and common home-directory
+paths.
+
+## Inspect before sharing
+
+List and extract the archive only on a protected workstation. Read all three
+files before sending them anywhere. Sanitization reduces risk but cannot prove
+arbitrary command output is safe. Do not append raw logs, `.env`, decoded
+Secrets, license data, tokens, certificates/private keys, or database exports.
+
+When reporting a failure, add only a plain-language description of the failed
+wizard step and first unhealthy dependency. Rotate any credential that may
+already have been disclosed.

@@ -79,6 +79,10 @@ interfaces, roles, and terminology. Guided deployment screens also accept `?`
 to open help for the current step. The Help Center reads committed text under
 `docs/help/` and remains available when MicroK8s is offline.
 
+Long-form documentation is maintained as code under `docs/`; see the
+[documentation architecture decision](docs/adr/0001-mkdocs-authoritative-documentation.md)
+for the source-of-truth, offline-help, publishing, and GitHub Wiki boundaries.
+
 Choose **Operational guidance and troubleshooting** for a read-only environment
 overview, deployment plan, unfinished-work summary, symptom-driven guidance,
 network/TLS and lifecycle explanations, compatibility notes, backup/recovery
@@ -255,11 +259,10 @@ microk8s kubectl delete namespace fortify         # nuke everything else
 
 ## Contributing
 
-PRs welcome. Issues with deploy errors should include:
-
-- Output of `microk8s kubectl -n fortify get pods`
-- The relevant pod's `kubectl logs --tail=200`
-- Your `.env` (with passwords redacted)
+PRs welcome. For deployment errors, use **Operational guidance → Create
+sanitized diagnostics bundle**, inspect the allow-listed archive locally, and
+include only that minimum evidence plus the failed wizard step. Do not attach
+raw logs, `.env`, Secret values, license data, tokens, or private keys.
 
 ## License
 

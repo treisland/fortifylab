@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 import subprocess
 from pathlib import Path
@@ -13,20 +15,28 @@ WIZARD = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
 
 class GuidedWizardTests(unittest.TestCase):
     def run_wizard_functions(self, body: str, user_input: str = "") -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [
-                "bash",
-                "-c",
-                'export WIZARD_NOMAIN=1 NO_COLOR=1; source "$1"; '
-                "title() { :; }; sleep() { :; }; " + body,
-                "guided-test",
-                str(ROOT / "start_wizard.sh"),
-            ],
-            input=user_input,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        # Never depend on (or mutate) the developer/runner acknowledgement.
+        # Guided entry points enforce the lab boundary, so acknowledge it
+        # explicitly in a fresh configuration directory for every test.
+        with tempfile.TemporaryDirectory() as directory:
+            environment = os.environ.copy()
+            environment["XDG_CONFIG_HOME"] = str(Path(directory) / "config")
+            environment["HOME"] = str(Path(directory) / "home")
+            return subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'export WIZARD_NOMAIN=1 NO_COLOR=1; source "$1"; '
+                    "title() { :; }; sleep() { :; }; " + body,
+                    "guided-test",
+                    str(ROOT / "start_wizard.sh"),
+                ],
+                input="LAB\n" + user_input,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
 
     def test_main_menu_preserves_all_deployment_personas(self) -> None:
         for label in (
