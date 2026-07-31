@@ -259,11 +259,10 @@ microk8s kubectl delete namespace fortify         # nuke everything else
 
 ## Contributing
 
-PRs welcome. Issues with deploy errors should include:
-
-- Output of `microk8s kubectl -n fortify get pods`
-- The relevant pod's `kubectl logs --tail=200`
-- Your `.env` (with passwords redacted)
+PRs welcome. For deployment errors, use **Operational guidance → Create
+sanitized diagnostics bundle**, inspect the allow-listed archive locally, and
+include only that minimum evidence plus the failed wizard step. Do not attach
+raw logs, `.env`, Secret values, license data, tokens, or private keys.
 
 ## License
 

@@ -1,20 +1,97 @@
 # Deployment, resume, and lifecycle safety
 
-The dependency order is host/MicroK8s → certificates → Dashboard → Secrets →
-MySQL and PostgreSQL → SSC and LIM → SAST → DAST Core → DAST scanner → client
-connectivity checks. The preview is descriptive and makes no changes.
+Use `./start_wizard.sh` as your normal user. The wizard previews the tested
+dependency order and resumes at the first missing layer:
 
-The unfinished-work summary reports Kubernetes resource **presence**, not
-health. Resume at the first missing dependency, then use the existing layered
-health gates. A failed consumer must not be started until its dependency is
-healthy.
+1. host prerequisites and MicroK8s;
+2. lab TLS certificates;
+3. Kubernetes Dashboard;
+4. Kubernetes Secrets;
+5. MySQL and PostgreSQL;
+6. SSC and LIM;
+7. ScanCentral SAST;
+8. ScanCentral DAST Core;
+9. ScanCentral DAST scanner;
+10. client DNS/TLS trust and a synthetic scan.
 
-- **Stop** retains persistent data.
-- **Restart** cycles workloads and is not data repair.
-- **Retry/repair** reruns a safe step after its root dependency is fixed.
-- **Uninstall** removes application resources according to its documented scope.
-- **Delete data** is a separate, explicitly confirmed action. Never imply it by
-  “stop,” “restart,” or a routine uninstall.
+The unfinished-work summary reports resource **presence**, not readiness or
+application health. A safe resume checks the first missing item, then verifies
+each existing dependency with the layered health gates before continuing.
 
-Do not rotate SSC `secret.key`, database credentials, tokens, or trust roots as
-incidental repair work. Helm rollback does not reverse database migrations.
+## Operation semantics
+
+| Operation | Intended effect | Persistent data |
+|---|---|---|
+| Start / Upgrade | Helm upgrade/install, scale up, then verify dependencies | retained |
+| Stop | scale application StatefulSets to zero | retained |
+| Restart | stop then start after dependencies are healthy | retained |
+| Repair / retry | rerun an idempotent failed step after fixing its dependency | retained |
+| Uninstall release | remove the named Helm release/resources | script-dependent; review first |
+| Delete data | explicitly remove persistent claims | permanently deleted |
+
+!!! danger "Destroy in the current wizard deletes data"
+    The component menu labels action 3 **Destroy (deletes data)**. Some current
+    destroy scripts remove only the Helm release, while database and LIM
+    destroy scripts also delete their claims. Treat every Destroy action as
+    destructive and confirm only when loss of that component's lab data is
+    intended. Stop is the safe choice when data must remain.
+
+## Safe start and resume
+
+1. Preview **Operational guidance → Deployment plan**.
+2. Use the unfinished-work summary only to find missing resources.
+3. Establish storage and database health before application consumers.
+4. Start consumers in the dependency order above. SSC waits for MySQL; SAST
+   waits for SSC; DAST Core waits for PostgreSQL, SSC, and LIM; the DAST scanner
+   waits for Core.
+5. Wait for bounded application-health success, not just `Running` pods.
+6. If a step fails, fix its first unhealthy dependency and retry that same
+   step. Completed Helm steps are designed to be detected or upgraded again.
+
+## Safe stop
+
+Stop in reverse dependency order so consumers cannot continue writing through
+services that are disappearing:
+
+1. DAST scanner, then DAST Core;
+2. ScanCentral SAST workers/controller;
+3. SSC and LIM;
+4. MySQL and PostgreSQL last.
+
+The component Stop scripts scale workloads to zero and retain claims. Confirm
+zero replicas and leave the namespace, Secrets, and PVCs in place.
+
+## Safe restart and repair
+
+Restart one dependency branch at a time. Stop the affected consumers in reverse
+order, repair or restart the earliest dependency, verify its application
+health, then start consumers in forward order. A restart is not a fix for
+corrupt data, incompatible migrations, missing entitlements, or incorrect TLS
+trust.
+
+Do not rotate database passwords, SSC `secret.key`, controller/service tokens,
+or the mkcert trust root as incidental repair. Re-running certificate creation
+rotates trust and requires dedicated clients to import the new public CA.
+
+## Uninstall versus data deletion
+
+The repository does not yet expose a uniform retain-data uninstall action.
+Inspect the named script before using Destroy:
+
+- MySQL, PostgreSQL, and LIM destroy scripts delete their PVCs.
+- SSC, SAST, and DAST destroy scripts remove their Helm releases; associated
+  shared data and Secrets require separate review.
+- Deleting the `fortify` namespace removes namespaced resources broadly and is
+  a full-lab destructive reset, not routine cleanup.
+
+Before any destructive action, identify the exact release and claims, create
+the required recovery artifacts, and verify the confirmation names the data to
+be lost. Never use PVC deletion as routine repair.
+
+## Upgrade boundary
+
+This lab is not a production upgrade system. Compare configured chart, image,
+product, and database versions; take application-consistent exports; preserve
+the matching SSC `secret.key`; and read vendor release notes. Helm rollback can
+restore manifests but cannot reverse a database migration. Prove recovery in
+an isolated lab before relying on it.
