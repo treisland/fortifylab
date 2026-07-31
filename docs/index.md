@@ -5,9 +5,22 @@
 > credentials, source code, customer data, or scan results in this lab.
 
 This site is the version-controlled documentation for the Fortify lab deployment
-toolkit. Start with the [lab-use boundary](lab-use.md), then use the existing
-[operations guides](operations/README.md) to deploy, inspect, and troubleshoot
-the lab safely.
+toolkit. Choose the path that matches what you need:
+
+- [Getting started](getting-started/index.md) takes a new operator from the
+  lab-use boundary to the interactive deployment wizard.
+- [Fortify system](fortify/index.md) explains the applications, databases,
+  dependencies, interfaces, and learning roles.
+- [Deployment](deployment/index.md) covers lifecycle, networking, and TLS.
+- [Operations](operations/README.md) covers routine lab operation, recovery,
+  compatibility, and a first scan.
+- [Configuration](configuration/index.md) points to the authoritative inputs,
+  secret, license, URL, and version guidance.
+- [Troubleshooting](troubleshooting/index.md) starts with symptoms and produces
+  deliberately sanitized evidence.
+- [Safety](safety/index.md) defines the lab/demo-only and data-handling boundary.
+- [Contributing](contributing/index.md) explains how to change and validate the
+  documentation.
 
 The documentation site never reads or publishes runtime configuration,
 credentials, licenses, private keys, generated secrets, or other operator input.
@@ -37,10 +50,11 @@ The generated site is written to the ignored `site/` directory. Strict mode
 treats documentation warnings, including invalid internal references, as build
 failures.
 
-!!! note "Documentation scope"
+!!! note "One source of truth"
 
-    The current navigation exposes the repository's existing guides. A later
-    milestone issue will reorganize and migrate the full information architecture.
+    The navigation groups authoritative pages by user intent. Existing paths
+    remain stable for repository links and released wizard help; section landing
+    pages point to those sources instead of copying their procedures.
 
 === "Preview"
 
