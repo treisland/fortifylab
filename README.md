@@ -79,6 +79,10 @@ interfaces, roles, and terminology. Guided deployment screens also accept `?`
 to open help for the current step. The Help Center reads committed text under
 `docs/help/` and remains available when MicroK8s is offline.
 
+Long-form documentation is maintained as code under `docs/`; see the
+[documentation architecture decision](docs/adr/0001-mkdocs-authoritative-documentation.md)
+for the source-of-truth, offline-help, publishing, and GitHub Wiki boundaries.
+
 Choose **Operational guidance and troubleshooting** for a read-only environment
 overview, deployment plan, unfinished-work summary, symptom-driven guidance,
 network/TLS and lifecycle explanations, compatibility notes, backup/recovery
