@@ -34,6 +34,11 @@ class GettingStartedJourneyTests(unittest.TestCase):
             "Revoke persistent Dashboard tokens",
             "15–20 minutes",
             "mutation impact",
+            "lifecycle verification",
+            "gradual readiness updates",
+            "auto-advance mode",
+            "countdown",
+            "take control",
             "Destroy (deletes data)",
         ):
             with self.subTest(phrase=phrase):

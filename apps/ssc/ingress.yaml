@@ -10,11 +10,11 @@ spec:
   ingressClassName: public
   tls:
   - hosts:
-    - ssc.fortifydemo.com
+    - ${SSC}
     secretName: tls
 
   rules:
-  - host: ssc.fortifydemo.com
+  - host: ${SSC}
     http:
       paths:
       - path: /

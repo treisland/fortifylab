@@ -23,6 +23,7 @@ fi
 
 source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh"
+source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
 
 # Running under sudo would create files in secrets/generated/ owned by root,
 # which then block subsequent normal-user runs from rebuilding the directory.
@@ -244,19 +245,8 @@ $KUBECTL -n "$NAMESPACE" create secret generic lim-signing-certificate-password 
 #--------------------------
 # SECTION: REGCRED (Docker Hub pull credentials)
 #--------------------------
-# Fall back to $SUDO_USER's Docker config when running under sudo.
-
-DOCKER_CONFIG_PATH="${DOCKER_CONFIG_PATH:-$HOME/.docker/config.json}"
-if [ ! -f "$DOCKER_CONFIG_PATH" ] && [ -n "${SUDO_USER:-}" ]; then
-  DOCKER_CONFIG_PATH="$(getent passwd "$SUDO_USER" | cut -d: -f6)/.docker/config.json"
-fi
-if [ ! -f "$DOCKER_CONFIG_PATH" ]; then
-  echo "❌ Docker config not found at $DOCKER_CONFIG_PATH"
-  echo "   Run 'docker login' first so the cluster can pull Fortify images."
-  exit 1
-fi
-$KUBECTL -n "$NAMESPACE" create secret docker-registry regcred \
-  --from-file=.dockerconfigjson="$DOCKER_CONFIG_PATH"
-
+# Materialize Docker Hub credentials into a Kubernetes-readable pull Secret.
+# Docker itself can use local credential helpers; kubelet cannot.
+refresh_registry_credentials
 echo
 echo "✅ Secrets created in namespace '$NAMESPACE'."

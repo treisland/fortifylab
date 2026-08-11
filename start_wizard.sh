@@ -59,6 +59,8 @@ source "$FORTIFY_HOME_K8S/scripts/lib/help.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/lab-disclaimer.sh"
 # shellcheck source=scripts/lib/operational-help.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/operational-help.sh"
+# shellcheck source=scripts/lib/registry-credentials.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
 
 
 # ============================================================
@@ -676,7 +678,7 @@ ensure_dashboard_access() {
 
 configure_dns() {
     local ip
-    ip=$(hostname -I | awk '{print $1}')
+    ip=$(lab_node_ip)
     cat <<EOF
 
   ── Client side ─────────────────────────────────────────
@@ -1103,22 +1105,26 @@ prereqs_menu() {
     while true; do
         title "Install prerequisites"
         echo
+        prereqs_status_table
+        echo
         echo "  1. JDK 17 (apt)"
         echo "  2. Docker (apt) + docker login"
         echo "  3. mkcert (apt)"
         echo "  4. microk8s (snap) + addons (dns, ingress, nfs, dashboard, community)"
         echo "  5. All of the above"
+        echo "  g. Restart wizard with microk8s group access"
         echo
         echo "  r. Return"
         echo
         ask choice "Select:"
 
         case "$choice" in
-            1) install_jdk;        press_any ;;
-            2) install_docker;     press_any ;;
-            3) install_mkcert;     press_any ;;
-            4) install_microk8s;   press_any ;;
-            5) install_jdk; install_docker; install_mkcert; install_microk8s; press_any ;;
+            1) install_jdk;        prereqs_install_summary ;;
+            2) install_docker;     prereqs_install_summary ;;
+            3) install_mkcert;     prereqs_install_summary ;;
+            4) install_microk8s;   prereqs_install_summary ;;
+            5) install_jdk; install_docker; install_mkcert; install_microk8s; prereqs_install_summary ;;
+            [Gg]) restart_with_microk8s_group ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
         esac
@@ -1255,13 +1261,101 @@ install_docker()   {
         docker login
     fi
 }
+
+ensure_registry_credentials() {
+    case "$1" in
+        mysql|postgresql|ssc|lim|sast|dast)
+            refresh_registry_credentials
+            ;;
+    esac
+}
 install_microk8s() {
     if command -v microk8s &>/dev/null; then
         note "Already installed."
     else
         bash "$FORTIFY_HOME_K8S/scripts/install_microk8s.sh"
     fi
+    if microk8s_access_ready; then
+        note "MicroK8s access is active in this shell."
+    else
+        note "MicroK8s installed, but this shell does not have group access yet."
+        note "Choose g to restart the wizard with microk8s group access, or run: newgrp microk8s"
+    fi
 }
+
+prereq_status() {
+    if "$@"; then
+        printf '%s ready' "$OK_MARK"
+    else
+        printf '%s needs attention' "$WARN_MARK"
+    fi
+}
+
+docker_ready() {
+    command -v docker >/dev/null 2>&1 || return 1
+    [ -s "$HOME/.docker/config.json" ] || return 1
+}
+
+mkcert_ready() { command -v mkcert >/dev/null 2>&1; }
+java_ready() { command -v java >/dev/null 2>&1 && command -v keytool >/dev/null 2>&1; }
+
+microk8s_access_ready() {
+    command -v microk8s >/dev/null 2>&1 || return 1
+    id -nG | grep -qw microk8s || return 1
+    microk8s status --wait-ready >/dev/null 2>&1 || return 1
+}
+
+prereqs_status_table() {
+    printf '  %-24s %s\n' "JDK 17" "$(prereq_status java_ready)"
+    printf '  %-24s %s\n' "Docker + login" "$(prereq_status docker_ready)"
+    printf '  %-24s %s\n' "mkcert" "$(prereq_status mkcert_ready)"
+    printf '  %-24s %s\n' "MicroK8s access" "$(prereq_status microk8s_access_ready)"
+}
+
+prereqs_ready_count() {
+    local ready=0
+    java_ready && ready=$((ready + 1))
+    docker_ready && ready=$((ready + 1))
+    mkcert_ready && ready=$((ready + 1))
+    microk8s_access_ready && ready=$((ready + 1))
+    printf '%s\n' "$ready"
+}
+
+prereqs_install_summary() {
+    local ready
+    ready=$(prereqs_ready_count)
+    printf '\n'
+    note "Host prerequisites: $ready/4 ready."
+    if [ "$ready" -eq 4 ]; then
+        note "All prerequisite indicators are complete."
+    elif ! microk8s_access_ready && command -v microk8s >/dev/null 2>&1; then
+        note "Next missing: MicroK8s group access in this shell."
+        note "Choose g to restart the wizard with group access, or run: newgrp microk8s"
+    fi
+    press_any
+}
+restart_with_microk8s_group() {
+    local restart_command
+    command -v microk8s >/dev/null 2>&1 || {
+        error "MicroK8s is not installed yet."
+        press_any
+        return 1
+    }
+    if microk8s_access_ready; then
+        note "MicroK8s group access is already active."
+        press_any
+        return 0
+    fi
+    if command -v sg >/dev/null 2>&1; then
+        note "Restarting wizard with microk8s group access..."
+        printf -v restart_command '%q --accept-lab-use' "$FORTIFY_HOME_K8S/start_wizard.sh"
+        exec sg microk8s -c "$restart_command"
+    fi
+    error "Could not find sg to refresh group access automatically."
+    note "Run this in your shell, then relaunch the wizard: newgrp microk8s"
+    press_any
+}
+
 
 
 # ============================================================
@@ -1273,6 +1367,9 @@ GUIDED_STEP_LABEL=("Host prerequisites" "Configuration and license" "Deployment 
 GUIDED_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 1)
 GUIDED_STEP_DURATION=("5-15 min" "2-5 min" "<1 min" "1-2 min" "2-5 min" "<1 min" "3-8 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "5-15 min" "manual")
 GUIDED_STEP_IMPACT=("host packages/add-ons" "local configuration" "read-only" "creates/updates lab TLS" "applies Dashboard" "creates/updates Secrets" "applies MySQL" "applies PostgreSQL" "applies SSC" "applies LIM" "applies SAST" "applies DAST" "manual configuration")
+GUIDED_STEP_TIMEOUT=(900 300 120 180 300 60 600 600 900 600 900 1200 0)
+GUIDED_STEP_MANUAL=(0 1 0 0 0 0 0 0 0 0 0 0 1)
+GUIDED_STEP_PROBE=("prereqs_complete" "inputs_complete" "preflight_inputs_complete" "certs_ready" "dashboard_ready" "secrets_ready" "mysql_ready" "postgresql_ready" "ssc_ready" "lim_ready" "sast_ready" "dast_ready" "configure_ready")
 GUIDED_STEP_HELP=(
     "Install the host tools and MicroK8s add-ons used by the lab."
     "Review .env and provide a readable Fortify license before deployment."
@@ -1289,11 +1386,55 @@ GUIDED_STEP_HELP=(
     "Configure DNS, the SSC ControllerToken, and the LIM pool when you are ready."
 )
 
+GUIDED_AUTO_ADVANCE="${GUIDED_AUTO_ADVANCE:-0}"
+GUIDED_AUTO_ADVANCE_DELAY="${GUIDED_AUTO_ADVANCE_DELAY:-5}"
+GUIDED_WAIT_INTERVAL="${GUIDED_WAIT_INTERVAL:-5}"
+GUIDED_WAIT_LAST_FAILURE=""
+GUIDED_WAIT_LAST_STATE=""
+
+# Guided lifecycle states: pending -> running -> verifying -> complete/failed/skipped.
+guided_step_index() {
+    local wanted="$1" idx
+    for idx in "${!GUIDED_STEP_ID[@]}"; do
+        [ "${GUIDED_STEP_ID[$idx]}" = "$wanted" ] && { printf '%s\n' "$idx"; return 0; }
+    done
+    return 1
+}
+
+guided_step_probe() {
+    local idx
+    idx=$(guided_step_index "$1") || return 1
+    printf '%s\n' "${GUIDED_STEP_PROBE[$idx]:-}"
+}
+
+guided_step_timeout() {
+    local idx
+    idx=$(guided_step_index "$1") || return 1
+    printf '%s\n' "${GUIDED_STEP_TIMEOUT[$idx]:-300}"
+}
+
+guided_step_is_optional() {
+    local idx
+    idx=$(guided_step_index "$1") || return 1
+    [ "${GUIDED_STEP_OPTIONAL[$idx]:-0}" -eq 1 ]
+}
+
+guided_step_is_manual() {
+    local idx
+    idx=$(guided_step_index "$1") || return 1
+    [ "${GUIDED_STEP_MANUAL[$idx]:-0}" -eq 1 ]
+}
+
+guided_step_help_topic() {
+    help_guided_topic "$1"
+}
+
 prereqs_complete() {
     local command
-    for command in microk8s docker mkcert java keytool openssl envsubst curl; do
+    for command in openssl envsubst curl; do
         command -v "$command" >/dev/null 2>&1 || return 1
     done
+    java_ready && docker_ready && mkcert_ready && microk8s_access_ready || return 1
     return 0
 }
 
@@ -1339,6 +1480,44 @@ preflight_inputs_complete() {
     [ "$memory_gib" -ge 16 ] && [ "$disk_gib" -ge 50 ]
 }
 
+lab_node_ip() {
+    hostname -I 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i !~ /^127\./) { print $i; exit } }'
+}
+
+lab_hostnames() {
+    printf '%s\n' "ssc.$DOMAIN" "sast.$DOMAIN" "dast.$DOMAIN" "lim.$DOMAIN" "dashboard.$DOMAIN"
+}
+
+lab_hosts_resolution_detail() {
+    local host resolved loopback_hosts node_ip
+    node_ip=$(lab_node_ip)
+    while IFS= read -r host; do
+        [ -n "$host" ] || continue
+        resolved=$(getent ahostsv4 "$host" 2>/dev/null | awk 'NR==1 {print $1}')
+        if [ -z "$resolved" ]; then
+            printf 'Hostname %s does not resolve on this machine; add it to client DNS or /etc/hosts.\n' "$host"
+            return 0
+        fi
+        if [[ "$resolved" == 127.* ]]; then
+            loopback_hosts="${loopback_hosts:+$loopback_hosts, }$host=$resolved"
+        fi
+    done < <(lab_hostnames)
+    if [ -n "${loopback_hosts:-}" ]; then
+        printf 'Lab hostnames resolve to loopback (%s). Map them to the lab node IP%s instead.\n' "$loopback_hosts" "${node_ip:+, for example $node_ip}"
+        return 0
+    fi
+    printf 'Lab hostnames resolve to non-loopback addresses for client access.\n'
+}
+
+certs_ready() {
+    [ -s "$SERVER_CERT" ] && [ -s "$SERVER_KEY" ] &&
+        [ -s "$JVM_KEYSTORE" ] && [ -s "$TRUSTSTORE" ] || return 1
+    openssl x509 -in "$SERVER_CERT" -noout >/dev/null 2>&1 || return 1
+    openssl rsa -in "$SERVER_KEY" -check -noout >/dev/null 2>&1 || return 1
+    keytool -list -keystore "$JVM_KEYSTORE" -storepass "$DEFAULT_PASS" >/dev/null 2>&1 || return 1
+    keytool -list -keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" >/dev/null 2>&1 || return 1
+}
+
 resource_exists() {
     local namespace="$1" type="$2" name="$3"
     cluster_reachable && $KUBECTL -n "$namespace" get "$type" "$name" >/dev/null 2>&1
@@ -1350,6 +1529,15 @@ workload_ready() {
     desired=$($KUBECTL -n "$namespace" get "$type" "$name" -o jsonpath='{.spec.replicas}' 2>/dev/null) || return 1
     ready=$($KUBECTL -n "$namespace" get "$type" "$name" -o jsonpath='{.status.readyReplicas}' 2>/dev/null) || return 1
     [ -n "$desired" ] && [ "${ready:-0}" -ge "$desired" ]
+}
+
+statefulset_in_progress() {
+    local namespace="$1" name="$2" desired ready
+    cluster_reachable || return 1
+    desired=$($KUBECTL -n "$namespace" get statefulset "$name" -o jsonpath='{.spec.replicas}' 2>/dev/null) || return 1
+    [ "${desired:-0}" -gt 0 ] || return 1
+    ready=$($KUBECTL -n "$namespace" get statefulset "$name" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || printf '0')
+    [ "${ready:-0}" -lt "$desired" ]
 }
 
 pod_prefix_ready() {
@@ -1376,21 +1564,127 @@ dashboard_ready() {
     fi
 }
 
+secrets_required_secret_names() {
+    printf '%s\n' \
+        regcred fortify-secrets tls tls-pfx tls-pfx-password \
+        scdast-utilityservice-certificate scdast-db-owner scdast-db-standard \
+        scdast-ssc-serviceaccount scdast-service-token lim-pool \
+        lim-admin-credentials lim-jwt-security-key lim-server-certificate \
+        lim-signing-certificate lim-signing-certificate-password
+}
+
+secrets_required_fortify_keys() {
+    printf '%s\n' \
+        fortify.license ssc.autoconfig secret.key keystore.jks truststore \
+        default_password scancentral-client-auth-token \
+        scancentral-worker-auth-token scancentral-ssc-scancentral-ctrl-secret \
+        jvm_truststore http_truststore keystore_password key_password \
+        jvm_truststore_password http_truststore_password keystore_alias
+}
+
+secret_key_exists() {
+    local secret="$1" key="$2"
+    cluster_reachable || return 1
+    $KUBECTL -n "$NAMESPACE" get secret "$secret" \
+        -o "go-template={{ index .data \"$key\" }}" 2>/dev/null | grep -q .
+}
+
+secrets_missing_detail() {
+    local required_secret required_key
+    cluster_reachable || {
+        printf '%s\n' "Cluster is not reachable while checking Kubernetes Secrets."
+        return 0
+    }
+    for required_secret in $(secrets_required_secret_names); do
+        if ! resource_exists "$NAMESPACE" secret "$required_secret"; then
+            printf 'Missing secret %s in namespace %s.\n' "$required_secret" "$NAMESPACE"
+            return 0
+        fi
+    done
+    for required_key in $(secrets_required_fortify_keys); do
+        if ! secret_key_exists fortify-secrets "$required_key"; then
+            printf 'Missing key %s in secret fortify-secrets.\n' "$required_key"
+            return 0
+        fi
+    done
+    printf '%s\n' "All required Kubernetes Secrets and fortify-secrets keys are present."
+}
+
+secrets_ready() {
+    local required_secret required_key
+    for required_secret in $(secrets_required_secret_names); do
+        resource_exists "$NAMESPACE" secret "$required_secret" || return 1
+    done
+    for required_key in $(secrets_required_fortify_keys); do
+        secret_key_exists fortify-secrets "$required_key" || return 1
+    done
+}
+
+mysql_ready() {
+    source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+    health_mysql_statefulset_probe && health_mysql_query
+}
+
+postgresql_ready() {
+    source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+    health_postgresql_statefulset_probe && health_postgresql_query
+}
+
+ssc_ready() {
+    source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+    health_ssc_statefulset_probe && health_ssc_service_probe &&
+        health_ssc_ingress_probe && health_ssc_http_probe
+}
+
+lim_ready() {
+    source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+    health_lim_statefulset_probe && health_lim_service_probe &&
+        health_lim_ingress_probe && health_lim_http_probe
+}
+
+sast_ready() {
+    workload_ready "$NAMESPACE" statefulset scancentral-sast-controller &&
+        workload_ready "$NAMESPACE" statefulset scancentral-sast-worker-linux
+}
+
+dast_ready() {
+    source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+    health_dast_core_workloads_probe &&
+        workload_ready "$NAMESPACE" statefulset sdast-scanner-scancentral-dast-scanner &&
+        health_dast_http_probe
+}
+
+configure_ready() {
+    return 1
+}
+
 guided_step_complete() {
+    local probe
+    probe=$(guided_step_probe "$1") || return 1
+    [ -n "$probe" ] || return 1
+    "$probe"
+}
+
+guided_step_in_progress() {
     case "$1" in
-        prereqs) prereqs_complete ;;
-        inputs) inputs_complete ;;
-        preflight) preflight_inputs_complete ;;
-        certs) [ -s "$FORTIFY_HOME_K8S/certs/tls.crt" ] && [ -s "$FORTIFY_HOME_K8S/certs/tls.key" ] ;;
-        dashboard) dashboard_ready ;;
-        secrets) resource_exists "$NAMESPACE" secret fortify-secrets ;;
-        mysql) pod_prefix_ready mysql ;;
-        postgresql) pod_prefix_ready postgresql ;;
-        ssc) pod_prefix_ready ssc-webapp ;;
-        lim) pod_prefix_ready lim ;;
-        sast) pod_prefix_ready scancentral-sast ;;
-        dast) pod_prefix_ready sdast ;;
-        configure) return 1 ;; # Optional human tasks cannot be inferred safely.
+        dashboard)
+            resource_exists "$(dashboard_access_namespace)" ingress ingress-dashboard &&
+                ! dashboard_ready
+            ;;
+        mysql) statefulset_in_progress "$NAMESPACE" mysql ;;
+        postgresql) statefulset_in_progress "$NAMESPACE" postgresql ;;
+        ssc) statefulset_in_progress "$NAMESPACE" ssc-webapp ;;
+        lim) statefulset_in_progress "$NAMESPACE" lim ;;
+        sast)
+            statefulset_in_progress "$NAMESPACE" scancentral-sast-controller ||
+                statefulset_in_progress "$NAMESPACE" scancentral-sast-worker-linux
+            ;;
+        dast)
+            statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-api ||
+                statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-globalservice ||
+                statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-utilityservice ||
+                statefulset_in_progress "$NAMESPACE" sdast-scanner-scancentral-dast-scanner
+            ;;
         *) return 1 ;;
     esac
 }
@@ -1398,9 +1692,206 @@ guided_step_complete() {
 guided_step_status() {
     if guided_step_complete "$1"; then
         printf '%scomplete%s' "$GREEN" "$RESET"
+    elif guided_step_in_progress "$1"; then
+        printf '%sin progress%s' "$YELLOW" "$RESET"
+    elif guided_step_is_manual "$1"; then
+        printf '%smanual%s' "$DIM" "$RESET"
     else
         printf '%spending%s' "$YELLOW" "$RESET"
     fi
+}
+
+guided_component_endpoint_detail() {
+    local service="$1" ingress="$2" host="$3" url="$4"
+    source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+    if ! health_service_endpoints_ready "$service"; then
+        printf 'Service %s has no ready endpoints yet.\n' "$service"
+    elif ! health_ingress_host_ready "$ingress" "$host"; then
+        printf 'Ingress %s does not contain host %s yet.\n' "$ingress" "$host"
+    else
+        FORTIFY_HEALTH_HTTP_MAX_TIME=3 health_http_detail "$url"
+    fi
+}
+
+guided_step_progress_message() {
+    case "$1" in
+        prereqs) printf '%s\n' "Checking host tools and MicroK8s add-ons." ;;
+        inputs) printf '%s\n' "Waiting for .env and a readable Fortify license." ;;
+        preflight) printf '%s\n' "Validating cluster reachability, storage, registry login, capacity, and required settings." ;;
+        certs) printf '%s\n' "Checking TLS certificate, private key, JVM keystore, and truststore artifacts." ;;
+        dashboard) printf '%s\n' "Waiting for Dashboard workloads, service, ingress, and TLS material." ;;
+        secrets) secrets_missing_detail ;;
+        mysql) printf '%s\n' "Waiting for the MySQL StatefulSet and an authenticated query." ;;
+        postgresql) printf '%s\n' "Waiting for the PostgreSQL StatefulSet and an authenticated query." ;;
+        ssc) guided_component_endpoint_detail ssc-service ssc-ingress "${SSC:?SSC is required}" "${SSC_URL:?SSC_URL is required}" ;;
+        lim) guided_component_endpoint_detail lim lim-ingress "${LIM:?LIM is required}" "${LIM_URL:?LIM_URL is required}" ;;
+        sast) printf '%s\n' "Waiting for the SAST controller and worker StatefulSets." ;;
+        dast)
+            source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+            FORTIFY_HEALTH_HTTP_MAX_TIME=3 health_http_detail "${SCDAST_URL:?SCDAST_URL is required}"
+            ;;
+        configure) lab_hosts_resolution_detail ;;
+        *) printf '%s\n' "Unknown guided step." ;;
+    esac
+}
+
+guided_step_pod_prefixes() {
+    case "$1" in
+        mysql) printf '%s\n' mysql ;;
+        postgresql) printf '%s\n' postgresql ;;
+        ssc) printf '%s\n' ssc-webapp ;;
+        lim) printf '%s\n' lim ;;
+        sast) printf '%s\n' scancentral-sast ;;
+        dast) printf '%s\n' sdast ;;
+    esac
+}
+
+guided_print_pods() {
+    local id="$1" prefix pods
+    cluster_reachable || { printf '  Cluster unavailable for pod status.\n'; return 0; }
+    prefix=$(guided_step_pod_prefixes "$id")
+    [ -n "$prefix" ] || { printf '  No pod status applies to this step yet.\n'; return 0; }
+    pods=$($KUBECTL -n "$NAMESPACE" get pods --no-headers 2>/dev/null \
+        | awk -v p="$prefix" '$1 ~ "^"p {print}')
+    if [ -z "$pods" ]; then
+        printf '  No pods matching %s have appeared yet.\n' "$prefix"
+    else
+        echo "$pods" | awk '{ printf "  %-56s %-8s %s\n", $1, $2, $3 }'
+    fi
+}
+
+guided_print_recent_events() {
+    cluster_reachable || return 0
+    $KUBECTL -n "$NAMESPACE" get events --sort-by='.lastTimestamp' 2>/dev/null \
+        | tail -5 | awk 'NR>0 { printf "  %s\n", $0 }'
+}
+
+guided_diagnostics_bundle() {
+    local output_dir bundle
+    output_dir="${XDG_STATE_HOME:-$HOME/.local/state}/fortify-lab/diagnostics"
+    if ! mkdir -p -- "$output_dir" || ! chmod 700 -- "$output_dir"; then
+        error "Could not create the private diagnostics output directory."
+        return 1
+    fi
+    if bundle=$(operational_create_diagnostics_bundle "$output_dir"); then
+        note "Sanitized bundle created: $bundle"
+        note "Review it before sharing; no automated sanitizer can prove all context is safe."
+    else
+        error "Diagnostics bundle creation failed."
+        return 1
+    fi
+}
+
+guided_wait_screen_enter() {
+    [ -t 1 ] || return 0
+    printf '\033[?25l'
+}
+
+guided_wait_screen_render_start() {
+    if [ -t 1 ]; then
+        printf '\033[H\033[J'
+    else
+        printf '\n'
+    fi
+}
+
+guided_wait_screen_leave() {
+    [ -t 1 ] || return 0
+    printf '\033[?25h'
+}
+
+
+guided_wait_for_step() {
+    local id="$1" label="$2" timeout interval started elapsed remaining control topic probe
+    timeout=$(guided_step_timeout "$id") || timeout=300
+    interval="${GUIDED_WAIT_INTERVAL:-5}"
+    [[ "$timeout" =~ ^[0-9]+$ ]] || timeout=300
+    [[ "$interval" =~ ^[1-9][0-9]*$ ]] || interval=5
+    GUIDED_WAIT_LAST_FAILURE=""
+    GUIDED_WAIT_LAST_STATE="verifying"
+    probe=$(guided_step_probe "$id") || probe="unknown"
+
+    if guided_step_is_manual "$id"; then
+        GUIDED_WAIT_LAST_STATE="manual"
+        note "$label needs operator action; automatic verification is not available."
+        return 0
+    fi
+
+    guided_wait_screen_enter
+
+    started=$SECONDS
+    while true; do
+        if guided_step_complete "$id"; then
+            GUIDED_WAIT_LAST_STATE="complete"
+            guided_wait_screen_leave
+            note "$label verified ready."
+            return 0
+        fi
+
+        elapsed=$((SECONDS - started))
+        if [ "$timeout" -gt 0 ] && [ "$elapsed" -ge "$timeout" ]; then
+            GUIDED_WAIT_LAST_STATE="failed"
+            GUIDED_WAIT_LAST_FAILURE="$label did not verify ready within ${timeout}s; probe $probe is still failing."
+            error "$GUIDED_WAIT_LAST_FAILURE"
+            guided_wait_screen_leave
+            help_print_topic_reference "$(guided_step_help_topic "$id")"
+            return 1
+        fi
+
+        remaining=$((timeout - elapsed))
+        [ "$timeout" -eq 0 ] && remaining=0
+        guided_wait_screen_render_start
+        printf '\n%s%s%s\n' "$BOLD" "Verifying $label" "$RESET"
+        hr
+        printf '\n  State:   %s\n' "$(guided_step_status "$id")"
+        printf '  Probe:   %s\n' "$probe"
+        printf '  Elapsed: %ss' "$elapsed"
+        [ "$timeout" -gt 0 ] && printf ' / %ss' "$timeout"
+        printf '\n  Detail:  %s\n\n' "$(guided_step_progress_message "$id")"
+        section "Pods"
+        guided_print_pods "$id"
+        section "Recent events"
+        guided_print_recent_events
+        printf '\n  r. Retry operation   i. Take interactive control   h. Help   d. Diagnostics   q. Quit safely\n'
+        printf '  Waiting %ss before the next refresh' "$interval"
+        [ "$timeout" -gt 0 ] && printf ' (%ss remaining)' "$remaining"
+        printf '...\n'
+
+        if read -rsn1 -t "$interval" control; then
+            case "$control" in
+                [Rr])
+                    GUIDED_WAIT_LAST_STATE="retry"
+                    guided_wait_screen_leave
+                    note "Retry requested."
+                    return 4
+                    ;;
+                [Ii])
+                    GUIDED_WAIT_LAST_STATE="interactive"
+                    guided_wait_screen_leave
+                    note "Interactive control requested."
+                    return 2
+                    ;;
+                [Hh]|\?)
+                    guided_wait_screen_leave
+                    topic=$(guided_step_help_topic "$id") || topic=overview
+                    help_show_topic "$topic"
+                    guided_wait_screen_enter
+                    ;;
+                [Dd])
+                    guided_wait_screen_leave
+                    guided_diagnostics_bundle
+                    press_any
+                    guided_wait_screen_enter
+                    ;;
+                [Qq])
+                    GUIDED_WAIT_LAST_STATE="quit"
+                    guided_wait_screen_leave
+                    note "No wizard state or secrets were written. Live resources will be detected when you resume."
+                    return 3
+                    ;;
+            esac
+        fi
+    done
 }
 
 wizard_deployment_plan() {
@@ -1437,9 +1928,30 @@ wizard_environment_overview() {
         "$ready_total" "$required_total"
 }
 
+managed_release_names() {
+    [ -n "${HELM:-}" ] && [ -n "${NAMESPACE:-}" ] && cluster_reachable || return 0
+    $HELM -n "$NAMESPACE" list -q 2>/dev/null \
+        | grep -E '^(mysql|postgresql|ssc|lim|scancentral-sast|sdast-core|sdast-scanner)$' || true
+}
+
+managed_releases_exist() {
+    [ -n "$(managed_release_names)" ]
+}
+
+fresh_deployment_guard() {
+    local releases
+    releases=$(managed_release_names)
+    if [ -n "$releases" ]; then
+        error "Managed releases already exist; choose Resume or repair deployment, or Manage individual components -> Start / Upgrade."
+        printf '%s\n' "$releases" | awk '{ printf "  existing release: %s\n", $0 }'
+        return 1
+    fi
+}
+
 # This is the sole operation dispatcher for both interactive deployment modes.
 # Rendering guided status never calls it.
 run_deployment_operation() {
+    ensure_registry_credentials "$1" || return 1
     case "$1" in
         prereqs) prereqs_menu ;;
         inputs) deployment_inputs_menu ;;
@@ -1458,46 +1970,177 @@ run_deployment_operation() {
     esac
 }
 
+guided_run_and_verify() {
+    local id="$1" label="$2" result
+    section "$label"
+    GUIDED_WAIT_LAST_STATE="running"
+    if ! run_deployment_operation "$id"; then
+        GUIDED_WAIT_LAST_STATE="failed"
+        GUIDED_WAIT_LAST_FAILURE="$label operation failed before verification."
+        error "$GUIDED_WAIT_LAST_FAILURE"
+        error "The step is still incomplete. Correct the issue, then choose Retry."
+        help_print_topic_reference "$(guided_step_help_topic "$id")"
+        return 1
+    fi
+    guided_wait_for_step "$id" "$label"
+    result=$?
+    case "$result" in
+        0)
+            if guided_step_is_optional "$id" || guided_step_complete "$id"; then
+                return 0
+            fi
+            GUIDED_WAIT_LAST_STATE="failed"
+            GUIDED_WAIT_LAST_FAILURE="$label still needs required operator input."
+            error "$GUIDED_WAIT_LAST_FAILURE"
+            error "The step is still incomplete. Correct the issue, then choose Retry."
+            return 1
+            ;;
+        2|3|4) return "$result" ;;
+        *)
+            error "The step is still incomplete. Correct the issue, then choose Retry."
+            return 1
+            ;;
+    esac
+}
+
+guided_countdown() {
+    local next_label="$1" delay="${GUIDED_AUTO_ADVANCE_DELAY:-10}" remaining control
+    [[ "$delay" =~ ^[0-9]+$ ]] || delay=10
+    remaining="$delay"
+    while [ "$remaining" -gt 0 ]; do
+        printf '\r  Continuing to %s in %ss. Press i for interactive control. ' "$next_label" "$remaining"
+        if read -rsn1 -t 1 control; then
+            case "$control" in
+                [Ii]) printf '\n'; GUIDED_AUTO_ADVANCE=0; return 1 ;;
+            esac
+        fi
+        remaining=$((remaining - 1))
+    done
+    printf '\n'
+    return 0
+}
+
+guided_deployment_menu() {
+    local choice
+    fortify_lab_require_acknowledgement || return 1
+    if managed_releases_exist; then
+        note "Existing managed releases detected; opening Resume or repair so live state drives the next step."
+        press_any
+        resume_repair
+        return
+    fi
+    title "Guided deployment mode"
+    cat <<EOF
+
+  1. Interactive guided deployment
+  2. Auto-advance after each verified step
+
+  Auto-advance still pauses for manual configuration and lets you press i
+  during wait screens or countdowns to take interactive control.
+
+EOF
+    ask choice "Select:"
+    case "$choice" in
+        2) GUIDED_AUTO_ADVANCE=1; guided_deployment 0 ;;
+        *) GUIDED_AUTO_ADVANCE=0; guided_deployment 0 ;;
+    esac
+}
+
 guided_deployment() {
-    local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result
+    local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label
     fortify_lab_require_acknowledgement || return 1
     while [ "$idx" -lt "$total" ]; do
         id="${GUIDED_STEP_ID[$idx]}"
-        title "Guided deployment — Step $((idx + 1)) of $total"
+
+        if [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && ! guided_step_is_manual "$id"; then
+            if ! guided_step_complete "$id"; then
+                guided_run_and_verify "$id" "${GUIDED_STEP_LABEL[$idx]}"
+                result=$?
+                case "$result" in
+                    0) ;;
+                    2) GUIDED_AUTO_ADVANCE=0; continue ;;
+                    3) return ;;
+                    4) continue ;;
+                    *) GUIDED_AUTO_ADVANCE=0; press_any; continue ;;
+                esac
+            fi
+            idx=$((idx + 1))
+            if [ "$idx" -lt "$total" ]; then
+                next_label="${GUIDED_STEP_LABEL[$idx]}"
+                guided_countdown "$next_label" || continue
+            fi
+            continue
+        fi
+
+        title "Guided deployment - Step $((idx + 1)) of $total"
         printf '\n  %s%s%s\n\n  %s\n' "$BOLD" "${GUIDED_STEP_LABEL[$idx]}" "$RESET" "${GUIDED_STEP_HELP[$idx]}"
         printf '\n  Current status: %s\n' "$(guided_step_status "$id")"
         [ "$id" = dashboard ] && printf '  Dashboard URL: https://dashboard.%s\n' "$DOMAIN"
+        [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && printf '  Mode: auto-advance is paused for this step\n'
         echo
         if guided_step_complete "$id"; then
             echo "  n. Next"
             echo "  r. Run again"
+            echo "  w. Watch verification"
+        elif guided_step_in_progress "$id"; then
+            echo "  w. Watch verification"
+            echo "  r. Retry operation"
         else
             echo "  r. Run"
             echo "  t. Retry"
         fi
         [ "${GUIDED_STEP_OPTIONAL[$idx]}" -eq 1 ] && echo "  s. Skip optional step"
+        [ "${GUIDED_AUTO_ADVANCE:-0}" = "0" ] && echo "  a. Enable auto-advance"
+        [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && echo "  i. Stay interactive"
         [ "$idx" -gt 0 ] && echo "  b. Back"
+        echo "  d. Diagnostics"
         echo "  ?. Help for this step"
         echo "  q. Quit safely"
         echo
         ask choice "Select:"
         case "$choice" in
             [Nn])
-                if guided_step_complete "$id"; then idx=$((idx + 1)); else error "Run this required step before continuing"; sleep 1; fi
-                ;;
-            [Rr]|[Tt])
-                deploy_step "${GUIDED_STEP_LABEL[$idx]}" run_deployment_operation "$id"
-                result=$?
-                if [ "$result" -eq 0 ] && { [ "${GUIDED_STEP_OPTIONAL[$idx]}" -eq 1 ] || guided_step_complete "$id"; }; then
+                if guided_step_complete "$id" || guided_step_is_optional "$id"; then
                     idx=$((idx + 1))
                 else
-                    error "The step is still incomplete. Correct the issue, then choose Retry."
-                    help_print_topic_reference "$(help_guided_topic "$id")"
-                    [ "$result" -eq 0 ] && press_any
+                    error "Run this required step before continuing"
+                    sleep 1
                 fi
                 ;;
+            [Rr]|[Tt])
+                guided_run_and_verify "$id" "${GUIDED_STEP_LABEL[$idx]}"
+                result=$?
+                if [ "$result" -eq 0 ] && { guided_step_is_optional "$id" || guided_step_complete "$id"; }; then
+                    idx=$((idx + 1))
+                elif [ "$result" -eq 3 ]; then
+                    return
+                elif [ "$result" -eq 4 ]; then
+                    continue
+                else
+                    press_any
+                fi
+                ;;
+            [Ww])
+                guided_wait_for_step "$id" "${GUIDED_STEP_LABEL[$idx]}"
+                result=$?
+                if [ "$result" -eq 0 ]; then
+                    if guided_step_is_optional "$id" || guided_step_complete "$id"; then
+                        idx=$((idx + 1))
+                    fi
+                elif [ "$result" -eq 3 ]; then
+                    return
+                elif [ "$result" -eq 4 ]; then
+                    continue
+                else
+                    press_any
+                fi
+                ;;
+            [Aa]) GUIDED_AUTO_ADVANCE=1 ;;
+            [Ii]) GUIDED_AUTO_ADVANCE=0 ;;
+            [Dd]) guided_diagnostics_bundle; press_any ;;
             [Ss])
-                if [ "${GUIDED_STEP_OPTIONAL[$idx]}" -eq 1 ]; then
+                if guided_step_is_optional "$id"; then
+                    GUIDED_WAIT_LAST_STATE="skipped"
                     note "Skipped optional step; you can return to it later."
                     idx=$((idx + 1))
                 else
@@ -1506,7 +2149,7 @@ guided_deployment() {
                 fi
                 ;;
             [Bb]) [ "$idx" -gt 0 ] && idx=$((idx - 1)) ;;
-            \?) help_show_topic "$(help_guided_topic "$id")" ;;
+            \?) help_show_topic "$(guided_step_help_topic "$id")" ;;
             [Qq]) note "No wizard state or secrets were written. Live resources will be detected when you resume."; return ;;
             *) error "Invalid selection"; sleep 1 ;;
         esac
@@ -1514,6 +2157,7 @@ guided_deployment() {
     note "Guided deployment complete."
     press_any
 }
+
 
 resume_repair() {
     local idx id start=0 found=0 total="${#GUIDED_STEP_ID[@]}"
@@ -1539,6 +2183,7 @@ resume_repair() {
 deploy_from_scratch() {
     fortify_lab_require_acknowledgement || return 1
     title "Deploy lab from scratch"
+    fresh_deployment_guard || { press_any; return 1; }
     wizard_deployment_plan
     cat <<EOF
 
@@ -1559,28 +2204,22 @@ deploy_from_scratch() {
 EOF
     confirm "Proceed?" || return
 
-    deploy_step "Pre-flight" run_deployment_operation preflight || return
-    deploy_step "Certs" run_deployment_operation certs || return
-    deploy_step "Dashboard" run_deployment_operation dashboard || return
-    deploy_step "Secrets" run_deployment_operation secrets || return
-    deploy_step "MySQL" run_deployment_operation mysql || return
-    deploy_step "PostgreSQL" run_deployment_operation postgresql || return
-    # shellcheck source=scripts/lib/dependency-health.sh
-    source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
-    health_mysql_ready || return
-    health_postgresql_ready || return
-    deploy_step "SSC" run_deployment_operation ssc || return
-    deploy_step "LIM" run_deployment_operation lim || return
-    health_ssc_ready || return
-    health_lim_ready || return
-    deploy_step "SAST" run_deployment_operation sast || return
-    deploy_step "DAST" run_deployment_operation dast || return
+    guided_run_and_verify preflight "Pre-flight" || return
+    guided_run_and_verify certs "Certs" || return
+    guided_run_and_verify dashboard "Dashboard" || return
+    guided_run_and_verify secrets "Secrets" || return
+    guided_run_and_verify mysql "MySQL" || return
+    guided_run_and_verify postgresql "PostgreSQL" || return
+    guided_run_and_verify ssc "SSC" || return
+    guided_run_and_verify lim "LIM" || return
+    guided_run_and_verify sast "SAST" || return
+    guided_run_and_verify dast "DAST" || return
     note "Deploy complete. Use Advanced setup and configuration for DNS, the SSC token, and LIM."
     press_any
 }
 
 preflight_check() {
-    local command releases memory_gib disk_gib variable
+    local command memory_gib disk_gib variable
     for command in microk8s docker mkcert java keytool openssl envsubst curl; do
         command -v "$command" >/dev/null 2>&1 || {
             error "Missing prerequisite: $command (use option 3)"
@@ -1598,11 +2237,6 @@ preflight_check() {
         error "Required NFS storage class is unavailable (use option 3)"
         return 1
     }
-    releases=$($HELM -n "$NAMESPACE" list -q 2>/dev/null || true)
-    if grep -Eq '^(mysql|postgresql|ssc|lim|scancentral-sast|sdast-core|sdast-scanner)$' <<<"$releases"; then
-        error "Managed releases already exist; use Apps → Start / Upgrade instead"
-        return 1
-    fi
     [ -s "$HOME/.docker/config.json" ] || {
         error "Docker registry login is missing (use option 3)"
         return 1
@@ -1704,7 +2338,7 @@ main_menu() {
         ask choice "Select:"
 
         case "$choice" in
-            1)  guided_deployment ;;
+            1)  guided_deployment_menu ;;
             2)  deploy_from_scratch ;;
             3)  resume_repair ;;
             4)  apps_menu ;;

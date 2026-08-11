@@ -39,13 +39,15 @@ each existing dependency with the layered health gates before continuing.
 ## Safe start and resume
 
 1. Preview **Operational guidance → Deployment plan**.
-2. Use the unfinished-work summary only to find missing resources.
-3. Establish storage and database health before application consumers.
-4. Start consumers in the dependency order above. SSC waits for MySQL; SAST
+2. Use Guided or Resume/repair for an existing lab; fresh/express deployment is
+   reserved for a lab without managed releases.
+3. Use the unfinished-work summary only to find missing resources.
+4. Establish storage and database health before application consumers.
+5. Start consumers in the dependency order above. SSC waits for MySQL; SAST
    waits for SSC; DAST Core waits for PostgreSQL, SSC, and LIM; the DAST scanner
    waits for Core.
-5. Wait for bounded application-health success, not just `Running` pods.
-6. If a step fails, fix its first unhealthy dependency and retry that same
+6. Wait for bounded application-health success, not just `Running` pods.
+7. If a step fails, fix its first unhealthy dependency and retry that same
    step. Completed Helm steps are designed to be detected or upgraded again.
 
 ## Safe stop
@@ -72,6 +74,55 @@ trust.
 Do not rotate database passwords, SSC `secret.key`, controller/service tokens,
 or the mkcert trust root as incidental repair. Re-running certificate creation
 rotates trust and requires dedicated clients to import the new public CA.
+
+## Guided deployment orchestration contract
+
+Guided deployment should behave like a small orchestrator around the component
+scripts. A script returning success means the operation was launched or applied;
+the guided step is not complete until its lifecycle verification passes.
+
+Each guided step has these lifecycle states:
+
+| State | Meaning |
+|---|---|
+| Pending | Required inputs or resources are not present yet |
+| Running | The component operation is being applied |
+| Verifying | The wizard is polling readiness and application-health probes |
+| Complete | The step-specific completion probe has passed |
+| Failed | The operation or verification timed out and needs operator action |
+| Skipped | An optional step was deliberately deferred |
+
+The live wait screen should update gradually while a step is Running or
+Verifying. It should show elapsed time, timeout, current probe name, workload readiness counts, recent relevant Kubernetes events when available, and the
+safe controls for Retry, Help, Diagnostics, interactive takeover, and safe
+quit. Status rendering remains read-only: it may inspect files and Kubernetes
+resources, but it must not install packages, apply manifests, create secrets,
+rotate TLS, or delete data.
+
+Guided mode supports two operator styles:
+
+- **Interactive** pauses after each successful verification and lets the
+  operator choose the next step.
+- **Auto-advance** runs the same lifecycle and verification gates, then shows a
+  countdown before continuing to the next step. During the countdown, the
+  operator can take control and return to interactive mode without killing
+  already-completed work.
+
+Resume and failure handling are derived from live state, not from a stored
+wizard progress file. If a previous operation created resources that are still
+starting, Resume should identify the first incomplete required step and enter
+the same verification wait instead of blindly rerunning the command. If a step
+fails or times out, the wizard should name the failed probe, show sanitized diagnostics options, and offer Retry, Help, interactive control, or safe quit.
+
+The shell implementation exposes stable hooks for this contract:
+
+- `guided_step_probe`
+- `guided_step_timeout`
+- `guided_step_in_progress`
+- `guided_wait_for_step`
+- `guided_run_and_verify`
+- `guided_countdown`
+- `guided_diagnostics_bundle`
 
 ## Uninstall versus data deletion
 

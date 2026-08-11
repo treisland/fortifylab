@@ -113,9 +113,11 @@ labs. They are stored only in Kubernetes, remain valid until revoked, and can
 be revoked from the same Dashboard access menu. Prefer one-hour tokens whenever
 practical.
 
-`Deploy from scratch` refuses to run over existing managed Helm releases. Use
-**Apps → Start / Upgrade** for an existing lab; this protects persistent data,
-SSC encryption material, and application credentials from accidental reset.
+The fresh/express deployment path refuses to run over existing managed Helm
+releases. Use **Guided deployment** or **Resume or repair** for an existing lab;
+use **Apps → Start / Upgrade** when intentionally repairing one component. This
+protects persistent data, SSC encryption material, and application credentials
+from accidental reset.
 
 ### Dependency gates and safe retries
 
