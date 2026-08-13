@@ -1167,13 +1167,25 @@ logs_menu() {
 }
 
 logs_for_prefix() {
-    local prefix="$1"
-    if k8s_select_resource pod "Select a pod" "" "$prefix"; then
-        pod_log_action_menu "$K8S_SELECTED_RESOURCE_NAME"
-    else
-        note "No pod selected."
-        press_any
-    fi
+    local prefix="$1" pods=()
+    mapfile -t pods < <(k8s_resource_names pod "" "$prefix")
+    case "${#pods[@]}" in
+        0)
+            note "No pods matching '$prefix' have appeared yet."
+            press_any
+            ;;
+        1)
+            pod_log_action_menu "${pods[0]}"
+            ;;
+        *)
+            if k8s_select_resource pod "Select a pod" "" "$prefix"; then
+                pod_log_action_menu "$K8S_SELECTED_RESOURCE_NAME"
+            else
+                note "No pod selected."
+                press_any
+            fi
+            ;;
+    esac
 }
 
 # Multi-pod log streamer. Tails every pod in $NAMESPACE in parallel,
@@ -2606,6 +2618,10 @@ guided_step_pod_logs() {
         guided_print_recent_events
         press_any
         return 1
+    fi
+    if [ ${#pods[@]} -eq 1 ]; then
+        pod_log_action_menu "${pods[0]}"
+        return $?
     fi
     if k8s_select_resource pod "Select a pod for $label" "" "$prefix"; then
         pod_log_action_menu "$K8S_SELECTED_RESOURCE_NAME"

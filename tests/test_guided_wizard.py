@@ -545,13 +545,39 @@ class GuidedWizardTests(unittest.TestCase):
 
         result = self.run_wizard_functions(
             'cluster_reachable() { return 0; }; '
-            'k8s_select_resource() { printf "SELECTOR:%s|%s|%s|%s\n" "$1" "$2" "$3" "$4"; K8S_SELECTED_RESOURCE_NAME=ssc-webapp-0; return 0; }; '
+            'k8s_resource_names() { printf "ssc-webapp-0\nssc-webapp-1\n"; }; '
+            'k8s_select_resource() { printf "SELECTOR:%s|%s|%s|%s\n" "$1" "$2" "$3" "$4"; K8S_SELECTED_RESOURCE_NAME=ssc-webapp-1; return 0; }; '
             'pod_log_action_menu() { printf "LOGS:%s\n" "$1"; }; '
             'logs_for_prefix ssc-webapp'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("SELECTOR:pod|Select a pod||ssc-webapp", result.stdout)
+        self.assertIn("LOGS:ssc-webapp-1", result.stdout)
+
+    def test_scoped_logs_skip_selector_when_only_one_pod_matches(self) -> None:
+        result = self.run_wizard_functions(
+            'cluster_reachable() { return 0; }; '
+            'k8s_resource_names() { printf "ssc-webapp-0\n"; }; '
+            'k8s_select_resource() { printf BAD_SELECTOR; return 1; }; '
+            'pod_log_action_menu() { printf "LOGS:%s\n" "$1"; }; '
+            'logs_for_prefix ssc-webapp'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("LOGS:ssc-webapp-0", result.stdout)
+        self.assertNotIn("BAD_SELECTOR", result.stdout)
+
+    def test_guided_wait_logs_skip_selector_when_only_one_pod_matches(self) -> None:
+        result = self.run_wizard_functions(
+            'cluster_reachable() { return 0; }; '
+            'guided_step_pod_prefixes() { printf "ssc-webapp"; }; '
+            'k8s_resource_names() { printf "ssc-webapp-0\n"; }; '
+            'k8s_select_resource() { printf BAD_SELECTOR; return 1; }; '
+            'pod_log_action_menu() { printf "LOGS:%s\n" "$1"; }; '
+            'guided_step_pod_logs ssc SSC'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("LOGS:ssc-webapp-0", result.stdout)
+        self.assertNotIn("BAD_SELECTOR", result.stdout)
 
     def test_wait_screen_exposes_contextual_pod_logs_without_losing_wizard_log(self) -> None:
         self.assertIn("guided_step_pod_logs()", WIZARD)
