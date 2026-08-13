@@ -61,6 +61,8 @@ source "$FORTIFY_HOME_K8S/scripts/lib/lab-disclaimer.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/operational-help.sh"
 # shellcheck source=scripts/lib/registry-credentials.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
+# shellcheck source=scripts/lib/wizard-logging.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/wizard-logging.sh"
 
 
 # ============================================================
@@ -1391,6 +1393,14 @@ GUIDED_AUTO_ADVANCE_DELAY="${GUIDED_AUTO_ADVANCE_DELAY:-5}"
 GUIDED_WAIT_INTERVAL="${GUIDED_WAIT_INTERVAL:-5}"
 GUIDED_WAIT_LAST_FAILURE=""
 GUIDED_WAIT_LAST_STATE=""
+GUIDED_MODE_CONTEXT="${GUIDED_MODE_CONTEXT:-fresh}"
+
+GUIDED_PREFLIGHT_MODE_ID=("fresh" "resume" "component")
+GUIDED_PREFLIGHT_MODE_CONTRACT=(
+    "fresh: read-only preflight plus empty managed-release guard before deployment"
+    "resume: read-only preflight; existing managed releases are expected and live state selects the first gap"
+    "component: read-only preflight; existing managed releases are allowed for expert start/upgrade repair"
+)
 
 # Guided lifecycle states: pending -> running -> verifying -> complete/failed/skipped.
 guided_step_index() {
@@ -1427,6 +1437,75 @@ guided_step_is_manual() {
 
 guided_step_help_topic() {
     help_guided_topic "$1"
+}
+
+guided_mode_context_text() {
+    case "${1:-${GUIDED_MODE_CONTEXT:-}}" in
+        fresh)
+            printf '%s\n' "Guided mode: fresh deployment. The wizard runs a read-only preflight, refuses existing managed releases, and advances only after each probe verifies."
+            ;;
+        resume)
+            printf '%s\n' "Guided mode: resume or repair. Live files and Kubernetes resources choose the first incomplete required step; completed steps remain repairable."
+            ;;
+        component)
+            printf '%s\n' "Guided mode: component repair. Expert component actions may run with existing managed releases, while preflight checks remain read-only."
+            ;;
+        auto)
+            printf '%s\n' "Guided mode: auto-advance. Verified non-manual steps continue automatically after the countdown; press i to take control."
+            ;;
+        *)
+            printf '%s\n' "Guided mode: live-derived deployment orchestration."
+            ;;
+    esac
+}
+
+guided_step_action_profile() {
+    local idx
+    idx=$(guided_step_index "$1") || return 1
+    if guided_step_is_manual "$1"; then
+        printf 'manual operator action; %s\n' "${GUIDED_STEP_IMPACT[$idx]}"
+    elif [ "${GUIDED_STEP_IMPACT[$idx]}" = "read-only" ]; then
+        printf '%s\n' "read-only verification"
+    else
+        printf 'idempotent operation; %s\n' "${GUIDED_STEP_IMPACT[$idx]}"
+    fi
+}
+
+guided_preflight_contract() {
+    case "$1" in
+        fresh)
+            printf '%s\n' "fresh: read-only preflight plus empty managed-release guard before deployment"
+            ;;
+        resume)
+            printf '%s\n' "resume: read-only preflight; existing managed releases are expected and live state selects the first gap"
+            ;;
+        component)
+            printf '%s\n' "component: read-only preflight; existing managed releases are allowed for expert start/upgrade repair"
+            ;;
+        *)
+            error "Unknown guided preflight mode: $1"
+            return 1
+            ;;
+    esac
+}
+
+guided_repair_recommendation() {
+    case "$1" in
+        prereqs) printf '%s\n' "Repair recommendation: install or refresh host prerequisites, then retry the prerequisite probe. Retry safety: host-package changes only." ;;
+        inputs) printf '%s\n' "Repair recommendation: review .env and the Fortify license, then rerun configuration validation. Retry safety: read-only until you choose an edit/import action." ;;
+        preflight) printf '%s\n' "Repair recommendation: fix the reported prerequisite, storage, registry, capacity, or required setting before deploying. Retry safety: read-only." ;;
+        certs) printf '%s\n' "Repair recommendation: regenerate TLS material only on a fresh lab or before recreating Secrets. Data risk: certificate and key rotation can invalidate existing trust." ;;
+        dashboard) printf '%s\n' "Repair recommendation: rerun the idempotent Dashboard deployment and verify the ingress and service accounts. Retry safety: idempotent Kubernetes apply." ;;
+        secrets) printf '%s\n' "Repair recommendation: rerun scripts/create-secrets.sh after confirming the license, TLS files, and registry credentials. Data risk: rotating SSC secret.key can invalidate encrypted SSC data." ;;
+        mysql) printf '%s\n' "Repair recommendation: retry MySQL start/upgrade and wait for the StatefulSet plus authenticated query. Retry safety: Helm upgrade preserves PVC data." ;;
+        postgresql) printf '%s\n' "Repair recommendation: retry PostgreSQL start/upgrade and wait for the StatefulSet plus authenticated query. Retry safety: Helm upgrade preserves PVC data." ;;
+        ssc) printf '%s\n' "Repair recommendation: repair MySQL first, then retry SSC and verify service, ingress, and HTTP health. For HTTP 5xx, inspect pod logs locally for migration or database errors." ;;
+        lim) printf '%s\n' "Repair recommendation: retry LIM and verify its service, ingress, and HTTP endpoint before DAST. Retry safety: idempotent Kubernetes apply." ;;
+        sast) printf '%s\n' "Repair recommendation: confirm SSC is healthy and the ControllerToken is configured, then retry SAST. Keep tokens out of logs and command output." ;;
+        dast) printf '%s\n' "Repair recommendation: confirm PostgreSQL, SSC, and LIM are healthy, then retry DAST Core and scanner. Preserve database PVCs while troubleshooting." ;;
+        configure) printf '%s\n' "Repair recommendation: complete DNS, SSC ControllerToken, and LIM pool actions from the Configure menu. Retry safety: manual operator action." ;;
+        *) printf '%s\n' "Repair recommendation: inspect the failing probe detail, fix the underlying resource, then retry. Avoid destructive cleanup unless a step explicitly says data will be deleted." ;;
+    esac
 }
 
 prereqs_complete() {
@@ -1735,6 +1814,17 @@ guided_step_progress_message() {
     esac
 }
 
+guided_step_why_pending() {
+    local id="$1"
+    if guided_step_complete "$id"; then
+        printf '%s\n' "Step is complete; no pending action is required."
+    elif guided_step_in_progress "$id"; then
+        printf '%s\n' "Step is in progress; continue watching verification before retrying."
+    else
+        guided_step_progress_message "$id"
+    fi
+}
+
 guided_step_pod_prefixes() {
     case "$1" in
         mysql) printf '%s\n' mysql ;;
@@ -1782,6 +1872,24 @@ guided_diagnostics_bundle() {
     fi
 }
 
+wizard_log_event() {
+    fortify_wizard_log INFO "$@" >/dev/null 2>&1 || true
+}
+
+wizard_log_viewer() {
+    local lines="${FORTIFY_WIZARD_LOG_VIEW_LINES:-120}" log_file
+    title "Wizard log"
+    log_file=$(fortify_wizard_log_file 2>/dev/null || true)
+    if [ -n "$log_file" ]; then
+        printf '\n  Log file: %s\n' "$log_file"
+    fi
+    printf '  Showing the last %s sanitized lines. Review before sharing.\n\n' "$lines"
+    if ! fortify_wizard_log_view "$lines" 2>/dev/null | sed 's/^/  /'; then
+        error "Could not read the wizard log."
+    fi
+    press_any
+}
+
 guided_wait_screen_enter() {
     [ -t 1 ] || return 0
     printf '\033[?25l'
@@ -1810,6 +1918,7 @@ guided_wait_for_step() {
     GUIDED_WAIT_LAST_FAILURE=""
     GUIDED_WAIT_LAST_STATE="verifying"
     probe=$(guided_step_probe "$id") || probe="unknown"
+    wizard_log_event "action=verification_start step=$id probe=$probe timeout=$timeout"
 
     if guided_step_is_manual "$id"; then
         GUIDED_WAIT_LAST_STATE="manual"
@@ -1824,6 +1933,7 @@ guided_wait_for_step() {
         if guided_step_complete "$id"; then
             GUIDED_WAIT_LAST_STATE="complete"
             guided_wait_screen_leave
+            wizard_log_event "action=verification_finish step=$id probe=$probe state=complete elapsed=$((SECONDS - started))"
             note "$label verified ready."
             return 0
         fi
@@ -1834,6 +1944,8 @@ guided_wait_for_step() {
             GUIDED_WAIT_LAST_FAILURE="$label did not verify ready within ${timeout}s; probe $probe is still failing."
             error "$GUIDED_WAIT_LAST_FAILURE"
             guided_wait_screen_leave
+            wizard_log_event "action=verification_finish step=$id probe=$probe state=failed elapsed=$elapsed detail=$GUIDED_WAIT_LAST_FAILURE"
+            guided_repair_recommendation "$id" >&2
             help_print_topic_reference "$(guided_step_help_topic "$id")"
             return 1
         fi
@@ -1863,22 +1975,32 @@ guided_wait_for_step() {
                     GUIDED_WAIT_LAST_STATE="retry"
                     guided_wait_screen_leave
                     note "Retry requested."
+                    wizard_log_event "action=user_control step=$id control=retry"
                     return 4
                     ;;
                 [Ii])
                     GUIDED_WAIT_LAST_STATE="interactive"
                     guided_wait_screen_leave
                     note "Interactive control requested."
+                    wizard_log_event "action=user_control step=$id control=interactive_takeover"
                     return 2
                     ;;
                 [Hh]|\?)
                     guided_wait_screen_leave
                     topic=$(guided_step_help_topic "$id") || topic=overview
+                    wizard_log_event "action=user_control step=$id control=help"
                     help_show_topic "$topic"
+                    guided_wait_screen_enter
+                    ;;
+                [Ll])
+                    guided_wait_screen_leave
+                    wizard_log_event "action=user_control step=$id control=view_log"
+                    wizard_log_viewer
                     guided_wait_screen_enter
                     ;;
                 [Dd])
                     guided_wait_screen_leave
+                    wizard_log_event "action=user_control step=$id control=diagnostics"
                     guided_diagnostics_bundle
                     press_any
                     guided_wait_screen_enter
@@ -1887,6 +2009,7 @@ guided_wait_for_step() {
                     GUIDED_WAIT_LAST_STATE="quit"
                     guided_wait_screen_leave
                     note "No wizard state or secrets were written. Live resources will be detected when you resume."
+                    wizard_log_event "action=user_control step=$id control=quit_safely"
                     return 3
                     ;;
             esac
@@ -1928,6 +2051,56 @@ wizard_environment_overview() {
         "$ready_total" "$required_total"
 }
 
+wizard_doctor_load_env() {
+    if [ -f "$ENV_FILE" ]; then
+        # shellcheck disable=SC1090
+        source "$ENV_FILE"
+    fi
+    DOMAIN="${DOMAIN:-fortifydemo.com}"
+    NAMESPACE="${NAMESPACE:-fortify}"
+    SSC="${SSC:-ssc.$DOMAIN}"
+    LIM="${LIM:-lim.$DOMAIN}"
+    SCDAST="${SCDAST:-dast.$DOMAIN}"
+    SCSAST="${SCSAST:-sast.$DOMAIN}"
+    SSC_URL="${SSC_URL:-https://$SSC}"
+    LIM_URL="${LIM_URL:-https://$LIM}"
+    SCDAST_URL="${SCDAST_URL:-https://$SCDAST}"
+    SCSAST_CTRL_URL="${SCSAST_CTRL_URL:-https://$SCSAST}"
+    FORTIFY_OPERATION_NAMESPACE="$NAMESPACE"
+}
+
+wizard_doctor() {
+    local id incomplete=0 unavailable=0
+    wizard_doctor_load_env
+    wizard_log_event "action=doctor_start mode=doctor"
+    operational_cluster_available || unavailable=1
+    operational_doctor_compact_health_summary || unavailable=1
+    printf '\nDetailed checks:\n'
+    operational_doctor_hosts_resolution || true
+    operational_doctor_coredns_drift || true
+    operational_doctor_ingress || true
+    operational_doctor_service_endpoints || true
+    operational_doctor_http_status || true
+    printf '\nGuided readiness:\n'
+    for id in prereqs inputs preflight certs dashboard secrets mysql postgresql ssc lim sast dast configure; do
+        if guided_step_complete "$id"; then
+            printf '  %-12s complete\n' "$id"
+        elif guided_step_in_progress "$id"; then
+            printf '  %-12s in-progress - %s\n' "$id" "$(guided_step_why_pending "$id")"
+            incomplete=1
+        else
+            printf '  %-12s needs-attention - %s\n' "$id" "$(guided_step_why_pending "$id")"
+            incomplete=1
+        fi
+    done
+    wizard_log_event "action=doctor_finish state=$([ "$incomplete" -eq 0 ] && [ "$unavailable" -eq 0 ] && printf healthy || printf degraded)"
+    if [ "$unavailable" -ne 0 ]; then
+        return 2
+    fi
+    [ "$incomplete" -eq 0 ] && return 0
+    return 1
+}
+
 managed_release_names() {
     [ -n "${HELM:-}" ] && [ -n "${NAMESPACE:-}" ] && cluster_reachable || return 0
     $HELM -n "$NAMESPACE" list -q 2>/dev/null \
@@ -1951,8 +2124,10 @@ fresh_deployment_guard() {
 # This is the sole operation dispatcher for both interactive deployment modes.
 # Rendering guided status never calls it.
 run_deployment_operation() {
-    ensure_registry_credentials "$1" || return 1
-    case "$1" in
+    local operation="$1" rc
+    wizard_log_event "action=operation_start step=$operation mode=${GUIDED_MODE_CONTEXT:-unknown}"
+    ensure_registry_credentials "$operation" || { rc=$?; wizard_log_event "action=operation_finish step=$operation state=failed exit_code=$rc detail=registry_credentials"; return "$rc"; }
+    case "$operation" in
         prereqs) prereqs_menu ;;
         inputs) deployment_inputs_menu ;;
         preflight) preflight_check ;;
@@ -1966,24 +2141,33 @@ run_deployment_operation() {
         sast) run_app_scripts "apps/scsast/start.sh" ;;
         dast) run_app_scripts "apps/scdast/core/start.sh apps/scdast/scanner/start.sh" ;;
         configure) configure_menu ;;
-        *) error "Unknown deployment operation: $1"; return 1 ;;
+        *) error "Unknown deployment operation: $operation"; return 1 ;;
     esac
+    rc=$?
+    wizard_log_event "action=operation_finish step=$operation state=$([ "$rc" -eq 0 ] && printf complete || printf failed) exit_code=$rc"
+    return "$rc"
 }
 
 guided_run_and_verify() {
-    local id="$1" label="$2" result
+    local id="$1" label="$2" result started elapsed
     section "$label"
+    started=$SECONDS
     GUIDED_WAIT_LAST_STATE="running"
+    wizard_log_event "action=step_enter step=$id label=$label mode=${GUIDED_MODE_CONTEXT:-unknown} profile=$(guided_step_action_profile "$id")"
     if ! run_deployment_operation "$id"; then
         GUIDED_WAIT_LAST_STATE="failed"
         GUIDED_WAIT_LAST_FAILURE="$label operation failed before verification."
         error "$GUIDED_WAIT_LAST_FAILURE"
         error "The step is still incomplete. Correct the issue, then choose Retry."
+        guided_repair_recommendation "$id" >&2
+        wizard_log_event "action=step_exit step=$id state=failed duration=$((SECONDS - started)) detail=$GUIDED_WAIT_LAST_FAILURE"
         help_print_topic_reference "$(guided_step_help_topic "$id")"
         return 1
     fi
     guided_wait_for_step "$id" "$label"
     result=$?
+    elapsed=$((SECONDS - started))
+    wizard_log_event "action=step_exit step=$id state=$GUIDED_WAIT_LAST_STATE duration=$elapsed result=$result"
     case "$result" in
         0)
             if guided_step_is_optional "$id" || guided_step_complete "$id"; then
@@ -1993,11 +2177,13 @@ guided_run_and_verify() {
             GUIDED_WAIT_LAST_FAILURE="$label still needs required operator input."
             error "$GUIDED_WAIT_LAST_FAILURE"
             error "The step is still incomplete. Correct the issue, then choose Retry."
+            guided_repair_recommendation "$id" >&2
             return 1
             ;;
         2|3|4) return "$result" ;;
         *)
             error "The step is still incomplete. Correct the issue, then choose Retry."
+            guided_repair_recommendation "$id" >&2
             return 1
             ;;
     esac
@@ -2029,7 +2215,9 @@ guided_deployment_menu() {
         resume_repair
         return
     fi
+    GUIDED_MODE_CONTEXT=fresh
     title "Guided deployment mode"
+    printf '\n  %s\n' "$(guided_mode_context_text fresh)"
     cat <<EOF
 
   1. Interactive guided deployment
@@ -2041,14 +2229,15 @@ guided_deployment_menu() {
 EOF
     ask choice "Select:"
     case "$choice" in
-        2) GUIDED_AUTO_ADVANCE=1; guided_deployment 0 ;;
-        *) GUIDED_AUTO_ADVANCE=0; guided_deployment 0 ;;
+        2) GUIDED_AUTO_ADVANCE=1; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=auto"; guided_deployment 0 ;;
+        *) GUIDED_AUTO_ADVANCE=0; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=fresh"; guided_deployment 0 ;;
     esac
 }
 
 guided_deployment() {
     local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label
     fortify_lab_require_acknowledgement || return 1
+    wizard_log_event "action=guided_session_start mode=${GUIDED_MODE_CONTEXT:-fresh} start_index=$idx auto_advance=${GUIDED_AUTO_ADVANCE:-0}"
     while [ "$idx" -lt "$total" ]; do
         id="${GUIDED_STEP_ID[$idx]}"
 
@@ -2073,8 +2262,11 @@ guided_deployment() {
         fi
 
         title "Guided deployment - Step $((idx + 1)) of $total"
+        printf '\n  %s\n' "$(guided_mode_context_text "$GUIDED_MODE_CONTEXT")"
         printf '\n  %s%s%s\n\n  %s\n' "$BOLD" "${GUIDED_STEP_LABEL[$idx]}" "$RESET" "${GUIDED_STEP_HELP[$idx]}"
+        printf '  Step type: %s\n' "$(guided_step_action_profile "$id")"
         printf '\n  Current status: %s\n' "$(guided_step_status "$id")"
+        printf '  Why pending: %s\n' "$(guided_step_why_pending "$id")"
         [ "$id" = dashboard ] && printf '  Dashboard URL: https://dashboard.%s\n' "$DOMAIN"
         [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && printf '  Mode: auto-advance is paused for this step\n'
         echo
@@ -2093,6 +2285,7 @@ guided_deployment() {
         [ "${GUIDED_AUTO_ADVANCE:-0}" = "0" ] && echo "  a. Enable auto-advance"
         [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && echo "  i. Stay interactive"
         [ "$idx" -gt 0 ] && echo "  b. Back"
+        echo "  l. View wizard log"
         echo "  d. Diagnostics"
         echo "  ?. Help for this step"
         echo "  q. Quit safely"
@@ -2137,11 +2330,13 @@ guided_deployment() {
                 ;;
             [Aa]) GUIDED_AUTO_ADVANCE=1 ;;
             [Ii]) GUIDED_AUTO_ADVANCE=0 ;;
-            [Dd]) guided_diagnostics_bundle; press_any ;;
+            [Ll]) wizard_log_event "action=user_control step=$id control=view_log"; wizard_log_viewer ;;
+            [Dd]) wizard_log_event "action=user_control step=$id control=diagnostics"; guided_diagnostics_bundle; press_any ;;
             [Ss])
                 if guided_step_is_optional "$id"; then
                     GUIDED_WAIT_LAST_STATE="skipped"
                     note "Skipped optional step; you can return to it later."
+                    wizard_log_event "action=step_exit step=$id state=skipped"
                     idx=$((idx + 1))
                 else
                     error "${GUIDED_STEP_LABEL[$idx]} is required and cannot be skipped"
@@ -2150,10 +2345,11 @@ guided_deployment() {
                 ;;
             [Bb]) [ "$idx" -gt 0 ] && idx=$((idx - 1)) ;;
             \?) help_show_topic "$(guided_step_help_topic "$id")" ;;
-            [Qq]) note "No wizard state or secrets were written. Live resources will be detected when you resume."; return ;;
+            [Qq]) note "No wizard state or secrets were written. Live resources will be detected when you resume."; wizard_log_event "action=user_control step=$id control=quit_safely"; return ;;
             *) error "Invalid selection"; sleep 1 ;;
         esac
     done
+    wizard_log_event "action=guided_session_end mode=${GUIDED_MODE_CONTEXT:-fresh} state=complete"
     note "Guided deployment complete."
     press_any
 }
@@ -2162,7 +2358,9 @@ guided_deployment() {
 resume_repair() {
     local idx id start=0 found=0 total="${#GUIDED_STEP_ID[@]}"
     fortify_lab_require_acknowledgement || return 1
+    GUIDED_MODE_CONTEXT=resume
     title "Resume or repair deployment"
+    printf '\n  %s\n' "$(guided_mode_context_text resume)"
     echo
     echo "  State is derived from current files and Kubernetes; no password or token is persisted."
     echo
@@ -2176,12 +2374,14 @@ resume_repair() {
     done
     echo
     note "Guided mode will start at the first incomplete required step; completed steps remain available for repair."
+    note "$(guided_repair_recommendation "${GUIDED_STEP_ID[$start]}")"
     press_any
     guided_deployment "$start"
 }
 
 deploy_from_scratch() {
     fortify_lab_require_acknowledgement || return 1
+    GUIDED_MODE_CONTEXT=fresh
     title "Deploy lab from scratch"
     fresh_deployment_guard || { press_any; return 1; }
     wizard_deployment_plan
@@ -2331,6 +2531,7 @@ main_menu() {
         section "Learn"
         echo "  14. Help Center / Fortify Knowledge Center"
         echo "  15. Operational guidance and troubleshooting"
+        echo "  16. View wizard log"
 
         echo
         echo "   q. Quit"
@@ -2353,6 +2554,7 @@ main_menu() {
            13)  edit_env ;;
            14)  help_center ;;
            15)  operational_guidance_menu ;;
+           16)  wizard_log_viewer ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;
         esac
@@ -2371,6 +2573,7 @@ Fortify Lab management wizard.
 Usage:
   ./start_wizard.sh                  Launch the interactive menu.
   ./start_wizard.sh --accept-lab-use Explicitly acknowledge lab-only use for automation.
+  ./start_wizard.sh doctor           Run a read-only health summary and exit.
   ./start_wizard.sh -h | --help      Show this message.
 
 Environment overrides:
@@ -2390,13 +2593,17 @@ EOF
 if [ -z "${WIZARD_NOMAIN:-}" ]; then
     case "${1:-}" in
         -h|--help) usage; exit 0 ;;
-        ''|--accept-lab-use) ;;
+        doctor|''|--accept-lab-use) ;;
         *) error "Unsupported argument: ${1}"; usage >&2; exit 2 ;;
     esac
     if [ "$#" -gt 1 ]; then
         error "Only one command-line option is supported."
         usage >&2
         exit 2
+    fi
+    if [ "${1:-}" = doctor ]; then
+        wizard_doctor
+        exit $?
     fi
     fortify_lab_detect_accept_flag "$@"
     fortify_lab_require_acknowledgement || exit 1

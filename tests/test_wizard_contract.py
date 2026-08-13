@@ -145,7 +145,8 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn("credsStore", helper)
         self.assertIn("registry-1.docker.io", helper)
         self.assertIn("https://index.docker.io/v1/", helper)
-        self.assertIn('ensure_registry_credentials "$1" || return 1', wizard)
+        self.assertIn('ensure_registry_credentials "$operation"', wizard)
+        self.assertIn('action=operation_start step=$operation', wizard)
         self.assertIn("mysql|postgresql|ssc|lim|sast|dast)", wizard)
         self.assertNotIn("mysql|postgresql|ssc|lim|sast|dast|secrets)", wizard)
         self.assertIn('--dry-run=client -o yaml | $KUBECTL -n "$NAMESPACE" apply -f -', helper)
@@ -153,7 +154,7 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn("--type=kubernetes.io/dockerconfigjson", helper)
         self.assertIn("refresh_registry_credentials", create_secrets)
         dispatcher = wizard.split('run_deployment_operation() {', 1)[1].split('guided_run_and_verify()', 1)[0]
-        self.assertLess(dispatcher.index('ensure_registry_credentials \"$1\"'), dispatcher.index('case \"$1\" in'))
+        self.assertLess(dispatcher.index('ensure_registry_credentials "$operation"'), dispatcher.index('case "$operation" in'))
 
     def test_registry_materializer_writes_dockerhub_aliases(self) -> None:
         helper = ROOT / "scripts" / "lib" / "registry-credentials.sh"

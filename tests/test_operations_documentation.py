@@ -86,12 +86,15 @@ class OperationsDocumentationTests(unittest.TestCase):
                 self.assertIn(hook, self.lifecycle)
 
     def test_diagnostics_contract_matches_implementation_allow_list(self) -> None:
-        for filename in ("README.txt", "deployment-plan.txt", "cluster-status.txt"):
+        for filename in (
+            "README.txt", "deployment-plan.txt", "doctor-summary.txt",
+            "network-diagnostics.txt", "kubernetes-evidence.txt", "wizard-log-excerpt.txt",
+        ):
             self.assertIn(filename, self.diagnostics)
-        for excluded in ("logs", "Secret", "ConfigMap", "environment variables", "events", "license metadata"):
+        for excluded in ("pod/application logs", "Secret", "ConfigMap data", "environment variables", "command arguments", "license contents"):
             self.assertIn(excluded, self.diagnostics)
         implementation = (ROOT / "scripts" / "lib" / "operational-help.sh").read_text(encoding="utf-8")
-        self.assertIn("tar -C \"$work\" -czf \"$bundle\" README.txt deployment-plan.txt cluster-status.txt", implementation)
+        self.assertIn("doctor-summary.txt network-diagnostics.txt kubernetes-evidence.txt wizard-log-excerpt.txt", implementation)
 
     def test_readme_does_not_request_sensitive_support_artifacts(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

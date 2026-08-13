@@ -289,6 +289,105 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn('GUIDED_WAIT_LAST_STATE="retry"', WIZARD)
 
 
+
+    def test_guided_preflight_contracts_are_mode_specific(self) -> None:
+        self.assertIn('GUIDED_PREFLIGHT_MODE_ID=("fresh" "resume" "component")', WIZARD)
+        self.assertIn("guided_preflight_contract()", WIZARD)
+        self.assertIn("fresh: read-only preflight plus empty managed-release guard", WIZARD)
+        self.assertIn("resume: read-only preflight; existing managed releases are expected", WIZARD)
+        self.assertIn("component: read-only preflight; existing managed releases are allowed", WIZARD)
+
+        result = self.run_wizard_functions(
+            'guided_preflight_contract fresh; '
+            'guided_preflight_contract resume; '
+            'guided_preflight_contract component'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fresh: read-only preflight plus empty managed-release guard", result.stdout)
+        self.assertIn("resume: read-only preflight; existing managed releases are expected", result.stdout)
+        self.assertIn("component: read-only preflight; existing managed releases are allowed", result.stdout)
+
+    def test_guided_mode_banner_and_context_text_are_rendered(self) -> None:
+        self.assertIn("guided_mode_context_text()", WIZARD)
+        self.assertIn("Guided mode: fresh deployment", WIZARD)
+        self.assertIn("Guided mode: resume or repair", WIZARD)
+        self.assertIn("Guided mode: component repair", WIZARD)
+        self.assertIn("printf '\\n  %s\\n' \"$(guided_mode_context_text fresh)\"", WIZARD)
+        self.assertIn("printf '\\n  %s\\n' \"$(guided_mode_context_text \"$GUIDED_MODE_CONTEXT\")\"", WIZARD)
+        self.assertIn("GUIDED_MODE_CONTEXT=resume", WIZARD)
+
+        result = self.run_wizard_functions(
+            'guided_mode_context_text fresh; '
+            'guided_mode_context_text resume; '
+            'guided_mode_context_text component; '
+            'GUIDED_MODE_CONTEXT=resume; guided_mode_context_text'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fresh deployment", result.stdout)
+        self.assertEqual(result.stdout.count("resume or repair"), 2)
+        self.assertIn("component repair", result.stdout)
+
+    def test_guided_why_pending_detail_covers_state_machine_steps(self) -> None:
+        self.assertIn("guided_step_why_pending()", WIZARD)
+        self.assertIn("Why pending:", WIZARD)
+        progress_body = WIZARD.split("guided_step_progress_message()", 1)[1].split(
+            "guided_step_why_pending()", 1
+        )[0]
+        for step in (
+            "prereqs", "inputs", "preflight", "certs", "dashboard", "secrets",
+            "mysql", "postgresql", "ssc", "lim", "sast", "dast", "configure",
+        ):
+            with self.subTest(step=step):
+                self.assertIn(f"{step})", progress_body)
+
+        pending = self.run_wizard_functions(
+            'NAMESPACE=fortify; DOMAIN=lab.test; '
+            'guided_step_complete() { return 1; }; '
+            'guided_step_in_progress() { return 1; }; '
+            'cluster_reachable() { return 1; }; '
+            'guided_step_why_pending secrets; guided_step_why_pending configure'
+        )
+        self.assertEqual(pending.returncode, 0, pending.stderr)
+        self.assertIn("Cluster is not reachable while checking Kubernetes Secrets", pending.stdout)
+        self.assertIn("Hostname ssc.lab.test", pending.stdout)
+
+        complete = self.run_wizard_functions(
+            'guided_step_complete() { return 0; }; guided_step_why_pending mysql'
+        )
+        self.assertEqual(complete.returncode, 0, complete.stderr)
+        self.assertIn("Step is complete; no pending action is required", complete.stdout)
+
+    def test_guided_repair_recommendations_are_step_specific(self) -> None:
+        self.assertIn("guided_repair_recommendation()", WIZARD)
+        self.assertIn('note "$(guided_repair_recommendation "${GUIDED_STEP_ID[$start]}")"', WIZARD)
+        self.assertIn("Repair recommendation: repair MySQL first, then retry SSC", WIZARD)
+        self.assertIn("Data risk: rotating SSC secret.key", WIZARD)
+        self.assertIn("Avoid destructive cleanup unless a step explicitly says data will be deleted", WIZARD)
+
+        result = self.run_wizard_functions(
+            'guided_repair_recommendation ssc; '
+            'guided_repair_recommendation secrets; '
+            'guided_repair_recommendation unknown'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("repair MySQL first", result.stdout)
+        self.assertIn("rotating SSC secret.key", result.stdout)
+        self.assertIn("Avoid destructive cleanup", result.stdout)
+
+
+    def test_doctor_command_is_read_only_and_secret_safe(self) -> None:
+        self.assertIn("./start_wizard.sh doctor", WIZARD)
+        self.assertIn("wizard_doctor()", WIZARD)
+        self.assertIn("wizard_doctor_load_env()", WIZARD)
+        doctor_body = WIZARD.split("wizard_doctor()", 1)[1].split("managed_release_names()", 1)[0]
+        self.assertNotIn("bootstrap_env", doctor_body)
+        self.assertIn("operational_doctor_compact_health_summary", doctor_body)
+        self.assertIn("operational_doctor_http_status", doctor_body)
+        self.assertIn("Guided readiness", doctor_body)
+        self.assertIn("operational_cluster_available || unavailable=1", doctor_body)
+        self.assertIn("return 2", doctor_body)
+        self.assertIn("Step type:", WIZARD)
+
     def test_live_plan_uses_guided_registry_and_labels_impact(self) -> None:
         self.assertIn("wizard_deployment_plan()", WIZARD)
         self.assertIn('for idx in "${!GUIDED_STEP_ID[@]}"', WIZARD)
