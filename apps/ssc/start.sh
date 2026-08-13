@@ -12,6 +12,8 @@ source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
 # shellcheck source=../../scripts/lib/k8s-hostnames.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
+# shellcheck source=../../scripts/lib/traefik-backend.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
 
 fortify_require_k8s_hostname SSC "$SSC"
 
@@ -59,5 +61,6 @@ if microk8s kubectl get crd middlewares.traefik.io >/dev/null 2>&1; then
 fi
 
 envsubst '${SSC} ${NAMESPACE} ${TRAEFIK_SSC_UPLOAD_MIDDLEWARE}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
+fortify_annotate_traefik_https_service "$NAMESPACE" ssc-service
 
 microk8s kubectl -n "$NAMESPACE" scale statefulsets ssc-webapp --replicas=1

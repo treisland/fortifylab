@@ -131,7 +131,10 @@ class WizardContractTests(unittest.TestCase):
         dashboard = (ROOT / "apps" / "kubernetes-dashboard" / "dashboard.yaml").read_text(encoding="utf-8")
         ssc_start = (ROOT / "apps" / "ssc" / "start.sh").read_text(encoding="utf-8")
         ssc_destroy = (ROOT / "apps" / "ssc" / "destroy.sh").read_text(encoding="utf-8")
+        lim_start = (ROOT / "apps" / "lim" / "start.sh").read_text(encoding="utf-8")
+        dashboard_deploy = (ROOT / "apps" / "kubernetes-dashboard" / "deploy.sh").read_text(encoding="utf-8")
         middleware = (ROOT / "apps" / "ssc" / "traefik-upload-middleware.yaml").read_text(encoding="utf-8")
+        traefik_backend = (ROOT / "scripts" / "lib" / "traefik-backend.sh").read_text(encoding="utf-8")
         scsast = (ROOT / "apps" / "scsast" / "start.sh").read_text(encoding="utf-8")
         scdast = (ROOT / "apps" / "scdast" / "core" / "start.sh").read_text(encoding="utf-8")
 
@@ -148,6 +151,18 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn("delete middleware.traefik.io fortify-upload-buffer", ssc_destroy)
         self.assertIn("maxRequestBodyBytes: 1073741824", middleware)
         self.assertIn("namespace: ${NAMESPACE}", middleware)
+
+        for script in (ssc_start, lim_start, dashboard_deploy, scsast):
+            self.assertIn("scripts/lib/traefik-backend.sh", script)
+            self.assertIn("fortify_annotate_traefik_https_service", script)
+        self.assertIn('fortify_annotate_traefik_https_service "$NAMESPACE" ssc-service', ssc_start)
+        self.assertIn('fortify_annotate_traefik_https_service "$NAMESPACE" lim', lim_start)
+        self.assertIn('fortify_annotate_traefik_https_service "$DASHBOARD_NAMESPACE" "$DASHBOARD_SERVICE"', dashboard_deploy)
+        self.assertIn('fortify_annotate_traefik_https_service "$NAMESPACE" scancentral-sast-controller', scsast)
+        self.assertIn("kind: ServersTransport", traefik_backend)
+        self.assertIn("insecureSkipVerify: true", traefik_backend)
+        self.assertIn("traefik.ingress.kubernetes.io/service.serverstransport", traefik_backend)
+        self.assertIn("traefik.ingress.kubernetes.io/service.serversscheme=https", traefik_backend)
 
         self.assertIn("traefik\\.ingress\\.kubernetes\\.io/router\\.tls", scsast)
         self.assertIn("traefik\\.ingress\\.kubernetes\\.io/service\\.serversscheme", scsast)
