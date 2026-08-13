@@ -68,7 +68,9 @@ class DashboardContractTests(unittest.TestCase):
         self.assertIn("name: fortify-dashboard-admin", self.manifest)
 
     def test_wizard_dns_guidance_includes_dashboard(self) -> None:
-        self.assertIn("lim.$DOMAIN dashboard.$DOMAIN", self.wizard)
+        helper = (ROOT / "scripts/lib/coredns-lab-hosts.sh").read_text(encoding="utf-8")
+        self.assertIn("dashboard.$domain", helper)
+        self.assertIn("expected_hosts=$(fortify_lab_hostnames_inline)", self.wizard)
 
     def test_token_workflow_repairs_missing_dashboard_resources(self) -> None:
         self.assertIn("ensure_dashboard_access()", self.wizard)

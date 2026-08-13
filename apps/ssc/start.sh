@@ -14,8 +14,11 @@ source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
 # shellcheck source=../../scripts/lib/traefik-backend.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
+# shellcheck source=../../scripts/lib/coredns-lab-hosts.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
 
 fortify_require_k8s_hostname SSC "$SSC"
+fortify_ensure_coredns_lab_hosts
 
 # SSC database migrations must never start against an unavailable database.
 health_mysql_ready

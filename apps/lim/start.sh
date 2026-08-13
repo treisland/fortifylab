@@ -13,8 +13,11 @@ source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
 # shellcheck source=../../scripts/lib/traefik-backend.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
+# shellcheck source=../../scripts/lib/coredns-lab-hosts.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
 
 fortify_require_k8s_hostname LIM "$LIM"
+fortify_ensure_coredns_lab_hosts
 
 #get the current directory where this script resides
 CURRENT_DIR="$( dirname -- "${BASH_SOURCE[0]}" )"

@@ -12,8 +12,11 @@ source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
 # shellcheck source=../../../scripts/lib/k8s-hostnames.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
+# shellcheck source=../../../scripts/lib/coredns-lab-hosts.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
 
 fortify_require_k8s_hostname SCDAST "$SCDAST"
+fortify_ensure_coredns_lab_hosts
 
 # DAST schema setup and service startup depend on all three services.
 health_postgresql_ready

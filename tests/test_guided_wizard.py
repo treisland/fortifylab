@@ -323,6 +323,50 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("TRAEFIK DEFAULT CERT", result.stdout)
         self.assertIn("404", result.stdout)
 
+
+    def test_coredns_patch_refreshes_legacy_lab_hosts_block(self) -> None:
+        helper = ROOT / "scripts/lib/coredns-lab-hosts.sh"
+        corefile = ".:53 {\n    errors\n    hosts {\n        10.0.0.4 ssc.example.test sast.example.test\n        fallthrough\n    }\n    forward . 1.1.1.1\n}\n"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; printf "%s" "$2" | fortify_patch_coredns_corefile 10.0.0.5 "ssc.lab.test sast.lab.test dast.lab.test lim.lab.test dashboard.lab.test"',
+                "coredns-test",
+                str(helper),
+                corefile,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("# fortifylab hosts begin", result.stdout)
+        self.assertIn("10.0.0.5 ssc.lab.test sast.lab.test dast.lab.test lim.lab.test dashboard.lab.test", result.stdout)
+        self.assertNotIn("10.0.0.4 ssc.example.test", result.stdout)
+        self.assertEqual(result.stdout.count("hosts {"), 1)
+
+    def test_coredns_patch_refreshes_managed_lab_hosts_block(self) -> None:
+        helper = ROOT / "scripts/lib/coredns-lab-hosts.sh"
+        corefile = ".:53 {\n    # fortifylab hosts begin\n    hosts {\n        10.0.0.4 ssc.old.test sast.old.test dast.old.test lim.old.test dashboard.old.test\n        fallthrough\n    }\n    # fortifylab hosts end\n    forward . 1.1.1.1\n}\n"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; printf "%s" "$2" | fortify_patch_coredns_corefile 10.0.0.6 "ssc.new.test sast.new.test dast.new.test lim.new.test dashboard.new.test"',
+                "coredns-test",
+                str(helper),
+                corefile,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("10.0.0.6 ssc.new.test sast.new.test dast.new.test lim.new.test dashboard.new.test", result.stdout)
+        self.assertNotIn("old.test", result.stdout)
+        self.assertEqual(result.stdout.count("# fortifylab hosts begin"), 1)
+
     def test_secret_values_are_redacted_in_preview(self) -> None:
         result = self.run_wizard_functions(
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '

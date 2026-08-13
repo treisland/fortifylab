@@ -173,6 +173,27 @@ class WizardContractTests(unittest.TestCase):
         self.assertNotIn("api.ingress.annotations.\"nginx\\\\.ingress", scdast)
         self.assertNotIn("api.ingress.annotations.\"traefik\\\\.ingress\\\\.kubernetes\\\\.io/service", scdast)
 
+
+    def test_app_starts_refresh_coredns_before_hostname_based_workloads(self) -> None:
+        for relative in (
+            "apps/ssc/start.sh",
+            "apps/lim/start.sh",
+            "apps/scsast/start.sh",
+            "apps/scdast/core/start.sh",
+            "apps/scdast/scanner/start.sh",
+        ):
+            script = (ROOT / relative).read_text(encoding="utf-8")
+            self.assertIn("coredns-lab-hosts.sh", script, relative)
+            self.assertIn("fortify_ensure_coredns_lab_hosts", script, relative)
+
+    def test_wizard_dns_uses_shared_coredns_helper(self) -> None:
+        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        helper = (ROOT / "scripts/lib/coredns-lab-hosts.sh").read_text(encoding="utf-8")
+        self.assertIn("scripts/lib/coredns-lab-hosts.sh", wizard)
+        self.assertIn("fortify_ensure_coredns_lab_hosts || return 1", wizard)
+        self.assertIn("# fortifylab hosts begin", helper)
+        self.assertIn("ScanCentral SAST workers call", wizard)
+
     def test_guided_status_surfaces_endpoint_and_hostname_detail(self) -> None:
         wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
         self.assertIn("guided_component_endpoint_detail", wizard)

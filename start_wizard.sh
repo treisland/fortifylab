@@ -66,6 +66,8 @@ source "$FORTIFY_HOME_K8S/scripts/lib/operational-help.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
 # shellcheck source=scripts/lib/wizard-logging.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/wizard-logging.sh"
+# shellcheck source=scripts/lib/coredns-lab-hosts.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
 
 
 # ============================================================
@@ -828,45 +830,28 @@ ensure_dashboard_access() {
 }
 
 configure_dns() {
-    local ip
-    ip=$(lab_node_ip)
+    local ip expected_hosts
+    ip=$(fortify_lab_node_ip)
+    expected_hosts=$(fortify_lab_hostnames_inline)
     cat <<EOF
 
-  ── Client side ─────────────────────────────────────────
+  -- Client side ------------------------------------------------
   Add to your client's /etc/hosts (or Pi-hole DNS):
 
-    $ip   ssc.$DOMAIN sast.$DOMAIN dast.$DOMAIN lim.$DOMAIN dashboard.$DOMAIN
+    $ip   $expected_hosts
 
   Use the MicroK8s lab node IP shown above. If the names point at a Proxmox,
   Traefik, or other reverse-proxy endpoint without matching routes, browsers
   commonly show TRAEFIK DEFAULT CERT and then a plain 404 page.
 
-  ── In-cluster side ─────────────────────────────────────
+  -- In-cluster side --------------------------------------------
   Pods inside the cluster need to resolve $DOMAIN themselves
-  (e.g. SCDAST scanner calls https://dast.$DOMAIN). We patch
-  CoreDNS's hosts plugin so they resolve to this node's IP.
+  (e.g. ScanCentral SAST workers call https://sast.$DOMAIN/scancentral-ctrl).
+  We patch CoreDNS's hosts plugin so they resolve to this node's IP.
 
 EOF
     if confirm "Apply CoreDNS hosts override now?"; then
-        local cm
-        cm=$($KUBECTL -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}' 2>/dev/null)
-        if [ -z "$cm" ]; then
-            error "Could not read coredns ConfigMap"
-            return
-        fi
-        if echo "$cm" | grep -q "$DOMAIN"; then
-            note "CoreDNS already has an entry for $DOMAIN — skipping."
-            return
-        fi
-        # Insert a hosts block before the closing brace of the .:53 server block.
-        local patched
-        patched=$(echo "$cm" | awk -v ip="$ip" -v dom="$DOMAIN" '
-            /^}/ && !done { print "    hosts {"; print "        " ip " ssc." dom " sast." dom " dast." dom " lim." dom " dashboard." dom; print "        fallthrough"; print "    }"; done=1 } { print }')
-        $KUBECTL -n kube-system create configmap coredns \
-            --from-literal=Corefile="$patched" --dry-run=client -o yaml \
-          | $KUBECTL -n kube-system apply -f - >/dev/null
-        $KUBECTL -n kube-system rollout restart deployment/coredns >/dev/null
-        note "CoreDNS patched and restarted."
+        fortify_ensure_coredns_lab_hosts || return 1
     fi
 }
 
