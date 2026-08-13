@@ -116,12 +116,45 @@ class WizardContractTests(unittest.TestCase):
         lim_destroy = (ROOT / "apps" / "lim" / "destroy.sh").read_text(encoding="utf-8")
         self.assertIn("${SSC}", ssc_ingress)
         self.assertIn("${LIM}", lim_ingress)
+        self.assertIn("namespace: ${NAMESPACE}", ssc_ingress)
+        self.assertIn("namespace: ${NAMESPACE}", lim_ingress)
         self.assertNotIn("ssc.fortifydemo.com", ssc_ingress)
         self.assertNotIn("lim.fortifydemo.com", lim_ingress)
-        self.assertIn("envsubst '${SSC}'", ssc_start)
-        self.assertIn("envsubst '${LIM}'", lim_start)
+        self.assertIn("envsubst '${SSC} ${NAMESPACE} ${TRAEFIK_SSC_UPLOAD_MIDDLEWARE}'", ssc_start)
+        self.assertIn("envsubst '${LIM} ${NAMESPACE}'", lim_start)
         self.assertIn("delete ingress ssc-ingress", ssc_destroy)
         self.assertIn("delete ingress lim-ingress", lim_destroy)
+
+    def test_lab_ingresses_support_traefik_backed_microk8s(self) -> None:
+        ssc_ingress = (ROOT / "apps" / "ssc" / "ingress.yaml").read_text(encoding="utf-8")
+        lim_ingress = (ROOT / "apps" / "lim" / "ingress.yaml").read_text(encoding="utf-8")
+        dashboard = (ROOT / "apps" / "kubernetes-dashboard" / "dashboard.yaml").read_text(encoding="utf-8")
+        ssc_start = (ROOT / "apps" / "ssc" / "start.sh").read_text(encoding="utf-8")
+        ssc_destroy = (ROOT / "apps" / "ssc" / "destroy.sh").read_text(encoding="utf-8")
+        middleware = (ROOT / "apps" / "ssc" / "traefik-upload-middleware.yaml").read_text(encoding="utf-8")
+        scsast = (ROOT / "apps" / "scsast" / "start.sh").read_text(encoding="utf-8")
+        scdast = (ROOT / "apps" / "scdast" / "core" / "start.sh").read_text(encoding="utf-8")
+
+        for manifest in (ssc_ingress, lim_ingress, dashboard):
+            self.assertIn("nginx.ingress.kubernetes.io/backend-protocol", manifest)
+            self.assertIn("traefik.ingress.kubernetes.io/router.tls", manifest)
+            self.assertIn("traefik.ingress.kubernetes.io/service.serversscheme", manifest)
+
+        self.assertIn("nginx.ingress.kubernetes.io/proxy-body-size", ssc_ingress)
+        self.assertIn("traefik.ingress.kubernetes.io/router.middlewares", ssc_ingress)
+        self.assertIn("${TRAEFIK_SSC_UPLOAD_MIDDLEWARE}", ssc_ingress)
+        self.assertIn("middlewares.traefik.io", ssc_start)
+        self.assertIn("traefik-upload-middleware.yaml", ssc_start)
+        self.assertIn("delete middleware.traefik.io fortify-upload-buffer", ssc_destroy)
+        self.assertIn("maxRequestBodyBytes: 1073741824", middleware)
+        self.assertIn("namespace: ${NAMESPACE}", middleware)
+
+        self.assertIn("traefik\\.ingress\\.kubernetes\\.io/router\\.tls", scsast)
+        self.assertIn("traefik\\.ingress\\.kubernetes\\.io/service\\.serversscheme", scsast)
+        self.assertIn("traefik\\.ingress\\.kubernetes\\.io/router\\.tls", scdast)
+        self.assertIn("api.ingress.className=public", scdast)
+        self.assertNotIn("api.ingress.annotations.\"nginx\\\\.ingress", scdast)
+        self.assertNotIn("api.ingress.annotations.\"traefik\\\\.ingress\\\\.kubernetes\\\\.io/service", scdast)
 
     def test_guided_status_surfaces_endpoint_and_hostname_detail(self) -> None:
         wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")

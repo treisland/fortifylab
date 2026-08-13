@@ -32,6 +32,6 @@ microk8s helm -n "$NAMESPACE" upgrade -i lim oci://registry-1.docker.io/fortifyd
  --set signingCertificate.certificatePasswordSecretName=lim-signing-certificate-password \
  --set dataPersistence.existingClaim=lim-pvc  
 
-envsubst '${LIM}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
+envsubst '${LIM} ${NAMESPACE}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
 
 microk8s kubectl -n "$NAMESPACE" scale statefulset lim --replicas=1

@@ -19,6 +19,7 @@ fortify_require_k8s_hostname SSC "$SSC"
 health_mysql_ready
 
 CURRENT_DIR="$( dirname "${BASH_SOURCE[0]}" )"
+export TRAEFIK_SSC_UPLOAD_MIDDLEWARE="${NAMESPACE}-fortify-upload-buffer@kubernetescrd"
 
 microk8s helm -n "$NAMESPACE" upgrade -i ssc \
 		--create-namespace \
@@ -53,6 +54,10 @@ microk8s helm -n "$NAMESPACE" upgrade -i ssc \
 		--set resources.limits.cpu=1 \
 		--set service.type=ClusterIP
 
-envsubst '${SSC}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
+if microk8s kubectl get crd middlewares.traefik.io >/dev/null 2>&1; then
+	envsubst '${NAMESPACE}' < "$CURRENT_DIR/traefik-upload-middleware.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
+fi
+
+envsubst '${SSC} ${NAMESPACE} ${TRAEFIK_SSC_UPLOAD_MIDDLEWARE}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
 
 microk8s kubectl -n "$NAMESPACE" scale statefulsets ssc-webapp --replicas=1

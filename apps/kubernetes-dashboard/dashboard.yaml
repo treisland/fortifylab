@@ -43,6 +43,8 @@ metadata:
   namespace: ${DASHBOARD_NAMESPACE}
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/service.serversscheme: "https"
 spec:
   ingressClassName: public
   tls:
