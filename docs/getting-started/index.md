@@ -92,7 +92,10 @@ acknowledge it. From the main menu choose one deployment mode:
     screen to restart the wizard with group access, or run `newgrp microk8s`
     before relaunching. Guided step and wait screens include Retry, Help, live
     diagnostics, diagnostics bundle export, interactive takeover, and
-    contextual pod logs where a component owns pods.
+    contextual pod logs where a component owns pods. On completion, Guided
+    shows a congratulations page with live service status, URLs, certificate
+    trust guidance, recommended manual next steps, the wizard log, and the
+    access-and-credentials handoff.
 
 === "Express"
 
@@ -210,17 +213,22 @@ and modify or delete every workload and persistent resource.
 
 ## 6. Finish application configuration
 
-Use **12. URLs & credentials** to print the configured URLs and safe login
-guidance. The wizard deliberately does not display stored passwords.
+Use **12. URLs & credentials** to print configured URLs, safe login guidance,
+credential availability, retrieval commands, certificate trust instructions, and
+an explicit reveal-one-credential flow. Raw passwords and tokens are hidden by
+default and are never written to wizard logs, diagnostics, `.env`, or generated
+summary files by that screen.
 
 Two application tasks still require a person:
 
-1. Open SSC and obtain the initial administrator password from the SSC startup
-   log. In SSC, create a token of type `ScanCentralCtrlToken`; then choose
-   **Advanced setup and configuration → Configure → Apply SSC ControllerToken**.
-   Input is hidden and the wizard updates the protected Secret without putting
-   the token in files, command arguments, or Helm values.
-2. Open LIM as `lim_admin`, upload the entitled DAST license, and create the
+1. Open SSC as `admin`; refer to the SSC documentation for the default
+   administrator password. In SSC, create a token of type
+   `ScanCentralCtrlToken`; then choose **Advanced setup and configuration →
+   Configure → Apply SSC ControllerToken**. Input is hidden and the wizard
+   updates the protected Secret without putting the token in files, command
+   arguments, or Helm values.
+2. Open LIM as `lim_admin`, retrieve the password from **URLs & credentials**
+   if needed, upload the entitled DAST license, and create the
    pool named by `LIM_POOL_NAME` (default `Default`). Then run **Manage
    individual components → ScanCentral DAST → Start / Upgrade** so the scanner
    can authenticate to LIM.

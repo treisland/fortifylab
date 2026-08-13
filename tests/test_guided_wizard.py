@@ -80,11 +80,52 @@ class GuidedWizardTests(unittest.TestCase):
             'GUIDED_STEP_ID=(demo); GUIDED_STEP_LABEL=(Demo); '
             'GUIDED_STEP_OPTIONAL=(0); GUIDED_STEP_HELP=(Help); COMPLETE=0; '
             'guided_step_complete() { [ "$COMPLETE" -eq 1 ]; }; '
+            'guided_step_live_complete() { [ "$COMPLETE" -eq 1 ]; }; '
             'run_deployment_operation() { COMPLETE=1; }; guided_deployment',
             "r\n\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Guided deployment complete", result.stdout)
+        self.assertIn("Congratulations, FortifyLab is ready", result.stdout)
+
+
+    def test_completion_screen_and_credential_handoff_are_safe_by_default(self) -> None:
+        for expected in (
+            "Access & credentials",
+            "Reveal one credential",
+            "Type REVEAL to display this value once",
+            "The wizard will not write this value to logs, diagnostics, .env",
+            "refer to the SSC documentation for the default password",
+            "FortifyLab does not store or display that vendor default password",
+            "Credential availability",
+            "Certificate trust",
+        ):
+            self.assertIn(expected, WIZARD)
+        self.assertNotIn("see initial admin password in SSC startup logs", WIZARD)
+        self.assertNotIn("search the log for 'admin'", WIZARD)
+
+    def test_completion_screen_lists_profile_status_and_next_actions(self) -> None:
+        result = self.run_wizard_functions(
+            'DOMAIN=fortifydemo.test; NAMESPACE=fortify; KUBECTL=kube; '
+            'SSC_URL=https://ssc.fortifydemo.test; LIM_URL=https://lim.fortifydemo.test; '
+            'SCSAST_CTRL_URL=https://sast.fortifydemo.test/scancentral-ctrl; SCDAST_URL=https://dast.fortifydemo.test; '
+            'GUIDED_DEPLOYMENT_PROFILE_LABEL="SAST Full"; GUIDED_DEPLOYMENT_COMPONENTS="ssc,sast_controller,sast_sensor"; '
+            'GUIDED_STEP_ID=(dashboard ssc sast_controller sast_sensor); '
+            'GUIDED_STEP_LABEL=(Dashboard SSC SASTController SASTSensor); '
+            'GUIDED_STEP_OPTIONAL=(0 0 0 0); GUIDED_STEP_HELP=(Help Help Help Help); COMPLETE=0; '
+            'cluster_reachable() { return 0; }; secret_key_exists() { return 1; }; '
+            'app_status() { printf "1/1 running"; }; guided_step_live_status() { printf complete; }; '
+            'guided_step_complete() { [ "$COMPLETE" -eq 1 ]; }; '
+            'guided_step_live_complete() { [ "$COMPLETE" -eq 1 ]; }; '
+            'run_deployment_operation() { COMPLETE=1; }; guided_deployment',
+            "r\nn\nn\nn\nr\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Congratulations, FortifyLab is ready", result.stdout)
+        self.assertIn("Profile: SAST Full", result.stdout)
+        self.assertIn("SSC", result.stdout)
+        self.assertIn("ScanCentral SAST", result.stdout)
+        self.assertIn("https://ssc.fortifydemo.test", result.stdout)
+        self.assertIn("create an SSC ControllerToken", result.stdout)
 
     def test_resume_is_live_derived_and_starts_at_first_required_gap(self) -> None:
         self.assertIn("State is derived from current files and Kubernetes", WIZARD)
@@ -607,7 +648,7 @@ class GuidedWizardTests(unittest.TestCase):
             "\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Guided deployment complete", result.stdout)
+        self.assertIn("Congratulations, FortifyLab is ready", result.stdout)
 
 
     def test_wait_screen_redraws_without_full_clear_flash(self) -> None:

@@ -110,9 +110,13 @@ excludes logs, Secret and ConfigMap data, environment variables, command lines,
 license metadata, credentials, and local configuration paths.
 
 The Dashboard is surfaced before application workloads so it can monitor the
-rest of the deployment. After deployment, use **URLs & credentials** to print
-configured URLs and login guidance without disclosing stored passwords or
-tokens.
+rest of the deployment. When Guided deployment finishes, the wizard shows a
+congratulations and access handoff page with the selected profile, live service
+status, URLs, recommended next steps, certificate trust guidance, and a shortcut
+to **URLs & credentials**. That credential screen lists where lab-generated
+credentials live, can print retrieval commands, and can reveal a single selected
+credential after explicit confirmation. It does not disclose stored passwords or
+tokens by default.
 
 If a guided operation fails, its screen remains incomplete and offers Retry.
 Fix the reported dependency, retry the same operation, or quit safely and use
@@ -224,15 +228,18 @@ token or logging into SSC.
 
 Two steps still need a human after `Deploy from scratch`:
 
-- **SSC ControllerToken**: Log into SSC → Administration → ScanCentral SAST
-  → Tokens → create a token of type `ScanCentralCtrlToken`. Run wizard
+- **SSC access and ControllerToken**: Log into SSC as `admin`; refer to the SSC
+  documentation for the default administrator password. Then open
+  Administration → ScanCentral SAST → Tokens → create a token of type
+  `ScanCentralCtrlToken`. Run wizard
   Configure → option 2 to enter it through hidden input. The wizard patches the
   existing Kubernetes Secret through standard input and restarts the controller;
   the token is not placed in files, Helm values, or process arguments. This
   operation also clears token material left in Helm metadata by older versions
   of the wizard.
 - **DAST license + pool in LIM**: Open `https://lim.$DOMAIN`, sign in with
-  `lim_admin` username and configured lab password, upload the
+  `lim_admin`; retrieve the lab-generated password from **URLs & credentials**
+  if needed, upload the
   DAST license file, create a pool named `Default` (matches `LIM_POOL_NAME`
   in `.env`), then redeploy ScanCentral DAST so the scanner can authenticate.
 
