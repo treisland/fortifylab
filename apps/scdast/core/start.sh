@@ -54,7 +54,7 @@ microk8s helm -n "$NAMESPACE" upgrade -i \
 	--set api.ingress.hosts[0].paths[0].pathType=Prefix \
 	--set api.ingress.tls[0].secretName=tls \
 	--set api.ingress.tls[0].hosts[0]=$SCDAST \
-	--set api.ingress.annotations."traefik\.ingress\.kubernetes\.io/router\.tls"=true \
+	--set-string api.ingress.annotations."traefik\.ingress\.kubernetes\.io/router\.tls"=true \
 	-f $CURRENT_DIR/resource_override.yaml
 
 microk8s kubectl -n "$NAMESPACE" scale statefulset sdast-core-scancentral-dast-core-api --replicas=1

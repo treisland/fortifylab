@@ -164,8 +164,10 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn("traefik.ingress.kubernetes.io/service.serverstransport", traefik_backend)
         self.assertIn("traefik.ingress.kubernetes.io/service.serversscheme=https", traefik_backend)
 
+        self.assertIn("--set-string controller.ingress.annotations", scsast)
         self.assertIn("traefik\\.ingress\\.kubernetes\\.io/router\\.tls", scsast)
         self.assertIn("traefik\\.ingress\\.kubernetes\\.io/service\\.serversscheme", scsast)
+        self.assertIn("--set-string api.ingress.annotations", scdast)
         self.assertIn("traefik\\.ingress\\.kubernetes\\.io/router\\.tls", scdast)
         self.assertIn("api.ingress.className=public", scdast)
         self.assertNotIn("api.ingress.annotations.\"nginx\\\\.ingress", scdast)

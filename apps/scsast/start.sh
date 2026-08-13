@@ -54,8 +54,8 @@ microk8s helm -n "$NAMESPACE" upgrade -i scancentral-sast oci://registry-1.docke
 --set controller.ingress.tls[0].hosts[0]="$SCSAST" \
 --set controller.ingress.annotations."nginx\.ingress\.kubernetes\.io/proxy-body-size"=1G \
 --set controller.ingress.annotations."nginx\.ingress\.kubernetes\.io/backend-protocol"=HTTPS \
---set controller.ingress.annotations."traefik\.ingress\.kubernetes\.io/router\.tls"=true \
---set controller.ingress.annotations."traefik\.ingress\.kubernetes\.io/service\.serversscheme"=https \
+--set-string controller.ingress.annotations."traefik\.ingress\.kubernetes\.io/router\.tls"=true \
+--set-string controller.ingress.annotations."traefik\.ingress\.kubernetes\.io/service\.serversscheme"=https \
 --set workers.linux.enabled=true \
 --set workers.linux.truststoreSecret="" \
 --set workers.linux.controllerUrl="$SCSAST_CTRL_URL" \
