@@ -665,15 +665,17 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("guided_wait_screen_render_start()", WIZARD)
         self.assertIn("guided_wait_screen_render_finish()", WIZARD)
         self.assertIn("guided_wait_screen_leave()", WIZARD)
-        self.assertIn("printf '\\033[?25l\\033[H\\033[J'", WIZARD)
-        self.assertIn("printf '\\033[?25h'", WIZARD)
-        self.assertIn("printf '\\033[%sA'", WIZARD)
-        self.assertIn("printf '\\r\\033[K%s\\n'", WIZARD)
+        self.assertIn("guided_wait_screen_tty()", WIZARD)
+        self.assertIn("FORTIFY_GUIDED_WAIT_ALT_SCREEN", WIZARD)
+        self.assertIn("terminal alternate screen", WIZARD)
+        self.assertIn(r"printf '\033[?1049h\033[?25l\033[H\033[J'", WIZARD)
+        self.assertIn(r"printf '\033[H\033[J'", WIZARD)
+        self.assertIn(r"printf '\033[?25h\033[?1049l'", WIZARD)
+        self.assertIn(r"printf '\033[K%s\n'", WIZARD)
         self.assertNotIn("trap guided_wait_screen_leave RETURN", WIZARD)
 
         wait_body = WIZARD.split("guided_wait_for_step()", 1)[1].split("wizard_deployment_plan()", 1)[0]
         self.assertNotIn("clear", wait_body)
-        self.assertNotIn("\\033[H\\033[J", wait_body)
         self.assertIn('guided_wait_screen_render "$id" "$label"', wait_body)
         self.assertIn("guided_wait_screen_leave", wait_body)
 

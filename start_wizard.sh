@@ -3505,44 +3505,42 @@ wizard_log_viewer() {
 }
 
 GUIDED_WAIT_SCREEN_LINES=0
+GUIDED_WAIT_SCREEN_ACTIVE=0
+
+guided_wait_screen_tty() {
+    [ -t 1 ] && [ "${FORTIFY_GUIDED_WAIT_ALT_SCREEN:-1}" != 0 ]
+}
 
 guided_wait_screen_enter() {
     GUIDED_WAIT_SCREEN_LINES=0
-    [ -t 1 ] || return 0
-    printf '\033[?25l\033[H\033[J'
+    GUIDED_WAIT_SCREEN_ACTIVE=0
+    guided_wait_screen_tty || return 0
+    # Use the terminal alternate screen for live verification dashboards so
+    # repeated refreshes do not push older frames into scrollback.
+    printf '\033[?1049h\033[?25l\033[H\033[J'
+    GUIDED_WAIT_SCREEN_ACTIVE=1
 }
 
 guided_wait_screen_render_start() {
-    if [ -t 1 ]; then
-        if [ "${GUIDED_WAIT_SCREEN_LINES:-0}" -gt 0 ]; then
-            printf '\033[%sA' "$GUIDED_WAIT_SCREEN_LINES"
-        fi
+    if guided_wait_screen_tty; then
+        printf '\033[H\033[J'
     else
         printf '\n'
     fi
 }
 
 guided_wait_screen_render_finish() {
-    local rendered_lines="$1" previous_lines="${GUIDED_WAIT_SCREEN_LINES:-0}" extra
-    [ -t 1 ] || return 0
-    if [ "$previous_lines" -gt "$rendered_lines" ]; then
-        extra=$((previous_lines - rendered_lines))
-        while [ "$extra" -gt 0 ]; do
-            printf '\r\033[K\n'
-            extra=$((extra - 1))
-        done
-        printf '\033[%sA' "$((previous_lines - rendered_lines))"
-    fi
-    GUIDED_WAIT_SCREEN_LINES="$rendered_lines"
+    GUIDED_WAIT_SCREEN_LINES="${1:-0}"
 }
 
 guided_wait_screen_line() {
-    printf '\r\033[K%s\n' "$*"
+    printf '\033[K%s\n' "$*"
 }
 
 guided_wait_screen_leave() {
-    [ -t 1 ] || return 0
-    printf '\033[?25h'
+    [ "${GUIDED_WAIT_SCREEN_ACTIVE:-0}" -eq 1 ] || return 0
+    printf '\033[?25h\033[?1049l'
+    GUIDED_WAIT_SCREEN_ACTIVE=0
     GUIDED_WAIT_SCREEN_LINES=0
 }
 
