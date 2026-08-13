@@ -88,8 +88,11 @@ class GuidedWizardTests(unittest.TestCase):
 
     def test_resume_is_live_derived_and_starts_at_first_required_gap(self) -> None:
         self.assertIn("State is derived from current files and Kubernetes", WIZARD)
-        self.assertIn('! guided_step_complete "$id"', WIZARD)
+        self.assertIn('! guided_step_live_complete "$id"', WIZARD)
         self.assertIn('guided_deployment "$start"', WIZARD)
+        self.assertIn("Checking deployment state", WIZARD)
+        self.assertIn("guided_collect_step_statuses", WIZARD)
+        self.assertIn("guided_cached_step_status", WIZARD)
         self.assertNotIn("wizard-state", WIZARD.lower())
 
         result = self.run_wizard_functions(
@@ -100,6 +103,45 @@ class GuidedWizardTests(unittest.TestCase):
             'resume_repair'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("START=1", result.stdout)
+        self.assertIn("[ 1/ 3] Done", result.stdout)
+        self.assertIn("Deployment state", result.stdout)
+
+    def test_resume_status_collection_shows_progress_before_final_table(self) -> None:
+        result = self.run_wizard_functions(
+            'GUIDED_STEP_ID=(one two); GUIDED_STEP_LABEL=(One Two); '
+            'GUIDED_STEP_OPTIONAL=(0 0); GUIDED_STEP_MANUAL=(0 0); '
+            'guided_step_live_state() { [ "$1" = one ] && printf complete || printf pending; }; '
+            'guided_step_live_complete() { [ "$1" = one ]; }; '
+            'press_any() { :; }; guided_deployment() { :; }; resume_repair'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Checking deployment state", result.stdout)
+        self.assertIn("[ 1/ 2] One", result.stdout)
+        self.assertIn("[ 2/ 2] Two", result.stdout)
+        self.assertIn("complete", result.stdout)
+        self.assertIn("pending", result.stdout)
+        self.assertNotIn("checking...", result.stdout)
+        self.assertIn("Deployment state", result.stdout)
+
+
+    def test_resume_treats_manually_deployed_sast_pods_as_complete(self) -> None:
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; '
+            'GUIDED_STEP_ID=(sast dast); '
+            'GUIDED_STEP_LABEL=("ScanCentral SAST" "ScanCentral DAST"); '
+            'GUIDED_STEP_OPTIONAL=(0 0); GUIDED_STEP_MANUAL=(0 0); '
+            'cluster_reachable() { return 0; }; '
+            'kube() { case "$*" in '
+            '"-n fortify get pods --no-headers") printf "scancentral-sast-controller-0 1/1 Running 0 1m\nscancentral-sast-sensor-0 1/1 Running 0 1m\n" ;; '
+            '*) return 1 ;; '
+            'esac; }; '
+            'press_any() { :; }; guided_deployment() { printf "START=%s\n" "$1"; }; '
+            'resume_repair'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ScanCentral SAST", result.stdout)
+        self.assertIn("complete", result.stdout)
         self.assertIn("START=1", result.stdout)
 
     def test_guided_entry_routes_existing_lab_to_resume_repair(self) -> None:
@@ -584,8 +626,9 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("pod_log_action_menu()", WIZARD)
         self.assertIn('k8s_select_resource pod "Select a pod"', WIZARD)
         self.assertIn('k8s_select_resource pod "Select a pod" "" "$prefix"', WIZARD)
-        self.assertIn("--follow --tail=100", WIZARD)
-        self.assertIn("--previous --tail=200", WIZARD)
+        self.assertIn("--all-containers --tail=200", WIZARD)
+        self.assertIn("--all-containers --follow --tail=100", WIZARD)
+        self.assertIn("--all-containers --previous --tail=200", WIZARD)
 
         result = self.run_wizard_functions(
             'cluster_reachable() { return 0; }; '
@@ -646,13 +689,44 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("No pods matching 'mysql' have appeared yet", result.stdout)
         self.assertIn("Recent events", result.stdout)
 
-    def test_failure_screen_can_create_sanitized_diagnostics(self) -> None:
+    def test_guided_screens_split_live_diagnostics_from_bundle_export(self) -> None:
+        self.assertIn("guided_live_diagnostics()", WIZARD)
         self.assertIn("guided_diagnostics_bundle()", WIZARD)
-        self.assertIn("Create sanitized diagnostics bundle", WIZARD)
-        self.assertIn("d. Diagnostics", WIZARD)
+        self.assertIn("d. Live diagnostics", WIZARD)
+        self.assertIn("x. Export diagnostics bundle", WIZARD)
+        self.assertIn("control=live_diagnostics", WIZARD)
+        self.assertIn("control=diagnostics_bundle", WIZARD)
         self.assertIn("r. Retry operation", WIZARD)
         self.assertIn('GUIDED_WAIT_LAST_STATE="retry"', WIZARD)
 
+    def test_guided_step_menu_can_open_contextual_pod_logs(self) -> None:
+        self.assertIn('guided_step_has_pod_logs "$id" && echo "  p. Pod logs"', WIZARD)
+        self.assertIn('guided_step_pod_logs "$id" "${GUIDED_STEP_LABEL[$idx]}"', WIZARD)
+        self.assertIn('guided_live_diagnostics "$id" "${GUIDED_STEP_LABEL[$idx]}"', WIZARD)
+
+    def test_guided_live_diagnostics_prints_step_scoped_sections(self) -> None:
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; SSC=ssc.example.test; '
+            'cluster_reachable() { return 0; }; '
+            'guided_step_live_status() { printf pending; }; '
+            'guided_step_why_pending() { printf "waiting for endpoint"; }; '
+            'guided_print_pods() { printf "  ssc-webapp-0 0/1 Running\n"; }; '
+            'kube() { case "$*" in '
+            '"-n fortify get service ssc-service") return 0 ;; '
+            '"-n fortify get service ssc-service -o custom-columns=NAME:.metadata.name,TYPE:.spec.type,PORTS:.spec.ports[*].port") printf "NAME TYPE PORTS\nssc-service ClusterIP 443\n" ;; '
+            '"-n fortify get endpoints ssc-service") return 0 ;; '
+            '"-n fortify get endpoints ssc-service -o custom-columns=NAME:.metadata.name,ENDPOINTS:.subsets[*].addresses[*].ip,PORTS:.subsets[*].ports[*].port") printf "NAME ENDPOINTS PORTS\nssc-service 10.1.1.2 8443\n" ;; '
+            '"-n fortify get ingress -o custom-columns=NAME:.metadata.name,CLASS:.spec.ingressClassName,HOSTS:.spec.rules[*].host,ADDRESS:.status.loadBalancer.ingress[*].ip") printf "NAME CLASS HOSTS ADDRESS\nssc-ingress public ssc.example.test <none>\n" ;; '
+            '"-n fortify get events --sort-by=.lastTimestamp") printf "LAST SEEN TYPE REASON OBJECT MESSAGE\n1m Warning Failed pod/ssc-webapp-0 demo\n" ;; '
+            '*) return 1 ;; esac; }; '
+            'guided_live_diagnostics ssc SSC'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Live diagnostics for SSC", result.stdout)
+        self.assertIn("waiting for endpoint", result.stdout)
+        self.assertIn("ssc-webapp-0", result.stdout)
+        self.assertIn("ssc-service", result.stdout)
+        self.assertIn("ssc-ingress", result.stdout)
 
 
     def test_guided_preflight_contracts_are_mode_specific(self) -> None:

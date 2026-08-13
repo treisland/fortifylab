@@ -95,7 +95,8 @@ Each guided step has these lifecycle states:
 The live wait screen updates gradually while a step is Running or Verifying. It
 shows elapsed time, timeout, current probe name, workload readiness counts,
 recent relevant Kubernetes events when available, and safe controls for Retry,
-Help, Diagnostics, interactive takeover, contextual pod logs, and safe quit.
+Help, live diagnostics, diagnostics bundle export, interactive takeover,
+contextual pod logs, and safe quit.
 Status rendering remains read-only: it may inspect files and Kubernetes
 resources, but it must not install packages, apply manifests, create secrets,
 rotate TLS, or delete data.
@@ -113,7 +114,9 @@ Resume and failure handling are derived from live state, not from a stored
 wizard progress file. If a previous operation created resources that are still
 starting, Resume should identify the first incomplete required step and enter
 the same verification wait instead of blindly rerunning the command. If a step
-fails or times out, the wizard should name the failed probe, show sanitized diagnostics options, and offer Retry, Help, interactive control, or safe quit.
+fails or times out, the wizard should name the failed probe, show live
+diagnostics, offer contextual pod logs, keep sanitized diagnostics bundle export
+separate, and offer Retry, Help, interactive control, or safe quit.
 
 The shell implementation exposes stable hooks for this contract:
 
@@ -123,6 +126,7 @@ The shell implementation exposes stable hooks for this contract:
 - `guided_wait_for_step`
 - `guided_run_and_verify`
 - `guided_countdown`
+- `guided_live_diagnostics`
 - `guided_diagnostics_bundle`
 
 ## Uninstall versus data deletion

@@ -87,8 +87,9 @@ acknowledge it. From the main menu choose one deployment mode:
     mkcert, and MicroK8s access. When MicroK8s is installed but the current
     shell has not picked up the `microk8s` group yet, choose `g` from that
     screen to restart the wizard with group access, or run `newgrp microk8s`
-    before relaunching. Guided wait screens include Retry, Help, Diagnostics,
-    interactive takeover, and contextual pod logs where a component owns pods.
+    before relaunching. Guided step and wait screens include Retry, Help, live
+    diagnostics, diagnostics bundle export, interactive takeover, and
+    contextual pod logs where a component owns pods.
 
 === "Express"
 

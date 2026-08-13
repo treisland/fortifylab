@@ -80,7 +80,9 @@ class OperationsDocumentationTests(unittest.TestCase):
             "Auto-advance",
             "countdown",
             "Resume",
-            "sanitized diagnostics options",
+            "live diagnostics",
+            "diagnostics bundle export",
+            "contextual pod logs",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.lifecycle)
