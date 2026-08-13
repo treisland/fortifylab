@@ -10,6 +10,10 @@ fi
 source "$FORTIFY_HOME_K8S/.env"
 # shellcheck source=../../../scripts/lib/dependency-health.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+# shellcheck source=../../../scripts/lib/k8s-hostnames.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
+
+fortify_require_k8s_hostname SCDAST "$SCDAST"
 
 # DAST schema setup and service startup depend on all three services.
 health_postgresql_ready

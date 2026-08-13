@@ -9,6 +9,10 @@ if [ -z "$FORTIFY_HOME_K8S" ]; then
 fi
 
 source "$FORTIFY_HOME_K8S/.env"
+# shellcheck source=../../scripts/lib/k8s-hostnames.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
+
+fortify_require_k8s_hostname LIM "$LIM"
 
 #get the current directory where this script resides
 CURRENT_DIR="$( dirname -- "${BASH_SOURCE[0]}" )"

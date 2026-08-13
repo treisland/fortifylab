@@ -11,6 +11,10 @@ fi
 source "$FORTIFY_HOME_K8S/.env"
 # shellcheck source=../../scripts/lib/dependency-health.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+# shellcheck source=../../scripts/lib/k8s-hostnames.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
+
+fortify_require_k8s_hostname SCSAST "$SCSAST"
 
 health_ssc_ready
 

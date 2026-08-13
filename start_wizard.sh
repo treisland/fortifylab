@@ -1475,7 +1475,7 @@ env_guided_section_editor() {
 }
 
 env_valid_domain() {
-    [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]]
+    [[ "$1" =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)+$ ]]
 }
 
 domain_url_updates() {
@@ -1500,7 +1500,8 @@ domain_url_assistant() {
     printf '\nCurrent domain: %s\n\n' "${DOMAIN:-<unset>}"
     ask domain "New base domain, for example fortifydemo.com:"
     [ -n "$domain" ] || return 0
-    env_valid_domain "$domain" || { error "Use a DNS-style domain such as fortifydemo.com or lab.example.internal."; press_any; return 1; }
+    domain=${domain,,}
+    env_valid_domain "$domain" || { error "Use a lowercase DNS-style domain such as fortifydemo.com or lab.example.internal."; press_any; return 1; }
     while IFS= read -r line; do updates+=("$line"); done < <(domain_url_updates "$domain")
     section "Pending domain and URL changes"
     env_preview_changes "${updates[@]}"

@@ -237,6 +237,19 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn('export SSC="ssc.$DOMAIN"', result.stdout)
         self.assertIn('export SSC_URL="https://$SSC"', result.stdout)
 
+    def test_domain_assistant_normalizes_domains_to_lowercase_ingress_hosts(self) -> None:
+        self.assertIn("domain=${domain,,}", WIZARD)
+        self.assertIn("lowercase DNS-style domain", WIZARD)
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=\"old.test\"" "export SSC=\"ssc.$DOMAIN\"" "export SSC_URL=\"https://$SSC\"" >"$ENV_FILE"; '
+            'ask() { local _v="$1"; shift; printf -v "$_v" "%s" "FortifyDemo.COM"; }; '
+            'confirm() { return 0; }; press_any() { :; }; '
+            'domain_url_assistant >/dev/null; source "$ENV_FILE"; printf "%s|%s|%s\n" "$DOMAIN" "$SSC" "$SSC_URL"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fortifydemo.com|ssc.fortifydemo.com|https://ssc.fortifydemo.com", result.stdout)
+
     def test_secret_values_are_redacted_in_preview(self) -> None:
         result = self.run_wizard_functions(
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '

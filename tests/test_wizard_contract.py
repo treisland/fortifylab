@@ -234,6 +234,42 @@ exit 1
         self.assertIn("newgrp microk8s", installer)
         self.assertIn("sudo microk8s status --wait-ready", installer)
 
+    def test_app_start_scripts_validate_ingress_hosts_before_deploying(self) -> None:
+        helper = ROOT / "scripts" / "lib" / "k8s-hostnames.sh"
+        helper_text = helper.read_text(encoding="utf-8")
+        self.assertIn("fortify_require_k8s_hostname", helper_text)
+        self.assertIn("lowercase DNS name", helper_text)
+
+        command = "source \"$1\"; fortify_require_k8s_hostname SSC LIM"
+        result = subprocess.run(
+            ["bash", "-c", command, "hostname-test", str(helper)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid SSC for Kubernetes ingress: LIM", result.stderr)
+
+        valid = subprocess.run(
+            ["bash", "-c", "source \"$1\"; fortify_require_k8s_hostname SSC ssc.fortifydemo.com", "hostname-test", str(helper)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+
+        for script in (
+            ROOT / "apps" / "ssc" / "start.sh",
+            ROOT / "apps" / "lim" / "start.sh",
+            ROOT / "apps" / "scsast" / "start.sh",
+            ROOT / "apps" / "scdast" / "core" / "start.sh",
+        ):
+            text = script.read_text(encoding="utf-8")
+            self.assertIn("scripts/lib/k8s-hostnames.sh", text)
+            self.assertLess(text.index("fortify_require_k8s_hostname"), text.index("microk8s helm"))
+
 
 if __name__ == "__main__":
     unittest.main()
