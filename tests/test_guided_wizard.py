@@ -282,6 +282,21 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("SSC_URL is set to placeholder-like value LIM_URL", result.stdout)
         self.assertIn("Repair derived host and URL values from DOMAIN", result.stdout)
 
+    def test_config_diagnostics_reports_raw_effective_expected_without_secrets(self) -> None:
+        self.assertIn("config-diagnostics", WIZARD)
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; '
+            'printf "%s\n" "export DOMAIN=\"fortifydemo.proxmox\"" "export SSC=\"LIM\"" "export SSC_URL=\"LIM_URL\"" "export DEFAULT_PASS=\"do-not-print\"" >"$ENV_FILE"; '
+            'source "$ENV_FILE"; env_diagnostics'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("raw=LIM", result.stdout)
+        self.assertIn("effective=LIM", result.stdout)
+        self.assertEqual(result.stdout.count("SSC_URL is set to placeholder-like value LIM_URL"), 1)
+        self.assertIn("expected=ssc.fortifydemo.proxmox", result.stdout)
+        self.assertIn("SSC_URL is set to placeholder-like value LIM_URL", result.stdout)
+        self.assertNotIn("do-not-print", result.stdout)
+
     def test_repair_domain_urls_rewrites_bad_derived_values_with_backup(self) -> None:
         result = self.run_wizard_functions(
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '

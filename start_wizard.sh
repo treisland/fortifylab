@@ -1509,46 +1509,82 @@ env_url_host() {
     printf '%s\n' "$url" | sed -n -E 's#^https://([^/:]+)([:/].*)?$#\1#p'
 }
 
+env_expected_host_for_key() {
+    local key="$1" domain="${DOMAIN:-fortifydemo.com}"
+    case "$key" in
+        SSC) printf 'ssc.%s\n' "$domain" ;;
+        LIM) printf 'lim.%s\n' "$domain" ;;
+        SCDAST) printf 'dast.%s\n' "$domain" ;;
+        SCSAST) printf 'sast.%s\n' "$domain" ;;
+        *) return 1 ;;
+    esac
+}
+
+env_expected_url_for_key() {
+    local key="$1" domain="${DOMAIN:-fortifydemo.com}"
+    case "$key" in
+        SSC_URL) printf 'https://ssc.%s\n' "$domain" ;;
+        LIM_URL) printf 'https://lim.%s\n' "$domain" ;;
+        LIM_API_URL) printf 'https://lim.%s/LIM.API\n' "$domain" ;;
+        SCDAST_URL) printf 'https://dast.%s\n' "$domain" ;;
+        SCSAST_URL) printf 'https://sast.%s\n' "$domain" ;;
+        SCSAST_CTRL_URL) printf 'https://sast.%s/scancentral-ctrl/\n' "$domain" ;;
+        *) return 1 ;;
+    esac
+}
+
+env_placeholder_like() {
+    [[ "${1:-}" =~ ^[A-Z][A-Z0-9_]*$ ]]
+}
+
 env_config_issue_lines() {
-    local issue=0 key value url_key host_key host url_host
+    local issue=0 key value url_key host_key host url_host expected
     if [ -z "${DOMAIN:-}" ] || ! env_valid_domain "${DOMAIN:-}"; then
         printf 'DOMAIN must be a lowercase DNS-style domain such as fortifydemo.com.\n'
         issue=1
     fi
     for key in SSC LIM SCDAST SCSAST; do
         value="${!key:-}"
+        expected=$(env_expected_host_for_key "$key" || true)
         if [ -z "$value" ]; then
-            printf '%s is unset.\n' "$key"
+            printf '%s is unset; expected %s.\n' "$key" "$expected"
             issue=1
-        elif [[ "$value" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
-            printf '%s is set to placeholder-like value %s; expected a hostname such as %s.%s.\n' "$key" "$value" "${key,,}" "${DOMAIN:-fortifydemo.com}"
+        elif env_placeholder_like "$value"; then
+            printf '%s is set to placeholder-like value %s; expected %s.\n' "$key" "$value" "$expected"
             issue=1
         elif ! env_valid_domain "$value"; then
-            printf '%s must be a lowercase DNS hostname with at least one dot; current value is %s.\n' "$key" "$value"
+            printf '%s must be a lowercase DNS hostname with at least one dot; current value is %s; expected %s.\n' "$key" "$value" "$expected"
+            issue=1
+        elif [ -n "$expected" ] && [ "$value" != "$expected" ]; then
+            printf '%s is %s; expected derived value %s for DOMAIN=%s.\n' "$key" "$value" "$expected" "${DOMAIN:-<unset>}"
             issue=1
         fi
     done
-    for pair in SSC_URL:SSC LIM_URL:LIM SCDAST_URL:SCDAST SCSAST_URL:SCSAST SCSAST_CTRL_URL:SCSAST; do
+    for pair in SSC_URL:SSC LIM_URL:LIM LIM_API_URL:LIM SCDAST_URL:SCDAST SCSAST_URL:SCSAST SCSAST_CTRL_URL:SCSAST; do
         url_key="${pair%%:*}"
         host_key="${pair#*:}"
         value="${!url_key:-}"
         host="${!host_key:-}"
+        expected=$(env_expected_url_for_key "$url_key" || true)
         if [ -z "$value" ]; then
-            printf '%s is unset.\n' "$url_key"
+            printf '%s is unset; expected %s.\n' "$url_key" "$expected"
             issue=1
             continue
         fi
-        if [[ "$value" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
-            printf '%s is set to placeholder-like value %s; expected https://%s.\n' "$url_key" "$value" "${host:-<host>}"
+        if env_placeholder_like "$value"; then
+            printf '%s is set to placeholder-like value %s; expected %s.\n' "$url_key" "$value" "$expected"
             issue=1
             continue
         fi
         url_host=$(env_url_host "$value")
         if [ -z "$url_host" ]; then
-            printf '%s must be an https URL; current value is %s.\n' "$url_key" "$value"
+            printf '%s must be an https URL; current value is %s; expected %s.\n' "$url_key" "$value" "$expected"
             issue=1
-        elif [ -n "$host" ] && [ "$url_host" != "$host" ]; then
-            printf '%s host %s does not match %s=%s.\n' "$url_key" "$url_host" "$host_key" "$host"
+        elif [ -n "$host" ] && ! env_placeholder_like "$host" && [ "$url_host" != "$host" ]; then
+            printf '%s host %s does not match %s=%s; expected %s.\n' "$url_key" "$url_host" "$host_key" "$host" "$expected"
+            issue=1
+        elif [ -n "$expected" ] && [ "$value" != "$expected" ]; then
+            printf '%s is %s; expected derived value %s for DOMAIN=%s.\n' "$url_key" "$value" "$expected" "${DOMAIN:-<unset>}"
             issue=1
         fi
     done
@@ -1566,6 +1602,10 @@ deployment_config_guard() {
     error "Configuration has invalid host or URL values; deployment is blocked before Kubernetes changes."
     printf '%s\n' "$issues" | awk '{ printf "  - %s\n", $0 }'
     printf '%s\n' 'Use Configuration editor -> Repair derived host and URL values from DOMAIN, or edit .env manually, then retry.'
+    if [ -t 0 ] && confirm "Repair derived host and URL values from DOMAIN now?"; then
+        env_repair_domain_urls --yes
+        printf '%s\n' 'Repair applied. Retry the start operation.'
+    fi
     return 1
 }
 
@@ -1578,7 +1618,7 @@ app_start_config_guard() {
 }
 
 env_repair_domain_urls() {
-    local domain updates=()
+    local assume_yes="${1:-}" domain updates=()
     domain="${DOMAIN:-fortifydemo.com}"
     domain="${domain,,}"
     env_valid_domain "$domain" || { error "Cannot repair from invalid DOMAIN=${DOMAIN:-<unset>}. Set DOMAIN to a lowercase DNS-style domain first."; return 1; }
@@ -1586,11 +1626,33 @@ env_repair_domain_urls() {
     section "Repair derived host and URL values"
     env_preview_changes "${updates[@]}"
     echo
-    if confirm "Apply these repaired values with a backup first?"; then
+    if [ "$assume_yes" = "--yes" ] || confirm "Apply these repaired values with a backup first?"; then
         env_apply_updates repair-domain-url "${updates[@]}"
     else
         note "Repair cancelled."
     fi
+}
+
+env_diagnostics() {
+    local key raw effective expected issues
+    title "Configuration diagnostics"
+    printf '\n.env file: %s\n' "$ENV_FILE"
+    printf 'DOMAIN:   %s\n' "${DOMAIN:-<unset>}"
+    section "Host and URL values"
+    for key in SSC LIM SCDAST SCSAST SSC_URL LIM_URL LIM_API_URL SCDAST_URL SCSAST_URL SCSAST_CTRL_URL; do
+        raw=$(sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?$key=(.*)$/\2/p" "$ENV_FILE" 2>/dev/null | tail -n 1)
+        effective="${!key:-<unset>}"
+        expected=$(env_expected_host_for_key "$key" 2>/dev/null || env_expected_url_for_key "$key" 2>/dev/null || true)
+        printf '  %-16s raw=%-36s effective=%-36s expected=%s\n' "$key" "${raw:-<missing>}" "$effective" "${expected:-<none>}"
+    done
+    section "Issues"
+    issues=$(env_config_issue_lines || true)
+    if [ -z "$issues" ]; then
+        printf '  No host/URL configuration drift detected.\n'
+    else
+        printf '%s\n' "$issues" | awk '{ printf "  - %s\n", $0 }'
+    fi
+    return 0
 }
 
 domain_url_updates() {
@@ -1731,11 +1793,12 @@ edit_env() {
   3. Image/chart versions
   4. Credentials and passwords
   5. Domain and URL assistant
-  6. Repair derived host and URL values from DOMAIN
-  7. mkcert root CA export and trust help
-  8. Roll back last wizard .env change
-  9. Restore selected .env backup
-  10. Open raw .env in editor (backup first)
+  6. Configuration diagnostics
+  7. Repair derived host and URL values from DOMAIN
+  8. mkcert root CA export and trust help
+  9. Roll back last wizard .env change
+  10. Restore selected .env backup
+  11. Open raw .env in editor (backup first)
 
   r. Return
 EOF
@@ -1747,11 +1810,12 @@ EOF
             3) env_guided_section_editor "Image/chart versions" versions ;;
             4) env_guided_section_editor "Credentials and passwords" credentials ;;
             5) domain_url_assistant ;;
-            6) env_repair_domain_urls; press_any ;;
-            7) mkcert_root_ca_menu ;;
-            8) env_rollback_last; press_any ;;
-            9) env_restore_selected; press_any ;;
-            10) raw_edit_env; press_any ;;
+            6) env_diagnostics; press_any ;;
+            7) env_repair_domain_urls; press_any ;;
+            8) mkcert_root_ca_menu ;;
+            9) env_rollback_last; press_any ;;
+            10) env_restore_selected; press_any ;;
+            11) raw_edit_env; press_any ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
         esac
@@ -2767,6 +2831,11 @@ wizard_doctor_load_env() {
     FORTIFY_OPERATION_NAMESPACE="$NAMESPACE"
 }
 
+wizard_config_diagnostics() {
+    wizard_doctor_load_env
+    env_diagnostics
+}
+
 wizard_doctor() {
     local id incomplete=0 unavailable=0
     wizard_doctor_load_env
@@ -3324,6 +3393,8 @@ Usage:
   ./start_wizard.sh                  Launch the interactive menu.
   ./start_wizard.sh --accept-lab-use Explicitly acknowledge lab-only use for automation.
   ./start_wizard.sh doctor           Run a read-only health summary and exit.
+  ./start_wizard.sh config-diagnostics
+                                      Inspect .env host/URL wiring without printing secrets.
   ./start_wizard.sh -h | --help      Show this message.
 
 Environment overrides:
@@ -3343,7 +3414,7 @@ EOF
 if [ -z "${WIZARD_NOMAIN:-}" ]; then
     case "${1:-}" in
         -h|--help) usage; exit 0 ;;
-        doctor|''|--accept-lab-use) ;;
+        doctor|config-diagnostics|''|--accept-lab-use) ;;
         *) error "Unsupported argument: ${1}"; usage >&2; exit 2 ;;
     esac
     if [ "$#" -gt 1 ]; then
@@ -3353,6 +3424,10 @@ if [ -z "${WIZARD_NOMAIN:-}" ]; then
     fi
     if [ "${1:-}" = doctor ]; then
         wizard_doctor
+        exit $?
+    fi
+    if [ "${1:-}" = config-diagnostics ]; then
+        wizard_config_diagnostics
         exit $?
     fi
     fortify_lab_detect_accept_flag "$@"
