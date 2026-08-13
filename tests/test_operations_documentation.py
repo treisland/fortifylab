@@ -33,6 +33,19 @@ class OperationsDocumentationTests(unittest.TestCase):
         self.assertIn("Readiness is not application health", self.troubleshooting)
         self.assertIn("application-health", self.lifecycle)
 
+    def test_networking_docs_cover_traefik_tls_contract(self) -> None:
+        networking = (OPERATIONS / "networking-and-tls.md").read_text(encoding="utf-8")
+        for phrase in (
+            "Traefik-backed",
+            "fortify/tls",
+            "TRAEFIK DEFAULT CERT",
+            "service annotations",
+            "ServersTransport",
+            "default certificate",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, networking + self.troubleshooting)
+
     def test_lifecycle_operations_and_dependency_order_are_explicit(self) -> None:
         for operation in ("Start / Upgrade", "Stop", "Restart", "Repair / retry", "Uninstall", "Delete data"):
             self.assertIn(operation, self.lifecycle)

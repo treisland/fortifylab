@@ -146,21 +146,25 @@ Follow one direction through the request path:
 
 1. Client DNS or hosts entry resolves the configured hostname to the lab node.
 2. The node is reachable on the intended port.
-3. MicroK8s ingress is Ready and contains the expected host rule. In
-   MicroK8s the `kubectl get ingress` `ADDRESS` column can be empty even when
-   the nginx ingress controller is serving traffic; verify the host rule,
-   ingress controller, and curl status instead of relying on that column alone.
+3. MicroK8s ingress is Ready and contains the expected host rule. In current
+   MicroK8s, the ingress addon is Traefik-backed and the `kubectl get ingress`
+   `ADDRESS` column can be empty even when traffic is served; verify the host
+   rule, ingress controller, service annotations, endpoints, and curl status
+   instead of relying on that column alone.
 4. The service has application-ready endpoints.
 5. The certificate includes the requested hostname.
 6. The dedicated lab client trusts the lab-local CA.
 
-A browser certificate viewer that says `TRAEFIK DEFAULT CERT`, followed by a plain
-`404 page not found` after accepting the warning, usually means the client is
-reaching a Traefik or reverse-proxy default route instead of the MicroK8s lab
-node ingress. Point the client hosts/DNS entries at the MicroK8s lab node IP,
-or explicitly configure the external proxy with matching SNI, host rules, and
-the lab certificate. Importing `rootCA.pem` cannot fix traffic sent to the wrong
-endpoint.
+A browser certificate viewer that says `TRAEFIK DEFAULT CERT` means Traefik is
+serving its fallback certificate or the client is reaching a different proxy.
+Rerun the Secrets step, or run
+`microk8s enable ingress --default-ssl-certificate fortify/tls`, then verify
+with `openssl s_client -servername`. If accepting the warning shows a plain
+`404 page not found`, the host rule still is not matching or the client is
+reaching a reverse-proxy default route. Point the client hosts/DNS entries at
+the MicroK8s lab node IP, or explicitly configure the external proxy with
+matching SNI, host rules, and the lab certificate. Importing `rootCA.pem` cannot
+fix traffic sent to the wrong endpoint.
 
 A name mismatch is not fixed by importing the CA, and an untrusted issuer is
 not fixed by changing DNS. Never disable certificate verification. See

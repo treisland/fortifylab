@@ -92,10 +92,11 @@ Each guided step has these lifecycle states:
 | Failed | The operation or verification timed out and needs operator action |
 | Skipped | An optional step was deliberately deferred |
 
-The live wait screen should update gradually while a step is Running or
-Verifying. It should show elapsed time, timeout, current probe name, workload readiness counts, recent relevant Kubernetes events when available, and the
-safe controls for Retry, Help, Diagnostics, interactive takeover, and safe
-quit. Status rendering remains read-only: it may inspect files and Kubernetes
+The live wait screen updates gradually while a step is Running or Verifying. It
+shows elapsed time, timeout, current probe name, workload readiness counts,
+recent relevant Kubernetes events when available, and safe controls for Retry,
+Help, Diagnostics, interactive takeover, contextual pod logs, and safe quit.
+Status rendering remains read-only: it may inspect files and Kubernetes
 resources, but it must not install packages, apply manifests, create secrets,
 rotate TLS, or delete data.
 
