@@ -923,12 +923,14 @@ class GuidedWizardTests(unittest.TestCase):
     def test_lab_lifecycle_controls_use_existing_component_scripts(self) -> None:
         self.assertIn("lab_lifecycle_menu()", WIZARD)
         self.assertIn("APP_GUIDED_STEP=", WIZARD)
-        self.assertIn('run_app_scripts "${APP_STOP[$idx]}"', WIZARD)
-        self.assertIn('run_app_scripts "${APP_DESTROY[$idx]}"', WIZARD)
-        self.assertIn('guided_run_and_verify "${APP_GUIDED_STEP[$idx]}"', WIZARD)
+        self.assertIn("lab_lifecycle_app_index_selected()", WIZARD)
+        self.assertIn("lab_lifecycle_selected_step_indexes()", WIZARD)
+        self.assertIn("Start selected profile workloads", WIZARD)
+        self.assertIn("Start all lab deployments", WIZARD)
+        self.assertIn("DESTROY SELECTED PROFILE", WIZARD)
         self.assertIn("DESTROY FORTIFY LAB", WIZARD)
-        self.assertIn("action=lab_lifecycle_start operation=shutdown", WIZARD)
-        self.assertIn("action=lab_lifecycle_start operation=destroy", WIZARD)
+        self.assertIn("action=lab_lifecycle_start operation=shutdown scope=selected", WIZARD)
+        self.assertIn("action=lab_lifecycle_start operation=destroy scope=$scope", WIZARD)
 
     def test_lab_shutdown_stops_workloads_in_reverse_dependency_order(self) -> None:
         result = self.run_wizard_functions(
@@ -941,7 +943,8 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertEqual(
             runs,
             [
-                "apps/scdast/core/stop.sh apps/scdast/scanner/stop.sh",
+                "apps/scdast/scanner/stop.sh",
+                "apps/scdast/core/stop.sh",
                 "apps/scsast/stop.sh",
                 "apps/lim/stop.sh",
                 "apps/ssc/stop.sh",
@@ -964,10 +967,12 @@ class GuidedWizardTests(unittest.TestCase):
             [
                 "VERIFY:mysql:MySQL:lifecycle",
                 "VERIFY:postgresql:PostgreSQL:lifecycle",
-                "VERIFY:ssc:SSC:lifecycle",
+                "VERIFY:ssc:Software Security Center:lifecycle",
                 "VERIFY:lim:LIM:lifecycle",
-                "VERIFY:sast:ScanCentral SAST:lifecycle",
-                "VERIFY:dast:ScanCentral DAST:lifecycle",
+                "VERIFY:sast_controller:ScanCentral SAST Controller:lifecycle",
+                "VERIFY:sast_sensor:ScanCentral SAST Sensor:lifecycle",
+                "VERIFY:dast_core:ScanCentral DAST Core:lifecycle",
+                "VERIFY:dast_scanner:ScanCentral DAST Scanner:lifecycle",
             ],
         )
         self.assertIn("MODE=resume", result.stdout)
@@ -977,11 +982,11 @@ class GuidedWizardTests(unittest.TestCase):
             'fortify_lab_show_action_warning() { :; }; '
             'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
             'wizard_log_event() { :; }; '
-            'read _lab_ack; lab_destroy_deployments; printf "RC=%s\n" "$?"',
+            'read _lab_ack; lab_destroy_deployments all; printf "RC=%s\n" "$?"',
             "not today\n",
         )
         self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
-        self.assertIn("Full teardown cancelled", cancelled.stdout)
+        self.assertIn("Teardown cancelled", cancelled.stdout)
         self.assertNotIn("RUN:", cancelled.stdout)
         self.assertIn("RC=1", cancelled.stdout)
 
@@ -989,7 +994,7 @@ class GuidedWizardTests(unittest.TestCase):
             'fortify_lab_show_action_warning() { :; }; '
             'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
             'wizard_log_event() { :; }; '
-            'read _lab_ack; lab_destroy_deployments',
+            'read _lab_ack; lab_destroy_deployments all',
             "DESTROY FORTIFY LAB\n",
         )
         self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
@@ -1006,6 +1011,66 @@ class GuidedWizardTests(unittest.TestCase):
             ],
         )
         self.assertIn("Full lab teardown preview", confirmed.stdout)
+
+    def test_lifecycle_start_uses_selected_profile_steps(self) -> None:
+        result = self.run_wizard_functions(
+            'FORTIFY_DEPLOYMENT_PROFILE=sast_full; guided_apply_deployment_profile sast_full; '
+            'guided_run_and_verify() { printf "VERIFY:%s:%s\n" "$1" "$2"; }; '
+            'wizard_log_event() { :; }; '
+            'lab_start_deployments selected'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        verifies = [line for line in result.stdout.splitlines() if line.startswith("VERIFY:")]
+        self.assertEqual(
+            verifies,
+            [
+                "VERIFY:mysql:MySQL",
+                "VERIFY:ssc:Software Security Center",
+                "VERIFY:sast_controller:ScanCentral SAST Controller",
+                "VERIFY:sast_sensor:ScanCentral SAST Sensor",
+            ],
+        )
+        self.assertNotIn("VERIFY:postgresql", result.stdout)
+        self.assertNotIn("VERIFY:lim", result.stdout)
+        self.assertNotIn("VERIFY:dast", result.stdout)
+
+    def test_lifecycle_shutdown_uses_selected_profile_scripts(self) -> None:
+        result = self.run_wizard_functions(
+            'FORTIFY_DEPLOYMENT_PROFILE=sast_full; guided_apply_deployment_profile sast_full; '
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
+            'wizard_log_event() { :; }; '
+            'lab_shutdown_deployments selected'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runs = [line.removeprefix("RUN:") for line in result.stdout.splitlines() if line.startswith("RUN:")]
+        self.assertEqual(
+            runs,
+            [
+                "apps/scsast/stop.sh",
+                "apps/ssc/stop.sh",
+                "apps/mysql/stop.sh",
+            ],
+        )
+        self.assertNotIn("apps/postgresql/stop.sh", result.stdout)
+        self.assertNotIn("apps/lim/stop.sh", result.stdout)
+        self.assertNotIn("apps/scdast", result.stdout)
+
+    def test_cluster_status_is_profile_aware_for_limited_deployments(self) -> None:
+        result = self.run_wizard_functions(
+            'FORTIFY_DEPLOYMENT_PROFILE=sast_full; guided_apply_deployment_profile sast_full; '
+            'NAMESPACE=fortify; KUBECTL=kube; cluster_reachable() { return 0; }; '
+            'kube() { printf "%s\n" '
+            '"mysql-0 1/1 Running 0 1m" '
+            '"ssc-webapp-0 1/1 Running 0 1m" '
+            '"scancentral-sast-controller-0 1/1 Running 0 1m" '
+            '"postgresql-0 0/1 Running 0 1m" '
+            '"lim-0 0/1 Running 0 1m" '
+            '"sdast-core-0 0/1 Pending 0 1m"; }; '
+            'status_cluster'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Cluster: selected profile pods ready (3/3 running)", result.stdout)
+        self.assertNotIn("3/6", result.stdout)
 
 
     def test_destroy_scripts_treat_missing_helm_releases_as_already_absent(self) -> None:
@@ -1102,7 +1167,7 @@ class GuidedWizardTests(unittest.TestCase):
             'fortify_lab_show_action_warning() { :; }; '
             'run_app_scripts() { printf "RUN:%s\n" "$1"; return 0; }; '
             'wizard_log_event() { :; }; '
-            'read _lab_ack; lab_destroy_deployments; printf "RC=%s\n" "$?"',
+            'read _lab_ack; lab_destroy_deployments all; printf "RC=%s\n" "$?"',
             "DESTROY FORTIFY LAB\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
