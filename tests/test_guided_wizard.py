@@ -954,6 +954,67 @@ class GuidedWizardTests(unittest.TestCase):
         )
         self.assertIn("Full lab teardown preview", confirmed.stdout)
 
+
+    def test_destroy_scripts_treat_missing_helm_releases_as_already_absent(self) -> None:
+        helper = (ROOT / "scripts/lib/k8s-destroy.sh").read_text(encoding="utf-8")
+        self.assertIn("fortify_helm_delete_if_exists()", helper)
+        self.assertIn('status "$release"', helper)
+        self.assertIn('already absent; skipping Helm delete', helper)
+
+        for script in (
+            "apps/mysql/destroy.sh",
+            "apps/postgresql/destroy.sh",
+            "apps/ssc/destroy.sh",
+            "apps/lim/destroy.sh",
+            "apps/scsast/destroy.sh",
+            "apps/scdast/core/destroy.sh",
+            "apps/scdast/scanner/destroy.sh",
+        ):
+            with self.subTest(script=script):
+                body = (ROOT / script).read_text(encoding="utf-8")
+                self.assertIn("scripts/lib/k8s-destroy.sh", body)
+                self.assertIn("fortify_helm_delete_if_exists", body)
+
+    def test_helm_delete_helper_treats_missing_release_as_success(self) -> None:
+        helper = ROOT / "scripts/lib/k8s-destroy.sh"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; '
+                'microk8s() { case "$*" in *" status "*) return 1 ;; esac; printf "DELETE:%s\n" "$*"; }; '
+                'fortify_helm_delete_if_exists fortify sdast-scanner',
+                "destroy-helper-test",
+                str(helper),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('release "sdast-scanner" already absent', result.stdout)
+        self.assertNotIn("DELETE:", result.stdout)
+
+    def test_full_lab_destroy_runs_all_destroy_scripts_in_reverse_order(self) -> None:
+        result = self.run_wizard_functions(
+            'fortify_lab_show_action_warning() { :; }; '
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; return 0; }; '
+            'wizard_log_event() { :; }; '
+            'read _lab_ack; lab_destroy_deployments; printf "RC=%s\n" "$?"',
+            "DESTROY FORTIFY LAB\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runs = [line.removeprefix("RUN:") for line in result.stdout.splitlines() if line.startswith("RUN:")]
+        self.assertEqual(runs, [
+            "apps/scdast/core/destroy.sh apps/scdast/scanner/destroy.sh",
+            "apps/scsast/destroy.sh",
+            "apps/lim/destroy.sh",
+            "apps/ssc/destroy.sh",
+            "apps/postgresql/destroy.sh",
+            "apps/mysql/destroy.sh",
+        ])
+        self.assertIn("RC=0", result.stdout)
+
     def test_live_plan_uses_guided_registry_and_labels_impact(self) -> None:
         self.assertIn("wizard_deployment_plan()", WIZARD)
         self.assertIn('for idx in "${!GUIDED_STEP_ID[@]}"', WIZARD)
