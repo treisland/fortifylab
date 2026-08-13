@@ -6,8 +6,40 @@
 # directory.
 
 FORTIFY_OPERATION_TIMEOUT="${FORTIFY_OPERATION_TIMEOUT:-10}"
+FORTIFY_OPERATION_HTTP_TIMEOUT="${FORTIFY_OPERATION_HTTP_TIMEOUT:-3}"
 FORTIFY_OPERATION_NAMESPACE="${NAMESPACE:-fortify}"
 FORTIFY_OPERATION_KUBECTL="${FORTIFY_OPERATION_KUBECTL:-microk8s kubectl}"
+FORTIFY_RECOMMENDED_MEMORY_GIB="${FORTIFY_RECOMMENDED_MEMORY_GIB:-16}"
+FORTIFY_RECOMMENDED_DISK_GIB="${FORTIFY_RECOMMENDED_DISK_GIB:-50}"
+
+operational_capacity_memory_gib() {
+    awk '/MemTotal:/ {print int($2/1024/1024)}' /proc/meminfo 2>/dev/null
+}
+
+operational_capacity_disk_gib() {
+    df -Pk "${FORTIFY_HOME_K8S:-.}" 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}'
+}
+
+operational_capacity_is_integer() {
+    [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+operational_capacity_warnings() {
+    local memory_gib disk_gib
+    memory_gib=$(operational_capacity_memory_gib)
+    disk_gib=$(operational_capacity_disk_gib)
+    if ! operational_capacity_is_integer "$memory_gib"; then
+        printf '%s\n' "memory unknown; recommended minimum is ${FORTIFY_RECOMMENDED_MEMORY_GIB} GiB"
+    elif [ "$memory_gib" -lt "$FORTIFY_RECOMMENDED_MEMORY_GIB" ]; then
+        printf '%s\n' "memory ${memory_gib} GiB is below recommended ${FORTIFY_RECOMMENDED_MEMORY_GIB} GiB"
+    fi
+    if ! operational_capacity_is_integer "$disk_gib"; then
+        printf '%s\n' "free disk unknown; recommended minimum is ${FORTIFY_RECOMMENDED_DISK_GIB} GiB"
+    elif [ "$disk_gib" -lt "$FORTIFY_RECOMMENDED_DISK_GIB" ]; then
+        printf '%s\n' "free disk ${disk_gib} GiB is below recommended ${FORTIFY_RECOMMENDED_DISK_GIB} GiB"
+    fi
+}
+
 
 operational_render_guide() {
     local topic="${1:-}" file
@@ -47,6 +79,10 @@ operational_cluster_available() {
     _operational_kubectl version --request-timeout="${FORTIFY_OPERATION_TIMEOUT}s" >/dev/null 2>&1
 }
 
+operational_node_ip() {
+    hostname -I 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i !~ /^127\./) { print $i; exit } }'
+}
+
 operational_print_urls() {
     local domain="${DOMAIN:-fortifydemo.com}"
     printf '%s\n' \
@@ -59,14 +95,250 @@ operational_print_urls() {
         'TLS is issued by the lab-local CA. Import only that CA on dedicated lab clients.'
 }
 
+_operational_lab_hosts() {
+    local domain="${DOMAIN:-fortifydemo.com}"
+    printf '%s\n' \
+        "SSC|${SSC:-ssc.${domain}}|${SSC_URL:-https://ssc.${domain}}" \
+        "SAST|${SAST:-sast.${domain}}|${SAST_URL:-https://sast.${domain}}" \
+        "DAST|${DAST:-dast.${domain}}|${SCDAST_URL:-https://dast.${domain}}" \
+        "LIM|${LIM:-lim.${domain}}|${LIM_URL:-https://lim.${domain}}" \
+        "Dashboard|${DASHBOARD:-dashboard.${domain}}|${DASHBOARD_URL:-https://dashboard.${domain}}"
+}
+
+operational_doctor_hosts_resolution() {
+    local label host url resolved state node_ip
+    node_ip=$(operational_node_ip)
+    printf '%s\n' 'Hosts resolution (first IPv4 answer only):'
+    [ -n "$node_ip" ] && printf '  expected lab node IP: %s\n' "$node_ip"
+    while IFS='|' read -r label host url; do
+        resolved=$(getent ahostsv4 "$host" 2>/dev/null | awk 'NR==1 {print $1}')
+        if [ -z "$resolved" ]; then
+            state=missing
+            resolved="-"
+        elif printf '%s\n' "$resolved" | grep -Eq '^(127\.|0\.0\.0\.0$)'; then
+            state=loopback
+        elif [ -n "$node_ip" ] && [ "$resolved" != "$node_ip" ]; then
+            state=wrong-ip
+        else
+            state=resolved
+        fi
+        printf '  %-10s %-34s %-9s %s\n' "$label" "$host" "$state" "$resolved"
+    done <<EOF
+$(_operational_lab_hosts)
+EOF
+    printf '%s\n' '  If a browser shows TRAEFIK DEFAULT CERT or a plain 404, client DNS/hosts is usually pointing at a Traefik or reverse-proxy endpoint instead of the MicroK8s lab node IP.'
+}
+
+operational_doctor_coredns_drift() {
+    local corefile ready desired observed_hosts=0 expected_hosts=0 label host url state
+    printf '%s\n' 'CoreDNS hosts override:'
+    if ! operational_cluster_available; then
+        printf '%s\n' '  unavailable: cluster is not answering the bounded read-only probe'
+        return 0
+    fi
+    ready=$(_operational_kubectl -n kube-system get deployment coredns \
+        -o 'jsonpath={.status.readyReplicas}' 2>/dev/null || true)
+    desired=$(_operational_kubectl -n kube-system get deployment coredns \
+        -o 'jsonpath={.spec.replicas}' 2>/dev/null || true)
+    printf '  deployment: %s/%s ready\n' "${ready:-0}" "${desired:-unknown}"
+    corefile=$(_operational_kubectl -n kube-system get configmap coredns \
+        -o 'jsonpath={.data.Corefile}' 2>/dev/null || true)
+    if [ -z "$corefile" ]; then
+        printf '%s\n' '  drift: unknown (CoreDNS configuration was not readable)'
+        return 0
+    fi
+    while IFS='|' read -r label host url; do
+        expected_hosts=$((expected_hosts + 1))
+        if printf '%s\n' "$corefile" | grep -Fq "$host"; then
+            observed_hosts=$((observed_hosts + 1))
+        fi
+    done <<EOF
+$(_operational_lab_hosts)
+EOF
+    if printf '%s\n' "$corefile" | grep -Fq 'hosts {' && [ "$observed_hosts" -eq "$expected_hosts" ]; then
+        state=matches
+    else
+        state=drift
+    fi
+    printf '  drift: %s (%s/%s expected lab hostnames present; Corefile contents not displayed)\n' \
+        "$state" "$observed_hosts" "$expected_hosts"
+}
+
+operational_doctor_ingress() {
+    printf '%s\n' 'Ingress controller and classes:'
+    if ! operational_cluster_available; then
+        printf '%s\n' '  unavailable: cluster is not answering the bounded read-only probe'
+        return 0
+    fi
+    printf '%s\n' '  ingress classes:'
+    _operational_kubectl get ingressclass \
+        -o 'custom-columns=NAME:.metadata.name,CONTROLLER:.spec.controller' 2>/dev/null |
+        sed 's/^/    /' || printf '%s\n' '    none readable'
+    printf '%s\n' '  lab ingresses:'
+    _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get ingress \
+        -o 'custom-columns=NAME:.metadata.name,CLASS:.spec.ingressClassName,HOSTS:.spec.rules[*].host' 2>/dev/null |
+        sed 's/^/    /' || printf '%s\n' '    none readable'
+}
+
+_operational_endpoint_count() {
+    local service="$1"
+    _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get endpoints "$service" \
+        -o 'jsonpath={range .subsets[*].addresses[*]}x{"\n"}{end}' 2>/dev/null |
+        awk 'END {print NR + 0}'
+}
+
+operational_doctor_service_endpoints() {
+    local label service count state
+    printf '%s\n' 'Service endpoints:'
+    if ! operational_cluster_available; then
+        printf '%s\n' '  unavailable: cluster is not answering the bounded read-only probe'
+        return 0
+    fi
+    while IFS='|' read -r label service; do
+        count=$(_operational_endpoint_count "$service")
+        if [ "${count:-0}" -gt 0 ]; then
+            state=ready
+        else
+            state=empty
+        fi
+        printf '  %-10s %-40s %-6s %s endpoint(s)\n' "$label" "$service" "$state" "${count:-0}"
+    done <<'EOF'
+SSC|ssc-service
+LIM|lim
+DAST|sdast-core-scancentral-dast-core-api
+EOF
+}
+
+_operational_http_status() {
+    local url="$1" host status
+    command -v curl >/dev/null 2>&1 || { printf '%s\n' unavailable; return 1; }
+    host=$(printf '%s\n' "$url" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:]+).*#\1#')
+    status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+        --connect-timeout 2 --max-time "$FORTIFY_OPERATION_HTTP_TIMEOUT" \
+        --resolve "$host:443:127.0.0.1" "$url" 2>/dev/null) || {
+        printf '%s\n' curl-failed
+        return 1
+    }
+    printf '%s\n' "$status"
+}
+
+operational_doctor_http_status() {
+    local label host url status state
+    printf '%s\n' 'HTTP status-only checks through local ingress:'
+    while IFS='|' read -r label host url; do
+        status=$(_operational_http_status "$url") || true
+        case "$status" in
+            2*|3*|401|403) state=reachable ;;
+            unavailable|curl-failed|000) state=unreachable ;;
+            5*) state=server-error ;;
+            *) state=unexpected ;;
+        esac
+        printf '  %-10s %-34s %-12s HTTP %s\n' "$label" "$host" "$state" "$status"
+    done <<EOF
+$(_operational_lab_hosts)
+EOF
+}
+
+_operational_tls_certificate_metadata() {
+    local host="$1"
+    command -v timeout >/dev/null 2>&1 || return 1
+    command -v openssl >/dev/null 2>&1 || return 1
+    timeout "$FORTIFY_OPERATION_HTTP_TIMEOUT" openssl s_client -connect 127.0.0.1:443 -servername "$host" </dev/null 2>/dev/null |
+        openssl x509 -noout -subject -issuer -ext subjectAltName 2>/dev/null
+}
+
+operational_doctor_tls_identity() {
+    local label host url metadata state
+    printf '%s\n' 'TLS certificate identity through local ingress:'
+    while IFS='|' read -r label host url; do
+        metadata=$(_operational_tls_certificate_metadata "$host") || metadata=""
+        if [ -z "$metadata" ]; then
+            state=unavailable
+        elif printf '%s\n' "$metadata" | grep -Fq 'TRAEFIK DEFAULT CERT'; then
+            state=wrong-ingress-default-cert
+        elif printf '%s\n' "$metadata" | grep -Eq "DNS:${host}([,[:space:]]|$)|CN[ =]+${host}([,[:space:]]|$)"; then
+            state=matches-host
+        else
+            state=mismatch
+        fi
+        printf '  %-10s %-34s %s\n' "$label" "$host" "$state"
+    done <<EOF
+$(_operational_lab_hosts)
+EOF
+    printf '%s\n' '  Seeing TRAEFIK DEFAULT CERT from a client means that client is reaching Traefik/default routing, not the Fortify Lab ingress certificate.'
+}
+
+operational_doctor_compact_health_summary() {
+    local label service count url host status capacity_warnings line any_issue=0
+    operational_notice
+    printf '\nDoctor summary (read-only, compact, secret-safe):\n'
+    capacity_warnings=$(operational_capacity_warnings)
+    printf '%s\n' '  host capacity:'
+    if [ -n "$capacity_warnings" ]; then
+        any_issue=1
+        while IFS= read -r line; do
+            [ -n "$line" ] && printf '    warning: %s\n' "$line"
+        done <<<"$capacity_warnings"
+    else
+        printf '%s\n' '    meets recommended deployment profile'
+    fi
+
+    if operational_cluster_available; then
+        printf '%s\n' '  cluster: reachable'
+        printf '%s\n' '  workloads:'
+        _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get statefulsets,deployments \
+            -o 'custom-columns=KIND:.kind,NAME:.metadata.name,DESIRED:.spec.replicas,READY:.status.readyReplicas' 2>/dev/null |
+            sed 's/^/    /' || {
+                printf '%s\n' '    none readable'
+                any_issue=1
+            }
+        printf '%s\n' '  endpoints:'
+        while IFS='|' read -r label service; do
+            count=$(_operational_endpoint_count "$service")
+            [ "${count:-0}" -gt 0 ] || any_issue=1
+            printf '    %-10s %s endpoint(s)\n' "$label" "${count:-0}"
+        done <<'EOF'
+SSC|ssc-service
+LIM|lim
+DAST|sdast-core-scancentral-dast-core-api
+EOF
+    else
+        printf '%s\n' '  cluster: unavailable'
+        any_issue=1
+    fi
+    printf '%s\n' '  http:'
+    while IFS='|' read -r label host url; do
+        status=$(_operational_http_status "$url") || true
+        case "$status" in
+            2*|3*|401|403) ;;
+            *) any_issue=1 ;;
+        esac
+        printf '    %-10s HTTP %s\n' "$label" "$status"
+    done <<EOF
+$(_operational_lab_hosts)
+EOF
+    if [ "$any_issue" -eq 0 ]; then
+        printf '%s\n' '  result: no obvious read-only diagnostic issues detected'
+    else
+        printf '%s\n' '  result: investigate unavailable, empty, drifted, or failing checks above'
+    fi
+}
+
 operational_environment_overview() {
-    local memory_gib disk_gib certificate
+    local memory_gib disk_gib certificate capacity_warnings line
     operational_notice
     printf '\nNamespace: %s\n' "$FORTIFY_OPERATION_NAMESPACE"
     operational_print_urls
-    memory_gib=$(awk '/MemTotal:/ {printf "%.1f", $2/1024/1024}' /proc/meminfo 2>/dev/null || true)
-    disk_gib=$(df -Pk "${FORTIFY_HOME_K8S:-.}" 2>/dev/null | awk 'NR==2 {printf "%.1f", $4/1024/1024}' || true)
+    memory_gib=$(operational_capacity_memory_gib)
+    disk_gib=$(operational_capacity_disk_gib)
     printf '\nHost capacity: %s GiB memory; %s GiB free disk\n' "${memory_gib:-unknown}" "${disk_gib:-unknown}"
+    capacity_warnings=$(operational_capacity_warnings)
+    if [ -n "$capacity_warnings" ]; then
+        printf '%s\n' 'Host capacity warning:'
+        while IFS= read -r line; do
+            [ -n "$line" ] && printf '  %s\n' "$line"
+        done <<<"$capacity_warnings"
+    fi
     certificate="${FORTIFY_HOME_K8S:-.}/certs/tls.crt"
     if command -v openssl >/dev/null 2>&1 && [ -r "$certificate" ]; then
         printf 'Lab TLS certificate: '
@@ -259,6 +531,19 @@ _operational_sanitize_stream() {
         -e 's#(/home|/root|/Users)/[^[:space:]]+#[LOCAL_PATH]#g'
 }
 
+_operational_wizard_log_excerpt() {
+    if ! declare -F fortify_wizard_log_view >/dev/null 2>&1 && [ -n "${FORTIFY_HOME_K8S:-}" ] && [ -r "$FORTIFY_HOME_K8S/scripts/lib/wizard-logging.sh" ]; then
+        # shellcheck source=wizard-logging.sh
+        source "$FORTIFY_HOME_K8S/scripts/lib/wizard-logging.sh"
+    fi
+    if declare -F fortify_wizard_log_view >/dev/null 2>&1; then
+        fortify_wizard_log_view "${FORTIFY_OPERATION_WIZARD_LOG_LINES:-80}" 2>/dev/null || \
+            printf '%s\n' 'Wizard log excerpt unavailable: log file could not be read.'
+    else
+        printf '%s\n' 'Wizard log excerpt unavailable: logging helpers were not loaded.'
+    fi
+}
+
 operational_create_diagnostics_bundle() {
     local output_dir="${1:-.}" stamp work bundle archive_status
     [ -d "$output_dir" ] && [ -w "$output_dir" ] || {
@@ -271,10 +556,22 @@ operational_create_diagnostics_bundle() {
     {
         operational_notice
         printf 'Created UTC: %s\n' "$stamp"
-        printf '%s\n' 'Contents exclude logs, Secrets, ConfigMap data, environment variables, command lines, license metadata, credentials, and local configuration paths.'
+        printf '%s\n' 'Included: dependency plan, compact cluster status, describe-style Kubernetes summaries, recent events, doctor checks, and a bounded sanitized wizard log excerpt when available.'
+        printf '%s\n' 'Excluded: Kubernetes Secret/ConfigMap data, pod/application logs, environment variables, command arguments, tokens, license contents, registry credentials, TLS private keys, database exports, and local configuration paths.'
+        printf '%s\n' 'Review every file before sharing; sanitization reduces risk but cannot prove arbitrary context is safe.'
     } >"$work/README.txt"
 
     operational_deployment_plan >"$work/deployment-plan.txt"
+    operational_doctor_compact_health_summary | _operational_sanitize_stream >"$work/doctor-summary.txt"
+    {
+        operational_doctor_hosts_resolution
+        operational_doctor_coredns_drift
+        operational_doctor_ingress
+        operational_doctor_service_endpoints
+        operational_doctor_http_status
+        operational_doctor_tls_identity
+    } | _operational_sanitize_stream >"$work/network-diagnostics.txt"
+    _operational_wizard_log_excerpt | _operational_sanitize_stream >"$work/wizard-log-excerpt.txt"
     if operational_cluster_available; then
         {
             printf '%s\n' 'NODES'
@@ -283,15 +580,21 @@ operational_create_diagnostics_bundle() {
             _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get statefulsets,deployments -o 'custom-columns=KIND:.kind,NAME:.metadata.name,DESIRED:.spec.replicas,READY:.status.readyReplicas' 2>&1 || true
             printf '%s\n' 'PODS'
             _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get pods -o 'custom-columns=NAME:.metadata.name,PHASE:.status.phase,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount' 2>&1 || true
+            printf '%s\n' 'SERVICES'
+            _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get services -o 'custom-columns=NAME:.metadata.name,TYPE:.spec.type,PORTS:.spec.ports[*].port' 2>&1 || true
+            printf '%s\n' 'ENDPOINTS'
+            _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get endpoints -o 'custom-columns=NAME:.metadata.name,ENDPOINTS:.subsets[*].addresses[*].ip,PORTS:.subsets[*].ports[*].port' 2>&1 || true
             printf '%s\n' 'STORAGE'
             _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get pvc -o 'custom-columns=NAME:.metadata.name,STATUS:.status.phase,CAPACITY:.status.capacity.storage' 2>&1 || true
             printf '%s\n' 'INGRESS'
-            _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get ingress -o 'custom-columns=NAME:.metadata.name,HOSTS:.spec.rules[*].host' 2>&1 || true
-        } | _operational_sanitize_stream >"$work/cluster-status.txt"
+            _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get ingress -o 'custom-columns=NAME:.metadata.name,CLASS:.spec.ingressClassName,HOSTS:.spec.rules[*].host' 2>&1 || true
+            printf '%s\n' 'RECENT EVENTS'
+            _operational_kubectl -n "$FORTIFY_OPERATION_NAMESPACE" get events --sort-by='.lastTimestamp' 2>&1 | tail -20 || true
+        } | _operational_sanitize_stream >"$work/kubernetes-evidence.txt"
     else
-        printf '%s\n' 'MicroK8s was unavailable; cluster evidence was skipped after a bounded read-only probe.' >"$work/cluster-status.txt"
+        printf '%s\n' 'MicroK8s was unavailable; Kubernetes evidence was skipped after a bounded read-only probe.' >"$work/kubernetes-evidence.txt"
     fi
-    tar -C "$work" -czf "$bundle" README.txt deployment-plan.txt cluster-status.txt
+    tar -C "$work" -czf "$bundle" README.txt deployment-plan.txt doctor-summary.txt network-diagnostics.txt kubernetes-evidence.txt wizard-log-excerpt.txt
     archive_status=$?
     rm -rf -- "$work"
     [ "$archive_status" -eq 0 ] || return "$archive_status"

@@ -23,6 +23,7 @@ fi
 
 source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh"
+source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
 
 # Running under sudo would create files in secrets/generated/ owned by root,
 # which then block subsequent normal-user runs from rebuilding the directory.
@@ -44,6 +45,24 @@ PRESERVED_SECRET_KEY="$(mktemp)"
 trap 'rm -f "$PRESERVED_SECRET_KEY"' EXIT
 
 KUBECTL="microk8s kubectl"
+
+configure_microk8s_ingress_default_tls() {
+  local cert_ref="$NAMESPACE/tls"
+
+  # MicroK8s 1.35+ backs the ingress addon with Traefik. Some migrated
+  # clusters route Ingress TLS but still serve Traefik's generated default
+  # certificate unless the addon has an explicit default certificate. Keep this
+  # best-effort so older MicroK8s tracks do not block secret creation.
+  if microk8s enable ingress --help 2>&1 | grep -q -- '--default-ssl-certificate'; then
+    if microk8s enable ingress --default-ssl-certificate "$cert_ref" >/dev/null 2>&1; then
+      echo "✅ MicroK8s ingress default TLS certificate set to $cert_ref"
+    else
+      echo "⚠️ Could not update MicroK8s ingress default TLS certificate to $cert_ref."
+      echo "   If Traefik still serves TRAEFIK DEFAULT CERT, run:"
+      echo "   microk8s enable ingress --default-ssl-certificate $cert_ref"
+    fi
+  fi
+}
 
 
 #--------------------------
@@ -183,9 +202,10 @@ $KUBECTL -n "$NAMESPACE" create secret generic fortify-secrets \
 # rejects the StatefulSet update ("doesn't match $setElementOrder list"). See
 # apps/ssc/start.sh, which maps each field to one of these unique keys.
 
-# Ingress server cert (kubernetes.io/tls type — required by nginx ingress).
+# Ingress server cert (kubernetes.io/tls type — required by ingress controllers).
 $KUBECTL -n "$NAMESPACE" create secret tls tls \
   --cert="$SERVER_CERT" --key="$SERVER_KEY"
+configure_microk8s_ingress_default_tls
 
 # LIM signing cert (PFX) + password.
 $KUBECTL -n "$NAMESPACE" create secret generic tls-pfx \
@@ -244,19 +264,8 @@ $KUBECTL -n "$NAMESPACE" create secret generic lim-signing-certificate-password 
 #--------------------------
 # SECTION: REGCRED (Docker Hub pull credentials)
 #--------------------------
-# Fall back to $SUDO_USER's Docker config when running under sudo.
-
-DOCKER_CONFIG_PATH="${DOCKER_CONFIG_PATH:-$HOME/.docker/config.json}"
-if [ ! -f "$DOCKER_CONFIG_PATH" ] && [ -n "${SUDO_USER:-}" ]; then
-  DOCKER_CONFIG_PATH="$(getent passwd "$SUDO_USER" | cut -d: -f6)/.docker/config.json"
-fi
-if [ ! -f "$DOCKER_CONFIG_PATH" ]; then
-  echo "❌ Docker config not found at $DOCKER_CONFIG_PATH"
-  echo "   Run 'docker login' first so the cluster can pull Fortify images."
-  exit 1
-fi
-$KUBECTL -n "$NAMESPACE" create secret docker-registry regcred \
-  --from-file=.dockerconfigjson="$DOCKER_CONFIG_PATH"
-
+# Materialize Docker Hub credentials into a Kubernetes-readable pull Secret.
+# Docker itself can use local credential helpers; kubelet cannot.
+refresh_registry_credentials
 echo
 echo "✅ Secrets created in namespace '$NAMESPACE'."

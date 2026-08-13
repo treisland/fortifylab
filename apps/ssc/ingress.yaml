@@ -2,19 +2,22 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: ssc-ingress
-  namespace: fortify
+  namespace: ${NAMESPACE}
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "1G"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/service.serversscheme: "https"
+    traefik.ingress.kubernetes.io/router.middlewares: "${TRAEFIK_SSC_UPLOAD_MIDDLEWARE}"
 spec:
   ingressClassName: public
   tls:
   - hosts:
-    - ssc.fortifydemo.com
+    - ${SSC}
     secretName: tls
 
   rules:
-  - host: ssc.fortifydemo.com
+  - host: ${SSC}
     http:
       paths:
       - path: /

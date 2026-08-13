@@ -25,21 +25,27 @@ offline, collection records that fact and completes without starting it.
 
 Every archive contains exactly:
 
-- `README.txt`: lab-use warning, UTC creation time, and exclusions;
+- `README.txt`: lab-use warning, UTC creation time, included evidence, and exclusions;
 - `deployment-plan.txt`: dependency order and preview-only statement;
-- `cluster-status.txt`: either offline status or narrow tables for nodes,
-  workloads, pods, storage claims, and ingress hostnames.
+- `doctor-summary.txt`: compact read-only health summary ordered by dependency;
+- `network-diagnostics.txt`: host resolution, CoreDNS drift status, ingress class,
+  service endpoint, and HTTP status-only checks;
+- `kubernetes-evidence.txt`: describe-style summaries for nodes, workloads, pods,
+  services, endpoints, persistent-volume claims, ingress hostnames/classes, and
+  recent namespace events;
+- `wizard-log-excerpt.txt`: bounded sanitized wizard log excerpt, or the reason it
+  was unavailable.
 
-The collector deliberately excludes logs, Secret and ConfigMap objects/data,
-environment variables, container commands/arguments, events, license metadata,
-local configuration, and source file paths. A final sanitizer redacts
-credential-shaped assignments, authorization headers, and common home-directory
+The collector deliberately excludes Kubernetes Secret data, ConfigMap data, pod/application logs, environment variables, container command arguments, tokens, license contents,
+registry credentials, TLS private keys, database exports, local configuration, and
+source file paths. Recent Kubernetes events are included because they explain scheduling,
+image pull, endpoint, and ingress failures without collecting pod logs. A final sanitizer
+redacts credential-shaped assignments, authorization headers, and common home-directory
 paths.
 
 ## Inspect before sharing
 
-List and extract the archive only on a protected workstation. Read all three
-files before sending them anywhere. Sanitization reduces risk but cannot prove
+List and extract the archive only on a protected workstation. Read all files before sending them anywhere. Sanitization reduces risk but cannot prove
 arbitrary command output is safe. Do not append raw logs, `.env`, decoded
 Secrets, license data, tokens, certificates/private keys, or database exports.
 

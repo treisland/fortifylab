@@ -10,11 +10,21 @@ fi
 source "$FORTIFY_HOME_K8S/.env"
 # shellcheck source=../../scripts/lib/dependency-health.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+# shellcheck source=../../scripts/lib/k8s-hostnames.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
+# shellcheck source=../../scripts/lib/traefik-backend.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
+# shellcheck source=../../scripts/lib/coredns-lab-hosts.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+
+fortify_require_k8s_hostname SSC "$SSC"
+fortify_ensure_coredns_lab_hosts
 
 # SSC database migrations must never start against an unavailable database.
 health_mysql_ready
 
 CURRENT_DIR="$( dirname "${BASH_SOURCE[0]}" )"
+export TRAEFIK_SSC_UPLOAD_MIDDLEWARE="${NAMESPACE}-fortify-upload-buffer@kubernetescrd"
 
 microk8s helm -n "$NAMESPACE" upgrade -i ssc \
 		--create-namespace \
@@ -49,6 +59,11 @@ microk8s helm -n "$NAMESPACE" upgrade -i ssc \
 		--set resources.limits.cpu=1 \
 		--set service.type=ClusterIP
 
-microk8s kubectl -n "$NAMESPACE" apply -f $CURRENT_DIR/ingress.yaml
+if microk8s kubectl get crd middlewares.traefik.io >/dev/null 2>&1; then
+	envsubst '${NAMESPACE}' < "$CURRENT_DIR/traefik-upload-middleware.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
+fi
+
+envsubst '${SSC} ${NAMESPACE} ${TRAEFIK_SSC_UPLOAD_MIDDLEWARE}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
+fortify_annotate_traefik_https_service "$NAMESPACE" ssc-service
 
 microk8s kubectl -n "$NAMESPACE" scale statefulsets ssc-webapp --replicas=1

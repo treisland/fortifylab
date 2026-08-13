@@ -33,6 +33,19 @@ class OperationsDocumentationTests(unittest.TestCase):
         self.assertIn("Readiness is not application health", self.troubleshooting)
         self.assertIn("application-health", self.lifecycle)
 
+    def test_networking_docs_cover_traefik_tls_contract(self) -> None:
+        networking = (OPERATIONS / "networking-and-tls.md").read_text(encoding="utf-8")
+        for phrase in (
+            "Traefik-backed",
+            "fortify/tls",
+            "TRAEFIK DEFAULT CERT",
+            "service annotations",
+            "ServersTransport",
+            "default certificate",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, networking + self.troubleshooting)
+
     def test_lifecycle_operations_and_dependency_order_are_explicit(self) -> None:
         for operation in ("Start / Upgrade", "Stop", "Restart", "Repair / retry", "Uninstall", "Delete data"):
             self.assertIn(operation, self.lifecycle)
@@ -47,13 +60,56 @@ class OperationsDocumentationTests(unittest.TestCase):
         self.assertIn("Destroy (deletes data)", self.lifecycle)
         self.assertIn("matching SSC database and `secret.key`", self.recovery)
 
+    def test_guided_orchestration_contract_is_documented(self) -> None:
+        for phrase in (
+            "Guided deployment orchestration contract",
+            "operation was launched or applied",
+            "lifecycle verification passes",
+            "Pending",
+            "Running",
+            "Verifying",
+            "Complete",
+            "Failed",
+            "Skipped",
+            "live wait screen",
+            "elapsed time",
+            "current probe name",
+            "workload readiness counts",
+            "recent relevant Kubernetes events",
+            "interactive takeover",
+            "Auto-advance",
+            "countdown",
+            "Resume",
+            "live diagnostics",
+            "diagnostics bundle export",
+            "contextual pod logs",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.lifecycle)
+
+    def test_guided_orchestration_needed_hooks_are_tracked(self) -> None:
+        for hook in (
+            "guided_step_probe",
+            "guided_step_timeout",
+            "guided_step_in_progress",
+            "guided_wait_for_step",
+            "guided_run_and_verify",
+            "guided_countdown",
+            "guided_diagnostics_bundle",
+        ):
+            with self.subTest(hook=hook):
+                self.assertIn(hook, self.lifecycle)
+
     def test_diagnostics_contract_matches_implementation_allow_list(self) -> None:
-        for filename in ("README.txt", "deployment-plan.txt", "cluster-status.txt"):
+        for filename in (
+            "README.txt", "deployment-plan.txt", "doctor-summary.txt",
+            "network-diagnostics.txt", "kubernetes-evidence.txt", "wizard-log-excerpt.txt",
+        ):
             self.assertIn(filename, self.diagnostics)
-        for excluded in ("logs", "Secret", "ConfigMap", "environment variables", "events", "license metadata"):
+        for excluded in ("pod/application logs", "Secret", "ConfigMap data", "environment variables", "command arguments", "license contents"):
             self.assertIn(excluded, self.diagnostics)
         implementation = (ROOT / "scripts" / "lib" / "operational-help.sh").read_text(encoding="utf-8")
-        self.assertIn("tar -C \"$work\" -czf \"$bundle\" README.txt deployment-plan.txt cluster-status.txt", implementation)
+        self.assertIn("doctor-summary.txt network-diagnostics.txt kubernetes-evidence.txt wizard-log-excerpt.txt", implementation)
 
     def test_readme_does_not_request_sensitive_support_artifacts(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

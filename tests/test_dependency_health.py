@@ -72,6 +72,32 @@ class DependencyHealthTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("positive integer", result.stderr)
 
+    def test_service_endpoints_and_ingress_host_are_required(self) -> None:
+        endpoints = self.run_bash(
+            "KUBECTL=fake_kubectl; NAMESPACE=fortify; "
+            "fake_kubectl() { printf '10.1.2.3'; }; "
+            "health_service_endpoints_ready ssc-service"
+        )
+        missing_endpoints = self.run_bash(
+            "KUBECTL=fake_kubectl; NAMESPACE=fortify; "
+            "fake_kubectl() { return 0; }; "
+            "health_service_endpoints_ready ssc-service"
+        )
+        ingress = self.run_bash(
+            "KUBECTL=fake_kubectl; NAMESPACE=fortify; "
+            "fake_kubectl() { printf 'ssc.example.test lim.example.test'; }; "
+            "health_ingress_host_ready ssc-ingress ssc.example.test"
+        )
+        wrong_ingress = self.run_bash(
+            "KUBECTL=fake_kubectl; NAMESPACE=fortify; "
+            "fake_kubectl() { printf 'other.example.test'; }; "
+            "health_ingress_host_ready ssc-ingress ssc.example.test"
+        )
+        self.assertEqual(endpoints.returncode, 0, endpoints.stderr)
+        self.assertNotEqual(missing_endpoints.returncode, 0)
+        self.assertEqual(ingress.returncode, 0, ingress.stderr)
+        self.assertNotEqual(wrong_ingress.returncode, 0)
+
     def test_http_probe_accepts_auth_response_but_rejects_server_error(self) -> None:
         accepted = self.run_bash(
             "curl() { printf 401; }; health_http_url https://ssc.example.test"
@@ -81,6 +107,22 @@ class DependencyHealthTests(unittest.TestCase):
         )
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
         self.assertNotEqual(rejected.returncode, 0)
+
+    def test_http_detail_reports_server_errors_without_body(self) -> None:
+        result = self.run_bash(
+            "curl() { printf 500; }; health_http_detail https://ssc.example.test"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("HTTP 500", result.stdout)
+        self.assertIn("pod logs", result.stdout)
+        self.assertNotIn("Internal Server Error", result.stdout)
+
+    def test_http_status_uses_bounded_max_time_override(self) -> None:
+        result = self.run_bash(
+            "curl() { printf '%s\n' \"$*\" | grep -q -- '--max-time 3' && printf 200; }; "
+            "FORTIFY_HEALTH_HTTP_MAX_TIME=3 health_http_url https://ssc.example.test"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_dast_core_requires_postgresql_ssc_and_lim(self) -> None:
         script = (ROOT / "apps/scdast/core/start.sh").read_text(encoding="utf-8")

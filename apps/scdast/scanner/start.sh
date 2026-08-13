@@ -10,6 +10,10 @@ fi
 source "$FORTIFY_HOME_K8S/.env"
 # shellcheck source=../../../scripts/lib/dependency-health.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+# shellcheck source=../../../scripts/lib/coredns-lab-hosts.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+
+fortify_ensure_coredns_lab_hosts
 
 health_dast_core_ready
 

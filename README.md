@@ -54,24 +54,41 @@ deployment toolkit, not to the production capabilities of Fortify products.
 See [`docs/lab-use.md`](docs/lab-use.md). A concise lab-mode banner remains
 visible in the wizard after acknowledgement.
 
-Inside the wizard:
+Inside the wizard, the main menu is organized by task:
 
-1. Choose **Guided deployment (recommended)** for a numbered, explanatory
-   walkthrough. Each screen shows status derived from current files and live
-   Kubernetes resources. Required steps cannot be skipped; optional host setup
-   and post-deploy configuration can be deferred.
-2. Choose **Express deployment** for the original unattended sequence: certs →
-   Kubernetes Dashboard → secrets → MySQL + Postgres → SSC + LIM → SAST → DAST.
-   Guided and Express modes call the same deployment operations and dependency
-   gates; the guided flow is not a second installer.
-3. Choose **Resume or repair** after a failure or safe quit. It locates the first
-   incomplete required step from Kubernetes and generated files. The wizard does
-   not create a state file and never persists passwords or tokens.
-4. Use **Advanced setup and configuration** when you want to install individual
-   prerequisites, edit `.env`, import a license, or configure:
-   - DNS (auto-patches CoreDNS so pods can resolve `*.$DOMAIN` themselves).
-   - SSC ControllerToken (paste the value generated in the SSC UI).
-   - LIM DAST license + pool (manual web UI step, instructions printed).
+- **Deploy:** Guided deployment, Express deployment, Resume or repair,
+  individual component management, and Kubernetes Dashboard access.
+- **Diagnostics and advanced:** live status plus the advanced setup menu for
+  prerequisites, license files, certificates/secrets, DNS, SSC token, LIM,
+  Dashboard access, and `.env` editing.
+- **Operations:** lab lifecycle controls, logs, cluster snapshot, one-pod logs,
+  URLs and credentials, image versions, Configuration editor, and wizard log.
+- **Learn:** the Help Center / Fortify Knowledge Center and operational
+  guidance.
+
+Choose **Guided deployment (recommended)** for a numbered, explanatory
+walkthrough. Guided deployment first asks for a deployment profile: SSC only,
+SAST controller only, SAST full with SSC, DAST full, Full lab, or Custom. The
+wizard expands required dependencies before it shows the final plan. Each screen
+shows status derived from current files and live Kubernetes resources. Required
+steps cannot be skipped; optional host setup and post-deploy configuration can
+be deferred. Guided wait screens poll through readiness and application checks,
+show recent relevant events, and let you open contextual pod logs or live
+diagnostics without leaving the guided flow. Interactive mode pauses after each
+verified step; auto-advance continues after a 5-second countdown unless you take
+control.
+
+Choose **Express deployment** for the original unattended sequence: certs →
+Kubernetes Dashboard → secrets → MySQL + Postgres → SSC + LIM → SAST → DAST.
+Guided and Express modes call the same underlying component operations and
+dependency gates; Guided adds selectable profiles and orchestration around those
+operations.
+
+Choose **Resume or repair** after a failure or safe quit. It locates the first
+incomplete required step from Kubernetes and generated files. The wizard does
+not create a state file and never persists passwords or tokens. Use **Manage
+individual components (expert) → Start / Upgrade** when intentionally repairing
+one component.
 
 Choose **Help Center / Fortify Knowledge Center** for offline, read-only guides
 to the system, each Fortify and database component, dependency/data flow,
@@ -93,8 +110,13 @@ excludes logs, Secret and ConfigMap data, environment variables, command lines,
 license metadata, credentials, and local configuration paths.
 
 The Dashboard is surfaced before application workloads so it can monitor the
-rest of the deployment. When deployment finishes, **option 11** prints URLs and
-login guidance without disclosing stored passwords or tokens.
+rest of the deployment. When Guided deployment finishes, the wizard shows a
+congratulations and access handoff page with the selected profile, live service
+status, URLs, recommended next steps, certificate trust guidance, and a shortcut
+to **URLs & credentials**. That credential screen lists where lab-generated
+credentials live, can print retrieval commands, and can reveal a single selected
+credential after explicit confirmation. It does not disclose stored passwords or
+tokens by default.
 
 If a guided operation fails, its screen remains incomplete and offers Retry.
 Fix the reported dependency, retry the same operation, or quit safely and use
@@ -102,20 +124,23 @@ Resume later. Rendering status performs read-only file and Kubernetes queries;
 it never installs, upgrades, generates credentials, or rotates TLS material.
 
 The Dashboard is the lab's operational Web UI. Open
-`https://dashboard.$DOMAIN`, then use **Configure → Kubernetes Dashboard
-access** to generate a one-hour token. Choose view-only access for routine
-monitoring. Administrator access is offered separately with a warning because
-it can modify or delete every workload, Secret, and persistent resource in the
-cluster. Tokens are neither stored by this repository nor printed during
-deployment; the wizard prints one only after an explicit operator request.
-Persistent view-only and administrator tokens are also available for isolated
-labs. They are stored only in Kubernetes, remain valid until revoked, and can
-be revoked from the same Dashboard access menu. Prefer one-hour tokens whenever
-practical.
+`https://dashboard.$DOMAIN`, then use **Kubernetes Dashboard access** from the
+main menu, or **Advanced setup and configuration → Configure DNS, SSC token,
+LIM, and Dashboard access → Kubernetes Dashboard access**, to generate a
+one-hour token. Choose view-only access for routine monitoring. Administrator
+access is offered separately with a warning because it can modify or delete
+every workload, Secret, and persistent resource in the cluster. Tokens are
+neither stored by this repository nor printed during deployment; the wizard
+prints one only after an explicit operator request. Persistent view-only and
+administrator tokens are also available for isolated labs. They are stored only
+in Kubernetes, remain valid until revoked, and can be revoked from the same
+Dashboard access menu. Prefer one-hour tokens whenever practical.
 
-`Deploy from scratch` refuses to run over existing managed Helm releases. Use
-**Apps → Start / Upgrade** for an existing lab; this protects persistent data,
-SSC encryption material, and application credentials from accidental reset.
+The fresh/express deployment path refuses to run over existing managed Helm
+releases. Use **Guided deployment** or **Resume or repair** for an existing lab;
+use **Apps → Start / Upgrade** when intentionally repairing one component. This
+protects persistent data, SSC encryption material, and application credentials
+from accidental reset.
 
 ### Dependency gates and safe retries
 
@@ -123,8 +148,11 @@ The wizard checks authoritative dependencies before it starts a consumer, in
 both **Deploy from scratch** and **Apps → Start / Upgrade**:
 
 - SSC waits for the MySQL StatefulSet and an authenticated `SELECT 1`.
-- ScanCentral SAST waits for MySQL and the SSC application endpoint.
-- DAST Core waits for an authenticated PostgreSQL query, SSC, and LIM.
+- ScanCentral SAST controller can be deployed independently for standalone SAST.
+- ScanCentral SAST sensor waits for the SAST controller; the SAST full profile
+  also includes SSC and MySQL for the integrated lab workflow.
+- DAST Core waits for an authenticated PostgreSQL query, SSC, and LIM in the
+  current lab topology.
 - The DAST scanner waits for all DAST Core workloads and its API endpoint.
 
 Every wait is bounded by `FORTIFY_HEALTH_TIMEOUT` (600 seconds by default).
@@ -151,11 +179,11 @@ the cluster's node IP.
 <host-ip>  ssc.fortifydemo.com sast.fortifydemo.com dast.fortifydemo.com lim.fortifydemo.com dashboard.fortifydemo.com
 ```
 
-**In-cluster** — pods can't reach `*.$DOMAIN` through nginx because
-nginx routes by Host header but the in-cluster DNS doesn't know the
-domain. The wizard's **Configure → DNS** option patches CoreDNS's hosts
-plugin so SCDAST scanner ↔ DAST API and SAST ↔ SSC traffic resolves
-correctly.
+**In-cluster** — pods also need the lab hostnames to resolve to the node so
+service-to-ingress traffic keeps the expected Host header. The wizard's
+**Advanced setup and configuration → Configure DNS, SSC token, LIM, and
+Dashboard access → DNS** option patches CoreDNS's hosts plugin so SCDAST
+scanner ↔ DAST API and SAST ↔ SSC traffic resolves correctly.
 
 ## TLS trust
 
@@ -178,24 +206,40 @@ Re-running `create-certs.sh` rotates the root CA — you'll need to
 re-import. The wizard does not warn you about this; treat it as a
 fresh-install operation.
 
-The same DNS and TLS trust setup applies to the Dashboard. Its ingress uses
-`dashboard.$DOMAIN`, rendered from `.env`; if the browser reports a name or
-certificate error, verify the client hosts/DNS entry and import this lab's
-`certs/rootCA.pem` before generating a login token.
+The same DNS and TLS trust setup applies to Dashboard, SSC, LIM, SAST, and
+DAST. MicroK8s 1.35+ uses Traefik for the `ingress` addon;
+`scripts/create-secrets.sh` now points MicroK8s ingress at the mkcert wildcard
+Secret `fortify/tls` so browsers receive the lab certificate instead of
+`TRAEFIK DEFAULT CERT`. The application start scripts also add Traefik backend
+service annotations for HTTPS services with lab-generated internal
+certificates. If a browser still reports `TRAEFIK DEFAULT CERT`, rerun the
+Secrets step or run:
+
+```bash
+microk8s enable ingress --default-ssl-certificate fortify/tls
+```
+
+Then recheck the hostname with `openssl s_client -servername`. If the browser
+reports a name or certificate error after that, verify the client hosts/DNS
+entry and import this lab's `certs/rootCA.pem` before generating a Dashboard
+token or logging into SSC.
 
 ## Manual configuration after deploy
 
 Two steps still need a human after `Deploy from scratch`:
 
-- **SSC ControllerToken**: Log into SSC → Administration → ScanCentral SAST
-  → Tokens → create a token of type `ScanCentralCtrlToken`. Run wizard
+- **SSC access and ControllerToken**: Log into SSC as `admin`; refer to the SSC
+  documentation for the default administrator password. Then open
+  Administration → ScanCentral SAST → Tokens → create a token of type
+  `ScanCentralCtrlToken`. Run wizard
   Configure → option 2 to enter it through hidden input. The wizard patches the
   existing Kubernetes Secret through standard input and restarts the controller;
   the token is not placed in files, Helm values, or process arguments. This
   operation also clears token material left in Helm metadata by older versions
   of the wizard.
 - **DAST license + pool in LIM**: Open `https://lim.$DOMAIN`, sign in with
-  `lim_admin` username and configured lab password, upload the
+  `lim_admin`; retrieve the lab-generated password from **URLs & credentials**
+  if needed, upload the
   DAST license file, create a pool named `Default` (matches `LIM_POOL_NAME`
   in `.env`), then redeploy ScanCentral DAST so the scanner can authenticate.
 
@@ -241,7 +285,9 @@ apps/
   `secrets/generated/` is owned by the scripts. License paths and content must
   never be included in logs, artifacts, or support bundles.
 - **Re-running `create-certs.sh`** rotates the root CA. Browsers will
-  flag the new cert as untrusted until you re-import `rootCA.pem`.
+  flag the new cert as untrusted until you re-import `rootCA.pem`. Rerun the
+  Secrets step afterward so Kubernetes `fortify/tls` and the MicroK8s ingress
+  default certificate use the regenerated mkcert leaf.
 - **Postgres data directory is initialized by the running image**. If
   the chart's image ever ships a newer major (PostgreSQL 18 vs 17), the
   PVC must be wiped to re-init. We pin the image tag to avoid surprise

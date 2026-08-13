@@ -51,6 +51,22 @@ health_statefulset_ready() {
     [ "${ready:-0}" -eq "$desired" ] && [ "${current:-0}" -eq "$desired" ]
 }
 
+health_service_endpoints_ready() {
+    local service="$1" namespace="${NAMESPACE:?NAMESPACE is required}"
+    local addresses
+    # shellcheck disable=SC2086
+    addresses=$($KUBECTL -n "$namespace" get endpoints "$service" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null) || return 1
+    [ -n "$addresses" ]
+}
+
+health_ingress_host_ready() {
+    local ingress="$1" host="$2" namespace="${NAMESPACE:?NAMESPACE is required}"
+    local hosts
+    # shellcheck disable=SC2086
+    hosts=$($KUBECTL -n "$namespace" get ingress "$ingress" -o jsonpath='{.spec.rules[*].host}' 2>/dev/null) || return 1
+    printf '%s\n' "$hosts" | tr ' ' '\n' | grep -Fxq "$host"
+}
+
 health_mysql_query() {
     # Resolve either supported Bitnami password contract inside the container.
     # Neither the value nor command output is returned to the caller.
@@ -67,7 +83,7 @@ health_postgresql_query() {
         >/dev/null 2>&1
 }
 
-health_http_url() {
+health_http_status() {
     local url="$1" ca_args=() resolve_args=() status host
     [ -n "${ROOTCA_CERT:-}" ] && [ -r "$ROOTCA_CERT" ] && ca_args=(--cacert "$ROOTCA_CERT")
     # Fresh installs may not have client DNS yet. Route the configured ingress
@@ -77,11 +93,35 @@ health_http_url() {
     host="${host%%:*}"
     [ -n "$host" ] && resolve_args=(--resolve "${host}:443:127.0.0.1")
     status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-        --noproxy '*' --connect-timeout 5 --max-time 10 \
-        "${ca_args[@]}" "${resolve_args[@]}" "$url" 2>/dev/null) || return 1
+        --noproxy '*' --connect-timeout 5 --max-time "${FORTIFY_HEALTH_HTTP_MAX_TIME:-10}" \
+        "${ca_args[@]}" "${resolve_args[@]}" "$url" 2>/dev/null) || {
+        printf '%s\n' curl-failed
+        return 1
+    }
+    printf '%s\n' "$status"
+}
+
+health_http_url() {
+    local url="$1" status
+    status=$(health_http_status "$url") || return 1
     # Redirects and authentication responses prove the application is serving;
     # 5xx responses do not.
     [[ "$status" =~ ^[234][0-9][0-9]$ ]]
+}
+
+health_http_detail() {
+    local url="$1" status
+    status=$(health_http_status "$url") || {
+        printf 'Could not connect to %s through local ingress.\n' "$url"
+        return 0
+    }
+    if [[ "$status" =~ ^[234][0-9][0-9]$ ]]; then
+        printf 'Application endpoint returned HTTP %s from %s.\n' "$status" "$url"
+    elif [[ "$status" =~ ^5[0-9][0-9]$ ]]; then
+        printf 'Application endpoint returned HTTP %s from %s; inspect the application pod logs and database migration state.\n' "$status" "$url"
+    else
+        printf 'Application endpoint returned HTTP %s from %s.\n' "$status" "$url"
+    fi
 }
 
 health_mysql_ready() {
@@ -92,7 +132,11 @@ health_mysql_ready() {
 health_mysql_statefulset_probe() { health_statefulset_ready mysql; }
 health_postgresql_statefulset_probe() { health_statefulset_ready postgresql; }
 health_ssc_statefulset_probe() { health_statefulset_ready ssc-webapp; }
+health_ssc_service_probe() { health_service_endpoints_ready ssc-service; }
+health_ssc_ingress_probe() { health_ingress_host_ready ssc-ingress "${SSC:?SSC is required}"; }
 health_lim_statefulset_probe() { health_statefulset_ready lim; }
+health_lim_service_probe() { health_service_endpoints_ready lim; }
+health_lim_ingress_probe() { health_ingress_host_ready lim-ingress "${LIM:?LIM is required}"; }
 
 health_postgresql_ready() {
     health_wait_for "PostgreSQL StatefulSet" "$FORTIFY_HEALTH_TIMEOUT" health_postgresql_statefulset_probe &&
@@ -106,11 +150,15 @@ health_dast_http_probe() { health_http_url "${SCDAST_URL:?SCDAST_URL is required
 health_ssc_ready() {
     health_mysql_ready &&
         health_wait_for "SSC StatefulSet" "$FORTIFY_HEALTH_TIMEOUT" health_ssc_statefulset_probe &&
+        health_wait_for "SSC service endpoints" "$FORTIFY_HEALTH_TIMEOUT" health_ssc_service_probe &&
+        health_wait_for "SSC ingress host" "$FORTIFY_HEALTH_TIMEOUT" health_ssc_ingress_probe &&
         health_wait_for "SSC application endpoint" "$FORTIFY_HEALTH_TIMEOUT" health_ssc_http_probe
 }
 
 health_lim_ready() {
     health_wait_for "LIM StatefulSet" "$FORTIFY_HEALTH_TIMEOUT" health_lim_statefulset_probe &&
+        health_wait_for "LIM service endpoints" "$FORTIFY_HEALTH_TIMEOUT" health_lim_service_probe &&
+        health_wait_for "LIM ingress host" "$FORTIFY_HEALTH_TIMEOUT" health_lim_ingress_probe &&
         health_wait_for "LIM application endpoint" "$FORTIFY_HEALTH_TIMEOUT" health_lim_http_probe
 }
 
