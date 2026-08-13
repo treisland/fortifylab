@@ -1019,6 +1019,55 @@ class GuidedWizardTests(unittest.TestCase):
                 self.assertIn("scripts/lib/k8s-destroy.sh", body)
                 self.assertIn("fortify_helm_delete_if_exists", body)
 
+
+    def test_stop_scripts_treat_missing_statefulsets_as_already_stopped(self) -> None:
+        helper = (ROOT / "scripts/lib/k8s-scale.sh").read_text(encoding="utf-8")
+        self.assertIn("fortify_scale_statefulset_if_exists()", helper)
+        self.assertIn('get statefulset "$statefulset"', helper)
+        self.assertIn("already stopped", helper)
+
+        expected_statefulsets = {
+            "apps/mysql/stop.sh": ["mysql"],
+            "apps/postgresql/stop.sh": ["postgresql"],
+            "apps/ssc/stop.sh": ["ssc-webapp"],
+            "apps/lim/stop.sh": ["lim"],
+            "apps/scsast/stop.sh": ["scancentral-sast-controller", "scancentral-sast-worker-linux"],
+            "apps/scdast/core/stop.sh": [
+                "sdast-core-scancentral-dast-core-api",
+                "sdast-core-scancentral-dast-core-globalservice",
+                "sdast-core-scancentral-dast-core-utilityservice",
+            ],
+            "apps/scdast/scanner/stop.sh": ["sdast-scanner-scancentral-dast-scanner"],
+        }
+        for script, statefulsets in expected_statefulsets.items():
+            with self.subTest(script=script):
+                body = (ROOT / script).read_text(encoding="utf-8")
+                self.assertIn("scripts/lib/k8s-scale.sh", body)
+                self.assertIn("fortify_scale_statefulset_if_exists", body)
+                for statefulset in statefulsets:
+                    self.assertIn(statefulset, body)
+
+    def test_scale_helper_treats_missing_statefulset_as_success(self) -> None:
+        helper = ROOT / "scripts/lib/k8s-scale.sh"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; '
+                'FORTIFY_OPERATION_KUBECTL=fake_kubectl; '
+                'fake_kubectl() { case "$*" in *" get statefulset "*) return 1 ;; esac; printf "SCALE:%s\n" "$*"; }; '
+                'fortify_scale_statefulset_if_exists fortify missing-statefulset 0',
+                "scale-helper-test",
+                str(helper),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('statefulset.apps "missing-statefulset" not found', result.stdout)
+        self.assertNotIn("SCALE:", result.stdout)
+
     def test_helm_delete_helper_treats_missing_release_as_success(self) -> None:
         helper = ROOT / "scripts/lib/k8s-destroy.sh"
         result = subprocess.run(

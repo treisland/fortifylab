@@ -1,8 +1,6 @@
 #!/bin/bash
 
-source $FORTIFY_HOME_K8S/.env
+source "$FORTIFY_HOME_K8S/.env"
+source "$FORTIFY_HOME_K8S/scripts/lib/k8s-scale.sh"
 
-#get the current directory where this script resides
-CURRENT_DIR="$( dirname -- "${BASH_SOURCE[0]}" )"
-
-microk8s kubectl -n $NAMESPACE scale statefulset ssc-webapp --replicas=0
+fortify_scale_statefulset_if_exists "$NAMESPACE" ssc-webapp 0

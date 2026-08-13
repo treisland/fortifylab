@@ -1,5 +1,6 @@
 #!/bin/bash
-#
-source $FORTIFY_HOME_K8S/.env
 
-microk8s kubectl -n $NAMESPACE scale statefulset postgresql --replicas=0
+source "$FORTIFY_HOME_K8S/.env"
+source "$FORTIFY_HOME_K8S/scripts/lib/k8s-scale.sh"
+
+fortify_scale_statefulset_if_exists "$NAMESPACE" postgresql 0
