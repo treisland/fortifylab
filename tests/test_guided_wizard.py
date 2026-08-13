@@ -119,6 +119,9 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Checking deployment state", result.stdout)
         self.assertIn("[ 1/ 2] One", result.stdout)
         self.assertIn("[ 2/ 2] Two", result.stdout)
+        self.assertIn("complete", result.stdout)
+        self.assertIn("pending", result.stdout)
+        self.assertNotIn("checking...", result.stdout)
         self.assertIn("Deployment state", result.stdout)
 
 

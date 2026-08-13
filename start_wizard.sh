@@ -2547,43 +2547,41 @@ guided_status_render() {
 
 guided_step_live_state() {
     if guided_step_live_complete "$1"; then
-        printf '%s
-' complete
+        printf '%s\n' complete
     elif guided_step_live_in_progress "$1"; then
-        printf '%s
-' in_progress
+        printf '%s\n' in_progress
     elif guided_step_is_manual "$1"; then
-        printf '%s
-' manual
+        printf '%s\n' manual
     else
-        printf '%s
-' pending
+        printf '%s\n' pending
     fi
 }
 
 guided_collect_step_statuses() {
-    local idx id state total="${#GUIDED_STEP_ID[@]}"
+    local idx id state total="${#GUIDED_STEP_ID[@]}" row
     GUIDED_STEP_STATUS_CACHE=()
     GUIDED_STEP_COMPLETE_CACHE=()
     section "Checking deployment state"
-    printf '  Deriving live state from files and Kubernetes.
-
-'
+    printf '  Deriving live state from files and Kubernetes.\n\n'
     for idx in "${!GUIDED_STEP_ID[@]}"; do
         id="${GUIDED_STEP_ID[$idx]}"
-        printf '  [%2d/%2d] %-30s checking...
-' "$((idx + 1))" "$total" "${GUIDED_STEP_LABEL[$idx]}"
+        row=$(printf '  [%2d/%2d] %-30s' "$((idx + 1))" "$total" "${GUIDED_STEP_LABEL[$idx]}")
+        if [ -t 1 ]; then
+            printf '%s %s' "$row" "checking..."
+        fi
         state=$(guided_step_live_state "$id")
         GUIDED_STEP_STATUS_CACHE[$idx]="$state"
         case "$state" in
             complete) GUIDED_STEP_COMPLETE_CACHE[$idx]=1 ;;
             *) GUIDED_STEP_COMPLETE_CACHE[$idx]=0 ;;
         esac
-        printf '           %-30s %s
-' '' "$(guided_status_render "$state")"
+        if [ -t 1 ]; then
+            printf '\r%s %s\033[K\n' "$row" "$(guided_status_render "$state")"
+        else
+            printf '%s %s\n' "$row" "$(guided_status_render "$state")"
+        fi
     done
 }
-
 guided_cached_step_status() {
     local idx="$1" state
     state="${GUIDED_STEP_STATUS_CACHE[$idx]:-}"
