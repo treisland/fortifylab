@@ -1,17 +1,18 @@
 # Deployment, resume, and lifecycle safety
 
-Use `./start_wizard.sh` as your normal user. The wizard previews the tested
-dependency order and resumes at the first missing layer:
+Use `./start_wizard.sh` as your normal user. Guided deployment lets the operator
+choose a deployment profile, expands required dependencies, previews the active
+plan, and resumes at the first missing layer:
 
 1. host prerequisites and MicroK8s;
 2. lab TLS certificates;
 3. Kubernetes Dashboard;
 4. Kubernetes Secrets;
 5. MySQL and PostgreSQL;
-6. SSC and LIM;
-7. ScanCentral SAST;
-8. ScanCentral DAST Core;
-9. ScanCentral DAST scanner;
+6. SSC and LIM when selected;
+7. ScanCentral SAST controller, then sensor when selected;
+8. ScanCentral DAST Core when selected;
+9. ScanCentral DAST scanner when selected;
 10. client DNS/TLS trust and a synthetic scan.
 
 The unfinished-work summary reports resource **presence**, not readiness or
@@ -43,9 +44,10 @@ each existing dependency with the layered health gates before continuing.
    reserved for a lab without managed releases.
 3. Use the unfinished-work summary only to find missing resources.
 4. Establish storage and database health before application consumers.
-5. Start consumers in the dependency order above. SSC waits for MySQL; SAST
-   waits for SSC; DAST Core waits for PostgreSQL, SSC, and LIM; the DAST scanner
-   waits for Core.
+5. Start consumers in the dependency order above. SSC waits for MySQL; the SAST
+   sensor waits for the SAST controller; the SAST full profile also adds SSC and
+   MySQL; DAST Core waits for PostgreSQL, SSC, and LIM in the current lab
+   topology; the DAST scanner waits for Core.
 6. Wait for bounded application-health success, not just `Running` pods.
 7. If a step fails, fix its first unhealthy dependency and retry that same
    step. Completed Helm steps are designed to be detected or upgraded again.
@@ -101,6 +103,12 @@ Status rendering remains read-only: it may inspect files and Kubernetes
 resources, but it must not install packages, apply manifests, create secrets,
 rotate TLS, or delete data.
 
+Guided mode supports selectable deployment profiles. The built-in profiles are
+SSC only, SAST controller only, SAST full with SSC, DAST full, Full lab, and
+Custom. Custom selections are stored as non-secret `.env` settings only when the
+operator chooses to save them; otherwise they apply to the current wizard session.
+Changing a profile does not stop or delete resources that already exist.
+
 Guided mode supports two operator styles:
 
 - **Interactive** pauses after each successful verification and lets the
@@ -120,6 +128,7 @@ separate, and offer Retry, Help, interactive control, or safe quit.
 
 The shell implementation exposes stable hooks for this contract:
 
+- `guided_apply_deployment_profile`
 - `guided_step_probe`
 - `guided_step_timeout`
 - `guided_step_in_progress`

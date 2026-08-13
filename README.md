@@ -67,18 +67,22 @@ Inside the wizard, the main menu is organized by task:
   guidance.
 
 Choose **Guided deployment (recommended)** for a numbered, explanatory
-walkthrough. Each screen shows status derived from current files and live
-Kubernetes resources. Required steps cannot be skipped; optional host setup and
-post-deploy configuration can be deferred. Guided wait screens poll through
-readiness and application checks, show recent relevant events, and let you open
-contextual pod logs or live diagnostics without leaving the guided flow.
-Interactive mode pauses after each verified step; auto-advance continues after
-a 5-second countdown unless you take control.
+walkthrough. Guided deployment first asks for a deployment profile: SSC only,
+SAST controller only, SAST full with SSC, DAST full, Full lab, or Custom. The
+wizard expands required dependencies before it shows the final plan. Each screen
+shows status derived from current files and live Kubernetes resources. Required
+steps cannot be skipped; optional host setup and post-deploy configuration can
+be deferred. Guided wait screens poll through readiness and application checks,
+show recent relevant events, and let you open contextual pod logs or live
+diagnostics without leaving the guided flow. Interactive mode pauses after each
+verified step; auto-advance continues after a 5-second countdown unless you take
+control.
 
 Choose **Express deployment** for the original unattended sequence: certs →
 Kubernetes Dashboard → secrets → MySQL + Postgres → SSC + LIM → SAST → DAST.
-Guided and Express modes call the same deployment operations and dependency
-gates; the guided flow is not a second installer.
+Guided and Express modes call the same underlying component operations and
+dependency gates; Guided adds selectable profiles and orchestration around those
+operations.
 
 Choose **Resume or repair** after a failure or safe quit. It locates the first
 incomplete required step from Kubernetes and generated files. The wizard does
@@ -140,8 +144,11 @@ The wizard checks authoritative dependencies before it starts a consumer, in
 both **Deploy from scratch** and **Apps → Start / Upgrade**:
 
 - SSC waits for the MySQL StatefulSet and an authenticated `SELECT 1`.
-- ScanCentral SAST waits for MySQL and the SSC application endpoint.
-- DAST Core waits for an authenticated PostgreSQL query, SSC, and LIM.
+- ScanCentral SAST controller can be deployed independently for standalone SAST.
+- ScanCentral SAST sensor waits for the SAST controller; the SAST full profile
+  also includes SSC and MySQL for the integrated lab workflow.
+- DAST Core waits for an authenticated PostgreSQL query, SSC, and LIM in the
+  current lab topology.
 - The DAST scanner waits for all DAST Core workloads and its API endpoint.
 
 Every wait is bounded by `FORTIFY_HEALTH_TIMEOUT` (600 seconds by default).

@@ -57,6 +57,8 @@ help_guided_topic() {
         preflight) printf '%s\n' guided/preflight ;;
         certs) printf '%s\n' guided/tls ;;
         dashboard|secrets|mysql|postgresql|ssc|lim|sast|dast) printf 'guided/%s\n' "$1" ;;
+        sast_controller|sast_sensor) printf '%s\n' guided/sast ;;
+        dast_core|dast_scanner) printf '%s\n' guided/dast ;;
         configure) printf '%s\n' guided/configuration ;;
         *) return 2 ;;
     esac

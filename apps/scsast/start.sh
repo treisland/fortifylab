@@ -21,7 +21,17 @@ source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
 fortify_require_k8s_hostname SCSAST "$SCSAST"
 fortify_ensure_coredns_lab_hosts
 
-health_ssc_ready
+if [ "${FORTIFY_SCSAST_REQUIRE_SSC:-0}" = "1" ]; then
+    health_ssc_ready
+fi
+
+SCSAST_WORKERS_ENABLED="${FORTIFY_SCSAST_WORKERS_ENABLED:-true}"
+SCSAST_WORKER_REPLICAS="${FORTIFY_SCSAST_WORKER_REPLICAS:-1}"
+case "$SCSAST_WORKERS_ENABLED" in
+    true|false) ;;
+    *) printf 'ERROR: FORTIFY_SCSAST_WORKERS_ENABLED must be true or false.\n' >&2; exit 1 ;;
+esac
+[[ "$SCSAST_WORKER_REPLICAS" =~ ^[0-9]+$ ]] || { printf 'ERROR: FORTIFY_SCSAST_WORKER_REPLICAS must be a non-negative integer.\n' >&2; exit 1; }
 
 # Get the current directory where this script resides
 CURRENT_DIR="$(dirname -- "${BASH_SOURCE[0]}")"
@@ -59,7 +69,7 @@ microk8s helm -n "$NAMESPACE" upgrade -i scancentral-sast oci://registry-1.docke
 --set controller.ingress.annotations."nginx\.ingress\.kubernetes\.io/backend-protocol"=HTTPS \
 --set-string controller.ingress.annotations."traefik\.ingress\.kubernetes\.io/router\.tls"=true \
 --set-string controller.ingress.annotations."traefik\.ingress\.kubernetes\.io/service\.serversscheme"=https \
---set workers.linux.enabled=true \
+--set workers.linux.enabled="$SCSAST_WORKERS_ENABLED" \
 --set workers.linux.truststoreSecret="" \
 --set workers.linux.controllerUrl="$SCSAST_CTRL_URL" \
 --set workers.linux.persistence.enabled=false \
@@ -70,4 +80,6 @@ microk8s helm -n "$NAMESPACE" upgrade -i scancentral-sast oci://registry-1.docke
 
 fortify_annotate_traefik_https_service "$NAMESPACE" scancentral-sast-controller
 microk8s kubectl -n "$NAMESPACE" scale statefulset scancentral-sast-controller --replicas=1
-microk8s kubectl -n "$NAMESPACE" scale statefulset scancentral-sast-worker-linux --replicas=1
+if microk8s kubectl -n "$NAMESPACE" get statefulset scancentral-sast-worker-linux >/dev/null 2>&1; then
+    microk8s kubectl -n "$NAMESPACE" scale statefulset scancentral-sast-worker-linux --replicas="$SCSAST_WORKER_REPLICAS"
+fi

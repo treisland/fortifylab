@@ -21,18 +21,23 @@ maintain controller connectivity and worker capacity.
 
 ## Dependencies
 
-The dependency chain is **MySQL → SSC → ScanCentral SAST**. SSC must answer and
-the SAST controller must receive an SSC-created `ScanCentralCtrlToken` through
-the protected wizard workflow. Storage, cluster networking, certificate trust,
-and the Fortify license input must also be valid.
+The SAST controller can run independently when the lab is using the
+**SAST controller only** profile. A SAST sensor requires the controller. The
+**SAST full with SSC** profile adds MySQL and SSC so results can participate in
+the SSC-centered workflow. In that integrated path, the controller must receive
+an SSC-created `ScanCentralCtrlToken` through the protected wizard workflow.
+Storage, cluster networking, certificate trust, and the Fortify license input
+must also be valid.
 
 ## Failure symptoms
 
 Common symptoms are rejected submissions, controller authentication failures,
 queued work with no available worker, workers that do not register, or results
-that do not reach the intended SSC application version. Check MySQL and SSC
-health first, then controller credential configuration, controller readiness,
-and worker readiness. Adding workers does not repair a broken dependency.
+that do not reach the intended SSC application version. For standalone
+controller deployments, check controller readiness and DNS/TLS first. For the
+integrated SAST full profile, also check MySQL, SSC health, controller credential
+configuration, and worker readiness. Adding workers does not repair a broken
+dependency.
 
 ## Stop impact
 
