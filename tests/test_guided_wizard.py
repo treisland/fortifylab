@@ -90,6 +90,9 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("State is derived from current files and Kubernetes", WIZARD)
         self.assertIn('! guided_step_live_complete "$id"', WIZARD)
         self.assertIn('guided_deployment "$start"', WIZARD)
+        self.assertIn("Checking deployment state", WIZARD)
+        self.assertIn("guided_collect_step_statuses", WIZARD)
+        self.assertIn("guided_cached_step_status", WIZARD)
         self.assertNotIn("wizard-state", WIZARD.lower())
 
         result = self.run_wizard_functions(
@@ -101,6 +104,22 @@ class GuidedWizardTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("START=1", result.stdout)
+        self.assertIn("[ 1/ 3] Done", result.stdout)
+        self.assertIn("Deployment state", result.stdout)
+
+    def test_resume_status_collection_shows_progress_before_final_table(self) -> None:
+        result = self.run_wizard_functions(
+            'GUIDED_STEP_ID=(one two); GUIDED_STEP_LABEL=(One Two); '
+            'GUIDED_STEP_OPTIONAL=(0 0); GUIDED_STEP_MANUAL=(0 0); '
+            'guided_step_live_state() { [ "$1" = one ] && printf complete || printf pending; }; '
+            'guided_step_live_complete() { [ "$1" = one ]; }; '
+            'press_any() { :; }; guided_deployment() { :; }; resume_repair'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Checking deployment state", result.stdout)
+        self.assertIn("[ 1/ 2] One", result.stdout)
+        self.assertIn("[ 2/ 2] Two", result.stdout)
+        self.assertIn("Deployment state", result.stdout)
 
 
     def test_resume_treats_manually_deployed_sast_pods_as_complete(self) -> None:

@@ -2536,6 +2536,72 @@ guided_step_live_status() {
     fi
 }
 
+guided_status_render() {
+    case "$1" in
+        complete) printf '%scomplete%s' "$GREEN" "$RESET" ;;
+        in_progress) printf '%sin progress%s' "$YELLOW" "$RESET" ;;
+        manual) printf '%smanual%s' "$DIM" "$RESET" ;;
+        *) printf '%spending%s' "$YELLOW" "$RESET" ;;
+    esac
+}
+
+guided_step_live_state() {
+    if guided_step_live_complete "$1"; then
+        printf '%s
+' complete
+    elif guided_step_live_in_progress "$1"; then
+        printf '%s
+' in_progress
+    elif guided_step_is_manual "$1"; then
+        printf '%s
+' manual
+    else
+        printf '%s
+' pending
+    fi
+}
+
+guided_collect_step_statuses() {
+    local idx id state total="${#GUIDED_STEP_ID[@]}"
+    GUIDED_STEP_STATUS_CACHE=()
+    GUIDED_STEP_COMPLETE_CACHE=()
+    section "Checking deployment state"
+    printf '  Deriving live state from files and Kubernetes.
+
+'
+    for idx in "${!GUIDED_STEP_ID[@]}"; do
+        id="${GUIDED_STEP_ID[$idx]}"
+        printf '  [%2d/%2d] %-30s checking...
+' "$((idx + 1))" "$total" "${GUIDED_STEP_LABEL[$idx]}"
+        state=$(guided_step_live_state "$id")
+        GUIDED_STEP_STATUS_CACHE[$idx]="$state"
+        case "$state" in
+            complete) GUIDED_STEP_COMPLETE_CACHE[$idx]=1 ;;
+            *) GUIDED_STEP_COMPLETE_CACHE[$idx]=0 ;;
+        esac
+        printf '           %-30s %s
+' '' "$(guided_status_render "$state")"
+    done
+}
+
+guided_cached_step_status() {
+    local idx="$1" state
+    state="${GUIDED_STEP_STATUS_CACHE[$idx]:-}"
+    if [ -z "$state" ]; then
+        state=$(guided_step_live_state "${GUIDED_STEP_ID[$idx]}")
+    fi
+    guided_status_render "$state"
+}
+
+guided_cached_step_complete() {
+    local idx="$1"
+    if [ -n "${GUIDED_STEP_COMPLETE_CACHE[$idx]+set}" ]; then
+        [ "${GUIDED_STEP_COMPLETE_CACHE[$idx]}" -eq 1 ]
+        return
+    fi
+    guided_step_live_complete "${GUIDED_STEP_ID[$idx]}"
+}
+
 guided_step_in_progress() {
     case "$1" in
         dashboard)
@@ -3192,14 +3258,20 @@ resume_repair() {
     fortify_lab_require_acknowledgement || return 1
     GUIDED_MODE_CONTEXT=resume
     title "Resume or repair deployment"
-    printf '\n  %s\n' "$(guided_mode_context_text resume)"
+    printf '
+  %s
+' "$(guided_mode_context_text resume)"
     echo
     echo "  State is derived from current files and Kubernetes; no password or token is persisted."
     echo
+    guided_collect_step_statuses
+    echo
+    section "Deployment state"
     for idx in "${!GUIDED_STEP_ID[@]}"; do
         id="${GUIDED_STEP_ID[$idx]}"
-        printf '  %2d. %-30s %s\n' "$((idx + 1))" "${GUIDED_STEP_LABEL[$idx]}" "$(guided_step_live_status "$id")"
-        if [ "$found" -eq 0 ] && [ "${GUIDED_STEP_OPTIONAL[$idx]}" -eq 0 ] && ! guided_step_live_complete "$id"; then
+        printf '  %2d. %-30s %s
+' "$((idx + 1))" "${GUIDED_STEP_LABEL[$idx]}" "$(guided_cached_step_status "$idx")"
+        if [ "$found" -eq 0 ] && [ "${GUIDED_STEP_OPTIONAL[$idx]}" -eq 0 ] && ! guided_cached_step_complete "$idx"; then
             start="$idx"
             found=1
         fi
