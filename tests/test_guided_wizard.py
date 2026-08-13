@@ -88,7 +88,7 @@ class GuidedWizardTests(unittest.TestCase):
 
     def test_resume_is_live_derived_and_starts_at_first_required_gap(self) -> None:
         self.assertIn("State is derived from current files and Kubernetes", WIZARD)
-        self.assertIn('! guided_step_complete "$id"', WIZARD)
+        self.assertIn('! guided_step_live_complete "$id"', WIZARD)
         self.assertIn('guided_deployment "$start"', WIZARD)
         self.assertNotIn("wizard-state", WIZARD.lower())
 
@@ -100,6 +100,26 @@ class GuidedWizardTests(unittest.TestCase):
             'resume_repair'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("START=1", result.stdout)
+
+
+    def test_resume_treats_manually_deployed_sast_pods_as_complete(self) -> None:
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; '
+            'GUIDED_STEP_ID=(sast dast); '
+            'GUIDED_STEP_LABEL=("ScanCentral SAST" "ScanCentral DAST"); '
+            'GUIDED_STEP_OPTIONAL=(0 0); GUIDED_STEP_MANUAL=(0 0); '
+            'cluster_reachable() { return 0; }; '
+            'kube() { case "$*" in '
+            '"-n fortify get pods --no-headers") printf "scancentral-sast-controller-0 1/1 Running 0 1m\nscancentral-sast-sensor-0 1/1 Running 0 1m\n" ;; '
+            '*) return 1 ;; '
+            'esac; }; '
+            'press_any() { :; }; guided_deployment() { printf "START=%s\n" "$1"; }; '
+            'resume_repair'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ScanCentral SAST", result.stdout)
+        self.assertIn("complete", result.stdout)
         self.assertIn("START=1", result.stdout)
 
     def test_guided_entry_routes_existing_lab_to_resume_repair(self) -> None:

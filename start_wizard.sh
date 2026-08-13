@@ -2345,11 +2345,42 @@ statefulset_in_progress() {
     [ "${ready:-0}" -lt "$desired" ]
 }
 
+pod_status_lines() {
+    local now
+    cluster_reachable || return 1
+    now="$SECONDS"
+    if [ "${GUIDED_POD_STATUS_CACHE_SECONDS:-}" != "$now" ]; then
+        GUIDED_POD_STATUS_CACHE=$($KUBECTL -n "$NAMESPACE" get pods --no-headers 2>/dev/null || true)
+        GUIDED_POD_STATUS_CACHE_SECONDS="$now"
+    fi
+    printf '%s\n' "$GUIDED_POD_STATUS_CACHE"
+}
+
+pod_prefix_in_progress() {
+    local prefix="$1"
+    cluster_reachable || return 1
+    pod_status_lines | awk -v p="$prefix" '
+            $1 ~ "^" p {
+                found=1
+                n=split($2,a,"/")
+                if ($3!="Running" || a[1] != a[2]) progress=1
+            }
+            END { exit found && progress ? 0 : 1 }
+        '
+}
+
+sast_pods_ready() {
+    pod_prefix_ready scancentral-sast
+}
+
+sast_pods_in_progress() {
+    pod_prefix_in_progress scancentral-sast
+}
+
 pod_prefix_ready() {
     local prefix="$1" pods total ready
     cluster_reachable || return 1
-    pods=$($KUBECTL -n "$NAMESPACE" get pods --no-headers 2>/dev/null \
-        | awk -v p="$prefix" '$1 ~ "^"p {print}')
+    pods=$(pod_status_lines | awk -v p="$prefix" '$1 ~ "^"p {print}')
     [ -n "$pods" ] || return 1
     total=$(wc -l <<<"$pods")
     ready=$(awk '$3=="Running" {n=split($2,a,"/"); if (a[1]==a[2]) c++} END{print c+0}' <<<"$pods")
@@ -2448,8 +2479,7 @@ lim_ready() {
 }
 
 sast_ready() {
-    workload_ready "$NAMESPACE" statefulset scancentral-sast-controller &&
-        workload_ready "$NAMESPACE" statefulset scancentral-sast-worker-linux
+    sast_pods_ready
 }
 
 dast_ready() {
@@ -2470,6 +2500,42 @@ guided_step_complete() {
     "$probe"
 }
 
+guided_step_live_complete() {
+    case "$1" in
+        mysql) pod_prefix_ready mysql ;;
+        postgresql) pod_prefix_ready postgresql ;;
+        ssc) pod_prefix_ready ssc-webapp ;;
+        lim) pod_prefix_ready lim ;;
+        sast) pod_prefix_ready scancentral-sast ;;
+        dast) pod_prefix_ready sdast ;;
+        *) guided_step_complete "$1" ;;
+    esac
+}
+
+guided_step_live_in_progress() {
+    case "$1" in
+        mysql) pod_prefix_in_progress mysql ;;
+        postgresql) pod_prefix_in_progress postgresql ;;
+        ssc) pod_prefix_in_progress ssc-webapp ;;
+        lim) pod_prefix_in_progress lim ;;
+        sast) pod_prefix_in_progress scancentral-sast ;;
+        dast) pod_prefix_in_progress sdast ;;
+        *) guided_step_in_progress "$1" ;;
+    esac
+}
+
+guided_step_live_status() {
+    if guided_step_live_complete "$1"; then
+        printf '%scomplete%s' "$GREEN" "$RESET"
+    elif guided_step_live_in_progress "$1"; then
+        printf '%sin progress%s' "$YELLOW" "$RESET"
+    elif guided_step_is_manual "$1"; then
+        printf '%smanual%s' "$DIM" "$RESET"
+    else
+        printf '%spending%s' "$YELLOW" "$RESET"
+    fi
+}
+
 guided_step_in_progress() {
     case "$1" in
         dashboard)
@@ -2481,8 +2547,7 @@ guided_step_in_progress() {
         ssc) statefulset_in_progress "$NAMESPACE" ssc-webapp ;;
         lim) statefulset_in_progress "$NAMESPACE" lim ;;
         sast)
-            statefulset_in_progress "$NAMESPACE" scancentral-sast-controller ||
-                statefulset_in_progress "$NAMESPACE" scancentral-sast-worker-linux
+            sast_pods_in_progress
             ;;
         dast)
             statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-api ||
@@ -2567,8 +2632,7 @@ guided_print_pods() {
     cluster_reachable || { printf '  Cluster unavailable for pod status.\n'; return 0; }
     prefix=$(guided_step_pod_prefixes "$id")
     [ -n "$prefix" ] || { printf '  No pod status applies to this step yet.\n'; return 0; }
-    pods=$($KUBECTL -n "$NAMESPACE" get pods --no-headers 2>/dev/null \
-        | awk -v p="$prefix" '$1 ~ "^"p {print}')
+    pods=$(pod_status_lines | awk -v p="$prefix" '$1 ~ "^"p {print}')
     if [ -z "$pods" ]; then
         printf '  No pods matching %s have appeared yet.\n' "$prefix"
     else
@@ -2712,7 +2776,7 @@ guided_wait_for_step() {
         guided_wait_screen_render_start
         printf '\n%s%s%s\n' "$BOLD" "Verifying $label" "$RESET"
         hr
-        printf '\n  State:   %s\n' "$(guided_step_status "$id")"
+        printf '\n  State:   %s\n' "$(guided_step_live_status "$id")"
         printf '  Probe:   %s\n' "$probe"
         printf '  Elapsed: %ss' "$elapsed"
         [ "$timeout" -gt 0 ] && printf ' / %ss' "$timeout"
@@ -3010,7 +3074,7 @@ guided_deployment() {
         id="${GUIDED_STEP_ID[$idx]}"
 
         if [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && ! guided_step_is_manual "$id"; then
-            if ! guided_step_complete "$id"; then
+            if ! guided_step_live_complete "$id"; then
                 guided_run_and_verify "$id" "${GUIDED_STEP_LABEL[$idx]}"
                 result=$?
                 case "$result" in
@@ -3033,7 +3097,7 @@ guided_deployment() {
         printf '\n  %s\n' "$(guided_mode_context_text "$GUIDED_MODE_CONTEXT")"
         printf '\n  %s%s%s\n\n  %s\n' "$BOLD" "${GUIDED_STEP_LABEL[$idx]}" "$RESET" "${GUIDED_STEP_HELP[$idx]}"
         printf '  Step type: %s\n' "$(guided_step_action_profile "$id")"
-        printf '\n  Current status: %s\n' "$(guided_step_status "$id")"
+        printf '\n  Current status: %s\n' "$(guided_step_live_status "$id")"
         printf '  Why pending: %s\n' "$(guided_step_why_pending "$id")"
         [ "$id" = dashboard ] && printf '  Dashboard URL: https://dashboard.%s\n' "$DOMAIN"
         [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && printf '  Mode: auto-advance is paused for this step\n'
@@ -3134,8 +3198,8 @@ resume_repair() {
     echo
     for idx in "${!GUIDED_STEP_ID[@]}"; do
         id="${GUIDED_STEP_ID[$idx]}"
-        printf '  %2d. %-30s %s\n' "$((idx + 1))" "${GUIDED_STEP_LABEL[$idx]}" "$(guided_step_status "$id")"
-        if [ "$found" -eq 0 ] && [ "${GUIDED_STEP_OPTIONAL[$idx]}" -eq 0 ] && ! guided_step_complete "$id"; then
+        printf '  %2d. %-30s %s\n' "$((idx + 1))" "${GUIDED_STEP_LABEL[$idx]}" "$(guided_step_live_status "$id")"
+        if [ "$found" -eq 0 ] && [ "${GUIDED_STEP_OPTIONAL[$idx]}" -eq 0 ] && ! guided_step_live_complete "$id"; then
             start="$idx"
             found=1
         fi
