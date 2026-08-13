@@ -1119,18 +1119,18 @@ pod_log_action_menu() {
         ask choice "Select:"
         case "$choice" in
             1)
-                $KUBECTL -n "$NAMESPACE" logs --tail=200 "$pod" || true
+                $KUBECTL -n "$NAMESPACE" logs --all-containers --tail=200 "$pod" || true
                 press_any
                 return 0
                 ;;
             2)
                 note "Following logs for $pod. Press Ctrl+C to return."
-                $KUBECTL -n "$NAMESPACE" logs --follow --tail=100 "$pod" || true
+                $KUBECTL -n "$NAMESPACE" logs --all-containers --follow --tail=100 "$pod" || true
                 press_any
                 return 0
                 ;;
             3)
-                $KUBECTL -n "$NAMESPACE" logs --previous --tail=200 "$pod" || true
+                $KUBECTL -n "$NAMESPACE" logs --all-containers --previous --tail=200 "$pod" || true
                 press_any
                 return 0
                 ;;
@@ -2691,6 +2691,29 @@ guided_step_pod_prefixes() {
     esac
 }
 
+guided_step_has_pod_logs() {
+    [ -n "$(guided_step_pod_prefixes "$1")" ]
+}
+
+guided_step_services() {
+    case "$1" in
+        ssc) printf '%s\n' ssc-service ;;
+        lim) printf '%s\n' lim ;;
+        sast) printf '%s\n' scancentral-sast-controller ;;
+        dast) printf '%s\n' sdast-core-scancentral-dast-core-api ;;
+    esac
+}
+
+guided_step_hosts() {
+    case "$1" in
+        ssc) printf '%s\n' "${SSC:-}" ;;
+        lim) printf '%s\n' "${LIM:-}" ;;
+        sast) printf '%s\n' "${SCSAST:-}" ;;
+        dast) printf '%s\n' "${SCDAST:-}" ;;
+        dashboard) printf '%s\n' "dashboard.${DOMAIN:-fortifydemo.com}" ;;
+    esac
+}
+
 guided_print_pods() {
     local id="$1" prefix pods
     cluster_reachable || { printf '  Cluster unavailable for pod status.\n'; return 0; }
@@ -2710,6 +2733,73 @@ guided_print_recent_events() {
         | tail -5 | awk 'NR>0 { printf "  %s\n", $0 }'
 }
 
+
+guided_print_step_events() {
+    local id="$1" prefix
+    cluster_reachable || return 0
+    prefix=$(guided_step_pod_prefixes "$id")
+    if [ -z "$prefix" ]; then
+        guided_print_recent_events
+        return 0
+    fi
+    $KUBECTL -n "$NAMESPACE" get events --sort-by='.lastTimestamp' 2>/dev/null \
+        | awk -v p="$prefix" 'NR == 1 || index($0, p) { lines[++count] = $0 } END { start = count - 4; if (start < 1) start = 1; for (i = start; i <= count; i++) printf "  %s\n", lines[i] }'
+}
+
+guided_print_step_services() {
+    local id="$1" service any=0
+    cluster_reachable || { printf '  Cluster unavailable for service status.\n'; return 0; }
+    while IFS= read -r service; do
+        [ -n "$service" ] || continue
+        any=1
+        if $KUBECTL -n "$NAMESPACE" get service "$service" >/dev/null 2>&1; then
+            $KUBECTL -n "$NAMESPACE" get service "$service" \
+                -o 'custom-columns=NAME:.metadata.name,TYPE:.spec.type,PORTS:.spec.ports[*].port' 2>/dev/null \
+                | sed 's/^/  /'
+        else
+            printf '  %s service is not present yet.\n' "$service"
+        fi
+        if $KUBECTL -n "$NAMESPACE" get endpoints "$service" >/dev/null 2>&1; then
+            $KUBECTL -n "$NAMESPACE" get endpoints "$service" \
+                -o 'custom-columns=NAME:.metadata.name,ENDPOINTS:.subsets[*].addresses[*].ip,PORTS:.subsets[*].ports[*].port' 2>/dev/null \
+                | sed 's/^/  /'
+        fi
+    done < <(guided_step_services "$id")
+    [ "$any" -eq 1 ] || printf '  No service endpoint check applies to this step yet.\n'
+}
+
+guided_print_step_ingresses() {
+    local id="$1" host any=0 matches
+    cluster_reachable || { printf '  Cluster unavailable for ingress status.\n'; return 0; }
+    while IFS= read -r host; do
+        [ -n "$host" ] || continue
+        any=1
+        matches=$($KUBECTL -n "$NAMESPACE" get ingress \
+            -o 'custom-columns=NAME:.metadata.name,CLASS:.spec.ingressClassName,HOSTS:.spec.rules[*].host,ADDRESS:.status.loadBalancer.ingress[*].ip' 2>/dev/null \
+            | awk -v h="$host" 'NR == 1 { header=$0; next } index($0, h) { if (!printed) { print header; printed=1 } print; found=1 } END { exit found ? 0 : 1 }') || matches=""
+        if [ -n "$matches" ]; then
+            printf '%s\n' "$matches" | sed 's/^/  /'
+        else
+            printf '  No ingress currently matches %s.\n' "$host"
+        fi
+    done < <(guided_step_hosts "$id")
+    [ "$any" -eq 1 ] || printf '  No ingress check applies to this step yet.\n'
+}
+
+guided_live_diagnostics() {
+    local id="$1" label="${2:-$1}"
+    section "Live diagnostics for $label"
+    printf '  Status: %s\n' "$(guided_step_live_status "$id")"
+    printf '  Detail: %s\n' "$(guided_step_why_pending "$id")"
+    section "Pods"
+    guided_print_pods "$id"
+    section "Services and endpoints"
+    guided_print_step_services "$id"
+    section "Ingress"
+    guided_print_step_ingresses "$id"
+    section "Recent matching events"
+    guided_print_step_events "$id"
+}
 
 guided_step_pod_logs() {
     local id="$1" label="${2:-$1}" prefix pods
@@ -2849,7 +2939,8 @@ guided_wait_for_step() {
         guided_print_pods "$id"
         section "Recent events"
         guided_print_recent_events
-        printf '\n  r. Retry operation   i. Take interactive control   p. Pod logs   l. Wizard log   h. Help   d. Diagnostics   q. Quit safely\n'
+        printf '\n  r. Retry operation   i. Take interactive control   p. Pod logs   l. Wizard log   h. Help\n'
+        printf '  d. Live diagnostics   x. Export diagnostics bundle   q. Quit safely\n'
         printf '  Waiting %ss before the next refresh' "$interval"
         [ "$timeout" -gt 0 ] && printf ' (%ss remaining)' "$remaining"
         printf '...\n'
@@ -2891,7 +2982,14 @@ guided_wait_for_step() {
                     ;;
                 [Dd])
                     guided_wait_screen_leave
-                    wizard_log_event "action=user_control step=$id control=diagnostics"
+                    wizard_log_event "action=user_control step=$id control=live_diagnostics"
+                    guided_live_diagnostics "$id" "$label"
+                    press_any
+                    guided_wait_screen_enter
+                    ;;
+                [Xx])
+                    guided_wait_screen_leave
+                    wizard_log_event "action=user_control step=$id control=diagnostics_bundle"
                     guided_diagnostics_bundle
                     press_any
                     guided_wait_screen_enter
@@ -3181,8 +3279,10 @@ guided_deployment() {
         [ "${GUIDED_AUTO_ADVANCE:-0}" = "0" ] && echo "  a. Enable auto-advance"
         [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && echo "  i. Stay interactive"
         [ "$idx" -gt 0 ] && echo "  b. Back"
+        guided_step_has_pod_logs "$id" && echo "  p. Pod logs"
         echo "  l. View wizard log"
-        echo "  d. Diagnostics"
+        echo "  d. Live diagnostics"
+        echo "  x. Export diagnostics bundle"
         echo "  ?. Help for this step"
         echo "  q. Quit safely"
         echo
@@ -3226,8 +3326,18 @@ guided_deployment() {
                 ;;
             [Aa]) GUIDED_AUTO_ADVANCE=1 ;;
             [Ii]) GUIDED_AUTO_ADVANCE=0 ;;
+            [Pp])
+                if guided_step_has_pod_logs "$id"; then
+                    wizard_log_event "action=user_control step=$id control=pod_logs"
+                    guided_step_pod_logs "$id" "${GUIDED_STEP_LABEL[$idx]}"
+                else
+                    note "No pod logs apply to ${GUIDED_STEP_LABEL[$idx]} yet."
+                    press_any
+                fi
+                ;;
             [Ll]) wizard_log_event "action=user_control step=$id control=view_log"; wizard_log_viewer ;;
-            [Dd]) wizard_log_event "action=user_control step=$id control=diagnostics"; guided_diagnostics_bundle; press_any ;;
+            [Dd]) wizard_log_event "action=user_control step=$id control=live_diagnostics"; guided_live_diagnostics "$id" "${GUIDED_STEP_LABEL[$idx]}"; press_any ;;
+            [Xx]) wizard_log_event "action=user_control step=$id control=diagnostics_bundle"; guided_diagnostics_bundle; press_any ;;
             [Ss])
                 if guided_step_is_optional "$id"; then
                     GUIDED_WAIT_LAST_STATE="skipped"

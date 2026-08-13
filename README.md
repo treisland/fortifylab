@@ -71,9 +71,9 @@ walkthrough. Each screen shows status derived from current files and live
 Kubernetes resources. Required steps cannot be skipped; optional host setup and
 post-deploy configuration can be deferred. Guided wait screens poll through
 readiness and application checks, show recent relevant events, and let you open
-contextual logs without leaving the wait. Interactive mode pauses after each
-verified step; auto-advance continues after a 5-second countdown unless you
-take control.
+contextual pod logs or live diagnostics without leaving the guided flow.
+Interactive mode pauses after each verified step; auto-advance continues after
+a 5-second countdown unless you take control.
 
 Choose **Express deployment** for the original unattended sequence: certs →
 Kubernetes Dashboard → secrets → MySQL + Postgres → SSC + LIM → SAST → DAST.
