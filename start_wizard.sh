@@ -3669,19 +3669,32 @@ guided_run_and_verify() {
 }
 
 guided_countdown() {
-    local next_label="$1" delay="${GUIDED_AUTO_ADVANCE_DELAY:-10}" remaining control
-    [[ "$delay" =~ ^[0-9]+$ ]] || delay=10
+    local current_idx="$1" current_label="$2" next_idx="$3" next_label="$4" reason="${5:-verified}"
+    local delay="${GUIDED_AUTO_ADVANCE_DELAY:-5}" remaining control total="${#GUIDED_STEP_ID[@]}"
+    local current_num next_num
+    [[ "$delay" =~ ^[0-9]+$ ]] || delay=5
+    current_num=$((current_idx + 1))
+    next_num=$((next_idx + 1))
     remaining="$delay"
     while [ "$remaining" -gt 0 ]; do
-        printf '\r  Continuing to %s in %ss. Press i for interactive control. ' "$next_label" "$remaining"
+        printf '\r\033[K  [%d/%d] %s %s. Continuing to [%d/%d] %s in %ss. Press i to stay here.' \
+            "$current_num" "$total" "$current_label" "$reason" \
+            "$next_num" "$total" "$next_label" "$remaining"
         if read -rsn1 -t 1 control; then
             case "$control" in
-                [Ii]) printf '\n'; GUIDED_AUTO_ADVANCE=0; return 1 ;;
+                [Ii])
+                    printf '\r\033[K'
+                    GUIDED_AUTO_ADVANCE=0
+                    note "[$next_num/$total] Auto-advance paused: staying interactive at $next_label."
+                    return 1
+                    ;;
             esac
         fi
         remaining=$((remaining - 1))
     done
-    printf '\n'
+    printf '\r\033[K%s [%d/%d] %s %s; continuing to [%d/%d] %s.\n' \
+        "$OK_MARK" "$current_num" "$total" "$current_label" "$reason" \
+        "$next_num" "$total" "$next_label"
     return 0
 }
 
@@ -3824,28 +3837,30 @@ EOF
 }
 
 guided_deployment() {
-    local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label
+    local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label transition_reason completed_idx
     fortify_lab_require_acknowledgement || return 1
     wizard_log_event "action=guided_session_start mode=${GUIDED_MODE_CONTEXT:-fresh} start_index=$idx auto_advance=${GUIDED_AUTO_ADVANCE:-0}"
     while [ "$idx" -lt "$total" ]; do
         id="${GUIDED_STEP_ID[$idx]}"
 
         if [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && ! guided_step_is_manual "$id"; then
+            transition_reason="already complete"
             if ! guided_step_live_complete "$id"; then
                 guided_run_and_verify "$id" "${GUIDED_STEP_LABEL[$idx]}"
                 result=$?
                 case "$result" in
-                    0) ;;
+                    0) transition_reason="verified" ;;
                     2) GUIDED_AUTO_ADVANCE=0; continue ;;
                     3) return ;;
                     4) continue ;;
                     *) GUIDED_AUTO_ADVANCE=0; press_any; continue ;;
                 esac
             fi
+            completed_idx="$idx"
             idx=$((idx + 1))
             if [ "$idx" -lt "$total" ]; then
                 next_label="${GUIDED_STEP_LABEL[$idx]}"
-                guided_countdown "$next_label" || continue
+                guided_countdown "$completed_idx" "${GUIDED_STEP_LABEL[$completed_idx]}" "$idx" "$next_label" "$transition_reason" || continue
             fi
             continue
         fi

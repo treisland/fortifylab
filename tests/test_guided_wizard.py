@@ -622,8 +622,16 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Correct the issue, then choose Retry", result.stderr)
 
 
-    def test_auto_advance_default_countdown_is_five_seconds(self) -> None:
+    def test_auto_advance_countdown_uses_numbered_ephemeral_status(self) -> None:
         self.assertIn('GUIDED_AUTO_ADVANCE_DELAY="${GUIDED_AUTO_ADVANCE_DELAY:-5}"', WIZARD)
+        countdown = WIZARD.split("guided_countdown()", 1)[1].split("guided_step_enabled()", 1)[0]
+        self.assertIn('GUIDED_AUTO_ADVANCE_DELAY:-5', countdown)
+        self.assertIn('read -rsn1 -t 1 control', countdown)
+        self.assertIn("[%d/%d]", countdown)
+        self.assertIn("Press i to stay here", countdown)
+        self.assertIn("Auto-advance paused: staying interactive", countdown)
+        self.assertIn("\\r\\033[K", countdown)
+        self.assertNotIn("Press i for interactive control", countdown)
 
     def test_prerequisite_menu_shows_completion_indicators(self) -> None:
         self.assertIn("prereqs_status_table()", WIZARD)
@@ -649,6 +657,7 @@ class GuidedWizardTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Congratulations, FortifyLab is ready", result.stdout)
+        self.assertIn("[1/2] One already complete; continuing to [2/2] Two.", result.stdout)
 
 
     def test_wait_screen_redraws_without_full_clear_flash(self) -> None:
