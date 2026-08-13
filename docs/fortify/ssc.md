@@ -27,7 +27,10 @@ LIM, and the databases do not replace SSC as the findings interface.
 
 MySQL is a hard upstream dependency. The lab waits for both the MySQL workload
 and an authenticated query before starting SSC. Ingress, DNS, TLS, storage,
-license inputs, and Kubernetes Secrets must also be prepared.
+license inputs, and Kubernetes Secrets must also be prepared. On
+Traefik-backed MicroK8s ingress, SSC uses the shared mkcert wildcard certificate
+for browser-facing TLS and Traefik service annotations plus a
+`ServersTransport` for the HTTPS backend hop to `ssc-service`.
 
 SSC is itself upstream of both ScanCentral SAST and the lab's ScanCentral DAST
 integration. Start and diagnose it before either scanning system.

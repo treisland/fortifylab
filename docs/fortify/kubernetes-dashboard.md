@@ -25,9 +25,12 @@ LIM product interfaces.
 ## Dependencies
 
 Dashboard depends on Kubernetes, its namespace and service, ingress, DNS, TLS,
-and an explicitly generated access token. It observes the other components but
-is not in their runtime dependency path: Fortify applications can continue to
-run while Dashboard is stopped.
+and an explicitly generated access token. On Traefik-backed MicroK8s ingress,
+the Dashboard route uses the shared mkcert wildcard certificate from
+`fortify/tls` for browser-facing TLS and Traefik service annotations for the
+HTTPS hop to the Dashboard service. It observes the other components but is not
+in their runtime dependency path: Fortify applications can continue to run
+while Dashboard is stopped.
 
 ## Failure symptoms
 

@@ -21,6 +21,7 @@ fi
 
 ENV_FILE="$FORTIFY_HOME_K8S/.env"
 ENV_EXAMPLE="$FORTIFY_HOME_K8S/.env.example"
+ENV_BACKUP_DIR="$FORTIFY_HOME_K8S/.env.backups"
 
 
 # ============================================================
@@ -43,6 +44,8 @@ OK_MARK="${GREEN}✓${RESET}"
 WARN_MARK="${YELLOW}⚠${RESET}"
 FAIL_MARK="${RED}✗${RESET}"
 INFO_MARK="${BLUE}ℹ${RESET}"
+FORTIFY_RECOMMENDED_MEMORY_GIB="${FORTIFY_RECOMMENDED_MEMORY_GIB:-16}"
+FORTIFY_RECOMMENDED_DISK_GIB="${FORTIFY_RECOMMENDED_DISK_GIB:-50}"
 
 hr()       { printf '%s\n' "────────────────────────────────────────────────────────────"; }
 title()    { clear; printf '\n%s%s%s\n' "$BOLD" "$1" "$RESET"; hr; }
@@ -61,6 +64,10 @@ source "$FORTIFY_HOME_K8S/scripts/lib/lab-disclaimer.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/operational-help.sh"
 # shellcheck source=scripts/lib/registry-credentials.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
+# shellcheck source=scripts/lib/wizard-logging.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/wizard-logging.sh"
+# shellcheck source=scripts/lib/coredns-lab-hosts.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
 
 
 # ============================================================
@@ -89,7 +96,7 @@ bootstrap_env() {
         if [ -f "$ENV_EXAMPLE" ]; then
             cp "$ENV_EXAMPLE" "$ENV_FILE"
             note "Created $ENV_FILE from .env.example."
-            note "Edit it (option 13) to set your domain, passwords, and image versions."
+            note "Use Advanced setup -> Configuration editor to set your domain, passwords, and image versions."
             press_any
         else
             error "Neither .env nor .env.example found in $FORTIFY_HOME_K8S."
@@ -109,6 +116,7 @@ bootstrap_env() {
 APP_LABEL=("MySQL" "PostgreSQL" "SSC" "LIM" "ScanCentral SAST" "ScanCentral DAST")
 APP_PODS=("mysql"  "postgresql" "ssc-webapp" "lim" "scancentral-sast" "sdast")
 APP_URL_VAR=(""    ""           "SSC_URL"    "LIM_URL" "SCSAST_CTRL_URL" "SCDAST_URL")
+APP_GUIDED_STEP=("mysql" "postgresql" "ssc" "lim" "sast" "dast")
 APP_START=(
     "apps/mysql/start.sh"
     "apps/postgresql/start.sh"
@@ -133,6 +141,26 @@ APP_DESTROY=(
     "apps/scsast/destroy.sh"
     "apps/scdast/core/destroy.sh apps/scdast/scanner/destroy.sh"
 )
+
+app_url_for_index() {
+    local idx="$1" variable=""
+    variable="${APP_URL_VAR[$idx]:-}"
+    [ -n "$variable" ] || return 0
+    printf '%s\n' "${!variable:-}"
+}
+
+app_url_display_for_index() {
+    local idx="$1" variable="" value=""
+    variable="${APP_URL_VAR[$idx]:-}"
+    [ -n "$variable" ] || return 0
+    value=$(app_url_for_index "$idx")
+    [ -n "$value" ] || return 0
+    if [[ "$value" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+        printf '<invalid: %s=%s>\n' "$variable" "$value"
+    else
+        printf '%s\n' "$value"
+    fi
+}
 
 
 # ============================================================
@@ -225,6 +253,129 @@ run_app_scripts() {
     done
 }
 
+lab_lifecycle_script_list() {
+    local idx field script
+    for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+        case "$1" in
+            destroy) field="${APP_DESTROY[$idx]}" ;;
+            stop) field="${APP_STOP[$idx]}" ;;
+            *) return 1 ;;
+        esac
+        for script in $field; do
+            printf '  - %-20s %s\n' "${APP_LABEL[$idx]}" "$script"
+        done
+    done
+}
+
+lab_shutdown_deployments() {
+    local idx rc=0
+    section "Shutdown lab deployments"
+    note "Stopping workloads in dependency-safe order. Persistent data is preserved."
+    wizard_log_event "action=lab_lifecycle_start operation=shutdown mode=non_destructive"
+    for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+        note "Stopping ${APP_LABEL[$idx]}..."
+        wizard_log_event "action=lab_lifecycle_component operation=shutdown component=${APP_GUIDED_STEP[$idx]}"
+        run_app_scripts "${APP_STOP[$idx]}"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            wizard_log_event "action=lab_lifecycle_finish operation=shutdown state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+            return "$rc"
+        fi
+    done
+    wizard_log_event "action=lab_lifecycle_finish operation=shutdown state=complete"
+    note "Lab workloads stopped. Data volumes and configuration remain in place."
+}
+
+lab_start_deployments() {
+    local idx rc=0 previous_mode="${GUIDED_MODE_CONTEXT:-}"
+    section "Start lab deployments"
+    note "Starting workloads in dependency order and verifying readiness after each component."
+    wizard_log_event "action=lab_lifecycle_start operation=start mode=non_destructive"
+    GUIDED_MODE_CONTEXT=lifecycle
+    for idx in "${!APP_LABEL[@]}"; do
+        guided_run_and_verify "${APP_GUIDED_STEP[$idx]}" "${APP_LABEL[$idx]}"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            GUIDED_MODE_CONTEXT="$previous_mode"
+            wizard_log_event "action=lab_lifecycle_finish operation=start state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+            return "$rc"
+        fi
+    done
+    GUIDED_MODE_CONTEXT="$previous_mode"
+    wizard_log_event "action=lab_lifecycle_finish operation=start state=complete"
+    note "Lab workloads are started and verified."
+}
+
+lab_teardown_preview() {
+    section "Full lab teardown preview"
+    cat <<EOF
+This destructive operation runs the component destroy scripts below in
+dependency-safe order. It deletes application deployments and their data so
+the lab can be started again from a clean slate.
+
+EOF
+    lab_lifecycle_script_list destroy
+}
+
+lab_destroy_deployments() {
+    local idx rc=0 confirmation expected="DESTROY FORTIFY LAB"
+    fortify_lab_show_action_warning destructive
+    lab_teardown_preview
+    printf '\nType %s to continue: ' "$expected"
+    IFS= read -r confirmation
+    if [ "$confirmation" != "$expected" ]; then
+        note "Full teardown cancelled."
+        wizard_log_event "action=lab_lifecycle_finish operation=destroy state=cancelled"
+        return 1
+    fi
+    wizard_log_event "action=lab_lifecycle_start operation=destroy mode=destructive"
+    for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+        note "Destroying ${APP_LABEL[$idx]}..."
+        wizard_log_event "action=lab_lifecycle_component operation=destroy component=${APP_GUIDED_STEP[$idx]}"
+        run_app_scripts "${APP_DESTROY[$idx]}"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            wizard_log_event "action=lab_lifecycle_finish operation=destroy state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+            return "$rc"
+        fi
+    done
+    wizard_log_event "action=lab_lifecycle_finish operation=destroy state=complete"
+    note "Lab deployments and data have been destroyed. You can start from scratch now."
+}
+
+lab_lifecycle_menu() {
+    local choice
+    while true; do
+        title "Lab lifecycle controls"
+        cat <<EOF
+
+  1. Shutdown lab deployments (preserve data)
+  2. Start lab deployments
+  3. Destroy lab deployments and data
+
+  r. Return
+  q. Quit
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1)
+                confirm "Stop all lab workloads while preserving data?" || continue
+                lab_shutdown_deployments
+                press_any ;;
+            2)
+                lab_start_deployments
+                press_any ;;
+            3)
+                lab_destroy_deployments
+                press_any ;;
+            [Rr]) return ;;
+            [Qq]) clear; exit 0 ;;
+            *) error "Invalid"; sleep 1 ;;
+        esac
+    done
+}
+
 
 # ============================================================
 # Apps submenu
@@ -267,7 +418,7 @@ app_action_menu() {
     while true; do
         title "${APP_LABEL[$idx]}"
         local url=""
-        [ -n "${APP_URL_VAR[$idx]}" ] && url="${!APP_URL_VAR[$idx]:-}"
+        url=$(app_url_display_for_index "$idx")
 
         echo
         printf '  Status: %s\n' "$(app_status "${APP_PODS[$idx]}")"
@@ -292,7 +443,9 @@ app_action_menu() {
 
         case "$choice" in
             1)
-                run_app_scripts "${APP_START[$idx]}"
+                if app_start_config_guard "$idx"; then
+                    run_app_scripts "${APP_START[$idx]}"
+                fi
                 press_any ;;
             2)
                 run_app_scripts "${APP_STOP[$idx]}"
@@ -331,7 +484,7 @@ scale_workers() {
 
 show_app_creds() {
     local idx="$1" url=""
-    [ -n "${APP_URL_VAR[$idx]}" ] && url="${!APP_URL_VAR[$idx]:-}"
+    url=$(app_url_display_for_index "$idx")
     section "${APP_LABEL[$idx]}"
     [ -n "$url" ] && printf '  URL: %s\n' "$url"
     case "${APP_LABEL[$idx]}" in
@@ -677,41 +830,28 @@ ensure_dashboard_access() {
 }
 
 configure_dns() {
-    local ip
-    ip=$(lab_node_ip)
+    local ip expected_hosts
+    ip=$(fortify_lab_node_ip)
+    expected_hosts=$(fortify_lab_hostnames_inline)
     cat <<EOF
 
-  ── Client side ─────────────────────────────────────────
+  -- Client side ------------------------------------------------
   Add to your client's /etc/hosts (or Pi-hole DNS):
 
-    $ip   ssc.$DOMAIN sast.$DOMAIN dast.$DOMAIN lim.$DOMAIN dashboard.$DOMAIN
+    $ip   $expected_hosts
 
-  ── In-cluster side ─────────────────────────────────────
+  Use the MicroK8s lab node IP shown above. If the names point at a Proxmox,
+  Traefik, or other reverse-proxy endpoint without matching routes, browsers
+  commonly show TRAEFIK DEFAULT CERT and then a plain 404 page.
+
+  -- In-cluster side --------------------------------------------
   Pods inside the cluster need to resolve $DOMAIN themselves
-  (e.g. SCDAST scanner calls https://dast.$DOMAIN). We patch
-  CoreDNS's hosts plugin so they resolve to this node's IP.
+  (e.g. ScanCentral SAST workers call https://sast.$DOMAIN/scancentral-ctrl).
+  We patch CoreDNS's hosts plugin so they resolve to this node's IP.
 
 EOF
     if confirm "Apply CoreDNS hosts override now?"; then
-        local cm
-        cm=$($KUBECTL -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}' 2>/dev/null)
-        if [ -z "$cm" ]; then
-            error "Could not read coredns ConfigMap"
-            return
-        fi
-        if echo "$cm" | grep -q "$DOMAIN"; then
-            note "CoreDNS already has an entry for $DOMAIN — skipping."
-            return
-        fi
-        # Insert a hosts block before the closing brace of the .:53 server block.
-        local patched
-        patched=$(echo "$cm" | awk -v ip="$ip" -v dom="$DOMAIN" '
-            /^}/ && !done { print "    hosts {"; print "        " ip " ssc." dom " sast." dom " dast." dom " lim." dom " dashboard." dom; print "        fallthrough"; print "    }"; done=1 } { print }')
-        $KUBECTL -n kube-system create configmap coredns \
-            --from-literal=Corefile="$patched" --dry-run=client -o yaml \
-          | $KUBECTL -n kube-system apply -f - >/dev/null
-        $KUBECTL -n kube-system rollout restart deployment/coredns >/dev/null
-        note "CoreDNS patched and restarted."
+        fortify_ensure_coredns_lab_hosts || return 1
     fi
 }
 
@@ -899,67 +1039,138 @@ live_status() {
     clear
 }
 
+k8s_resource_names() {
+    local kind="$1" filter="${2:-}" prefix="${3:-}" name
+    [ -n "$KUBECTL" ] || return 1
+    while IFS= read -r name; do
+        name="${name#*/}"
+        [ -n "$name" ] || continue
+        [ -z "$prefix" ] || [[ "$name" == "$prefix"* ]] || continue
+        [ -z "$filter" ] || [[ "$name" == *"$filter"* ]] || continue
+        printf '%s\n' "$name"
+    done < <($KUBECTL -n "$NAMESPACE" get "$kind" -o name 2>/dev/null)
+}
+
+k8s_select_resource() {
+    local kind="$1" prompt="${2:-Select resource}" filter="${3:-}" prefix="${4:-}"
+    local resources=() i sel exact
+    K8S_SELECTED_RESOURCE_KIND=""
+    K8S_SELECTED_RESOURCE_NAME=""
+
+    while true; do
+        mapfile -t resources < <(k8s_resource_names "$kind" "$filter" "$prefix")
+        printf '\n%s\n' "$prompt"
+        if [ -n "$filter" ]; then
+            printf '  Filter: %s\n' "$filter"
+        fi
+        if [ -n "$prefix" ]; then
+            printf '  Scope:  %s*\n' "$prefix"
+        fi
+        if [ ${#resources[@]} -eq 0 ]; then
+            note "No ${kind}s matched '${filter:-all}'."
+        else
+            for i in "${!resources[@]}"; do
+                printf '  %2d. %s\n' $((i + 1)) "${resources[$i]}"
+            done
+        fi
+        printf '\n  f. Filter list   x. Enter exact name   b. Back\n'
+        ask sel "${kind^} number:"
+        case "$sel" in
+            [Bb]|"") return 1 ;;
+            [Ff])
+                ask filter "Filter (substring, blank=all):"
+                ;;
+            [Xx])
+                ask exact "Exact ${kind} name:"
+                [ -n "$exact" ] || { error "Name cannot be blank"; continue; }
+                K8S_SELECTED_RESOURCE_KIND="$kind"
+                K8S_SELECTED_RESOURCE_NAME="$exact"
+                return 0
+                ;;
+            *)
+                if [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le ${#resources[@]} ]; then
+                    K8S_SELECTED_RESOURCE_KIND="$kind"
+                    K8S_SELECTED_RESOURCE_NAME="${resources[$((sel-1))]}"
+                    return 0
+                fi
+                error "Invalid selection."
+                ;;
+        esac
+    done
+}
+
+pod_has_restarts() {
+    local pod="$1"
+    $KUBECTL -n "$NAMESPACE" get pod "$pod" \
+        -o jsonpath='{range .status.containerStatuses[*]}{.restartCount}{"\\n"}{end}' 2>/dev/null \
+        | awk '$1 > 0 { found=1 } END { exit found ? 0 : 1 }'
+}
+
+pod_log_action_menu() {
+    local pod="$1" choice previous_label
+    while true; do
+        previous_label="Previous container logs"
+        pod_has_restarts "$pod" || previous_label="Previous container logs (if available)"
+        printf '\nPod: %s\n' "$pod"
+        printf '  1. Recent logs\n'
+        printf '  2. Follow logs\n'
+        printf '  3. %s\n' "$previous_label"
+        printf '  b. Back\n'
+        ask choice "Select:"
+        case "$choice" in
+            1)
+                $KUBECTL -n "$NAMESPACE" logs --tail=200 "$pod" || true
+                press_any
+                return 0
+                ;;
+            2)
+                note "Following logs for $pod. Press Ctrl+C to return."
+                $KUBECTL -n "$NAMESPACE" logs --follow --tail=100 "$pod" || true
+                press_any
+                return 0
+                ;;
+            3)
+                $KUBECTL -n "$NAMESPACE" logs --previous --tail=200 "$pod" || true
+                press_any
+                return 0
+                ;;
+            [Bb]|"") return 1 ;;
+            *) error "Invalid selection." ;;
+        esac
+    done
+}
+
 logs_menu() {
     title "Pod logs"
-    local pods=()
     if ! cluster_reachable; then
         error "Cluster not reachable"
         press_any; return
     fi
-    mapfile -t pods < <($KUBECTL -n "$NAMESPACE" get pods -o name 2>/dev/null | sed 's|^pod/||')
-    if [ ${#pods[@]} -eq 0 ]; then
-        note "No pods in '$NAMESPACE'"
-        press_any; return
-    fi
-    ask filter "Filter (substring, blank=all):"
-    local matched=() i
-    for i in "${!pods[@]}"; do
-        if [ -z "$filter" ] || [[ "${pods[$i]}" == *"$filter"* ]]; then
-            matched+=("${pods[$i]}")
-        fi
-    done
-    if [ ${#matched[@]} -eq 0 ]; then
-        note "No pods matched '$filter'"
-        press_any; return
-    fi
-    echo
-    for i in "${!matched[@]}"; do
-        printf '  %2d. %s\n' $((i + 1)) "${matched[$i]}"
-    done
-    echo
-    ask sel "Pod number:"
-    [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le ${#matched[@]} ] || {
-        error "Invalid"; press_any; return
-    }
-    local pod="${matched[$((sel-1))]}"
-    if confirm "Follow logs (Ctrl+C to exit)?"; then
-        $KUBECTL -n "$NAMESPACE" logs --follow "$pod" || true
-    else
-        $KUBECTL -n "$NAMESPACE" logs --tail=200 "$pod" || true
-        press_any
+    if k8s_select_resource pod "Select a pod"; then
+        pod_log_action_menu "$K8S_SELECTED_RESOURCE_NAME"
     fi
 }
 
 logs_for_prefix() {
-    local prefix="$1" pods=() i
-    mapfile -t pods < <($KUBECTL -n "$NAMESPACE" get pods -o name 2>/dev/null \
-                       | sed 's|^pod/||' | grep "^$prefix")
-    if [ ${#pods[@]} -eq 0 ]; then
-        note "No pods matching '$prefix'"
-        press_any; return
-    fi
-    if [ ${#pods[@]} -eq 1 ]; then
-        $KUBECTL -n "$NAMESPACE" logs --tail=200 "${pods[0]}" || true
-    else
-        echo
-        for i in "${!pods[@]}"; do
-            printf '  %2d. %s\n' $((i + 1)) "${pods[$i]}"
-        done
-        ask sel "Pod number:"
-        [[ "$sel" =~ ^[0-9]+$ ]] || return
-        $KUBECTL -n "$NAMESPACE" logs --tail=200 "${pods[$((sel-1))]}" || true
-    fi
-    press_any
+    local prefix="$1" pods=()
+    mapfile -t pods < <(k8s_resource_names pod "" "$prefix")
+    case "${#pods[@]}" in
+        0)
+            note "No pods matching '$prefix' have appeared yet."
+            press_any
+            ;;
+        1)
+            pod_log_action_menu "${pods[0]}"
+            ;;
+        *)
+            if k8s_select_resource pod "Select a pod" "" "$prefix"; then
+                pod_log_action_menu "$K8S_SELECTED_RESOURCE_NAME"
+            else
+                note "No pod selected."
+                press_any
+            fi
+            ;;
+    esac
 }
 
 # Multi-pod log streamer. Tails every pod in $NAMESPACE in parallel,
@@ -1090,10 +1301,522 @@ versions_menu() {
     press_any
 }
 
-edit_env() {
+env_is_secret_key() {
+    case "$1" in
+        *PASS*|*PASSWORD*|*TOKEN*|*SECRET*|*KEY*|*LICENSE*|*CREDENTIAL*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+env_display_value() {
+    local key="$1" value="${2:-}"
+    if env_is_secret_key "$key"; then
+        [ -n "$value" ] && printf '%s\n' '<redacted>' || printf '%s\n' '<unset>'
+    else
+        printf '%s\n' "${value:-<unset>}"
+    fi
+}
+
+env_shell_quote() {
+    local value="$1"
+    printf "'%s'" "${value//\'/\'\\\'\'}"
+}
+
+env_assignment_expr() {
+    local key="$1" value="$2" mode="${3:-literal}"
+    if [ "$mode" = expr ]; then
+        printf 'export %s="%s"' "$key" "$value"
+    else
+        printf 'export %s=%s' "$key" "$(env_shell_quote "$value")"
+    fi
+}
+
+env_backup_timestamp() { date +%Y%m%d-%H%M%S; }
+
+env_prepare_backup() {
+    local reason="${1:-wizard-edit}" timestamp backup meta
+    timestamp=$(env_backup_timestamp)
+    mkdir -p "$ENV_BACKUP_DIR" || return 1
+    backup="$ENV_BACKUP_DIR/.env.$timestamp.$reason.bak"
+    meta="$ENV_BACKUP_DIR/.env.$timestamp.$reason.meta"
+    cp "$ENV_FILE" "$backup" || return 1
+    ENV_LAST_BACKUP="$backup"
+    ENV_LAST_BACKUP_META="$meta"
+    printf 'created_by=fortifylab-wizard\ncreated_at=%s\nreason=%s\n' "$timestamp" "$reason" >"$meta"
+    printf '%s\n' "$backup" >"$FORTIFY_HOME_K8S/.env.rollback"
+}
+
+env_current_value() {
+    local key="$1"
+    ( set -a; source "$ENV_FILE" >/dev/null 2>&1; printf '%s\n' "${!key:-}" )
+}
+
+env_apply_updates() {
+    local reason="$1" key value mode pair changed_keys=() tmp line
+    shift
+    [ -s "$ENV_FILE" ] || { error "$ENV_FILE does not exist or is empty."; return 1; }
+    [ "$#" -gt 0 ] || { note "No changes selected."; return 0; }
+    env_prepare_backup "$reason" || { error "Could not create .env backup."; return 1; }
+    tmp="$FORTIFY_HOME_K8S/.env.tmp"
+    cp "$ENV_FILE" "$tmp" || return 1
+    for pair in "$@"; do
+        key="${pair%%=*}"
+        value="${pair#*=}"
+        mode=literal
+        case "$value" in
+            __EXPR__*) mode=expr; value="${value#__EXPR__}" ;;
+        esac
+        line=$(env_assignment_expr "$key" "$value" "$mode")
+        awk -v key="$key" -v newline="$line" '
+            BEGIN { replaced = 0 }
+            $0 ~ "^[[:space:]]*(export[[:space:]]+)?" key "=" { print newline; replaced = 1; next }
+            { print }
+            END { if (!replaced) { print ""; print newline } }
+        ' "$tmp" >"$tmp.next" || return 1
+        mv "$tmp.next" "$tmp" || return 1
+        changed_keys+=("$key")
+    done
+    mv "$tmp" "$ENV_FILE" || return 1
+    {
+        printf 'changed_keys='
+        local sep=""
+        for key in "${changed_keys[@]}"; do
+            printf '%s%s' "$sep" "$key"
+            sep=,
+        done
+        printf '\n'
+    } >>"$ENV_LAST_BACKUP_META"
+    wizard_log_event "action=env_update reason=$reason backup=$(basename "$ENV_LAST_BACKUP") keys=${changed_keys[*]}"
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    note "Updated .env. Backup: $ENV_LAST_BACKUP"
+    section "Changed keys"
+    for key in "${changed_keys[@]}"; do
+        printf '  - %s\n' "$key"
+    done
+}
+
+env_preview_changes() {
+    local key new mode old display_old display_new pair
+    for pair in "$@"; do
+        key="${pair%%=*}"
+        new="${pair#*=}"
+        mode=literal
+        case "$new" in
+            __EXPR__*) mode=expr; new="${new#__EXPR__}" ;;
+        esac
+        old=$(env_current_value "$key")
+        if [ "$mode" = expr ]; then
+            display_new="$new"
+        else
+            display_new="$new"
+        fi
+        display_old=$(env_display_value "$key" "$old")
+        display_new=$(env_display_value "$key" "$display_new")
+        printf '  %-32s %s -> %s\n' "$key" "$display_old" "$display_new"
+    done
+}
+
+env_backup_files() {
+    find "$ENV_BACKUP_DIR" -maxdepth 1 -type f -name '.env.*.bak' 2>/dev/null | sort -r
+}
+
+env_restore_backup() {
+    local backup="$1" reason="${2:-restore}"
+    [ -s "$backup" ] || { error "Backup not found: $backup"; return 1; }
+    env_prepare_backup "before-$reason" || return 1
+    cp "$backup" "$ENV_FILE" || return 1
+    wizard_log_event "action=env_restore restored=$(basename "$backup") rollback=$(basename "$ENV_LAST_BACKUP")"
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    note "Restored .env from $backup"
+}
+
+env_rollback_last() {
+    local backup
+    if [ -s "$FORTIFY_HOME_K8S/.env.rollback" ]; then
+        backup=$(cat "$FORTIFY_HOME_K8S/.env.rollback")
+    else
+        backup=$(env_backup_files | head -n 1)
+    fi
+    [ -n "${backup:-}" ] || { error "No .env backups are available."; return 1; }
+    env_restore_backup "$backup" rollback-last
+}
+
+env_restore_selected() {
+    local backups=() choice idx
+    while IFS= read -r choice; do backups+=("$choice"); done < <(env_backup_files)
+    [ "${#backups[@]}" -gt 0 ] || { error "No .env backups are available."; press_any; return 1; }
+    section "Available .env backups"
+    for idx in "${!backups[@]}"; do
+        printf '  %d. %s\n' $((idx + 1)) "${backups[$idx]}"
+    done
+    echo
+    ask choice "Restore which backup number (or empty to cancel):"
+    [ -z "$choice" ] && return 0
+    [[ "$choice" =~ ^[0-9]+$ ]] || { error "Invalid selection"; return 1; }
+    [ "$choice" -ge 1 ] && [ "$choice" -le "${#backups[@]}" ] || { error "Out of range"; return 1; }
+    env_restore_backup "${backups[$((choice - 1))]}" restore-selected
+}
+
+env_section_keys() {
+    case "$1" in
+        identity) printf '%s\n' NAMESPACE DOMAIN ;;
+        urls) printf '%s\n' SSC LIM SCDAST SCSAST SSC_URL LIM_URL LIM_API_URL SCDAST_URL SCSAST_URL SCSAST_CTRL_URL ;;
+        versions) printf '%s\n' FORTIFY_SSC_CHART_VERSION FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION FORTIFY_SCSAST_CTRL_IMAGE_TAG FORTIFY_SCSAST_WORKER_IMAGE_TAG FORTIFY_SCDAST_CHART_VERSION FORTIFY_LIM_CHART_VERSION FORTIFY_MYSQL_CHART_VERSION FORTIFY_POSTGRES_CHART_VERSION FORTIFY_POSTGRES_IMAGE_TAG FORTIFY_MYSQL_IMAGE_TAG ;;
+        credentials) printf '%s\n' DEFAULT_PASS SCDAST_SSC_USER SCDAST_SSC_PASS SCDAST_DB_OWNER_USER SCDAST_DB_OWNER_PASS SCDAST_DB_STANDARD_USER SCDAST_DB_STANDARD_PASS LIM_POOL_NAME LIM_POOL_PASS ;;
+        *) return 1 ;;
+    esac
+}
+
+env_guided_section_editor() {
+    local section_name="$1" reason="$2" key current value updates=()
+    title "Configuration editor"
+    section "$section_name"
+    while IFS= read -r key; do
+        current=$(env_current_value "$key")
+        printf '\n%s [%s]\n' "$key" "$(env_display_value "$key" "$current")"
+        if env_is_secret_key "$key"; then
+            read -rsp "New value (empty to keep current): " value
+            echo
+        else
+            read -rp "New value (empty to keep current): " value
+        fi
+        [ -z "$value" ] && continue
+        updates+=("$key=$value")
+    done < <(env_section_keys "$reason")
+    [ "${#updates[@]}" -gt 0 ] || { note "No changes selected."; press_any; return 0; }
+    section "Pending .env changes"
+    env_preview_changes "${updates[@]}"
+    echo
+    if confirm "Apply these .env changes with a backup first?"; then
+        env_apply_updates "$reason" "${updates[@]}"
+    else
+        note "Configuration changes cancelled."
+    fi
+    press_any
+}
+
+env_valid_domain() {
+    [[ "$1" =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)+$ ]]
+}
+
+env_url_host() {
+    local url="$1"
+    printf '%s\n' "$url" | sed -n -E 's#^https://([^/:]+)([:/].*)?$#\1#p'
+}
+
+env_expected_host_for_key() {
+    local key="$1" domain="${DOMAIN:-fortifydemo.com}"
+    case "$key" in
+        SSC) printf 'ssc.%s\n' "$domain" ;;
+        LIM) printf 'lim.%s\n' "$domain" ;;
+        SCDAST) printf 'dast.%s\n' "$domain" ;;
+        SCSAST) printf 'sast.%s\n' "$domain" ;;
+        *) return 1 ;;
+    esac
+}
+
+env_expected_url_for_key() {
+    local key="$1" domain="${DOMAIN:-fortifydemo.com}"
+    case "$key" in
+        SSC_URL) printf 'https://ssc.%s\n' "$domain" ;;
+        LIM_URL) printf 'https://lim.%s\n' "$domain" ;;
+        LIM_API_URL) printf 'https://lim.%s/LIM.API\n' "$domain" ;;
+        SCDAST_URL) printf 'https://dast.%s\n' "$domain" ;;
+        SCSAST_URL) printf 'https://sast.%s\n' "$domain" ;;
+        SCSAST_CTRL_URL) printf 'https://sast.%s/scancentral-ctrl/\n' "$domain" ;;
+        *) return 1 ;;
+    esac
+}
+
+env_placeholder_like() {
+    [[ "${1:-}" =~ ^[A-Z][A-Z0-9_]*$ ]]
+}
+
+env_config_issue_lines() {
+    local issue=0 key value url_key host_key host url_host expected
+    if [ -z "${DOMAIN:-}" ] || ! env_valid_domain "${DOMAIN:-}"; then
+        printf 'DOMAIN must be a lowercase DNS-style domain such as fortifydemo.com.\n'
+        issue=1
+    fi
+    for key in SSC LIM SCDAST SCSAST; do
+        value="${!key:-}"
+        expected=$(env_expected_host_for_key "$key" || true)
+        if [ -z "$value" ]; then
+            printf '%s is unset; expected %s.\n' "$key" "$expected"
+            issue=1
+        elif env_placeholder_like "$value"; then
+            printf '%s is set to placeholder-like value %s; expected %s.\n' "$key" "$value" "$expected"
+            issue=1
+        elif ! env_valid_domain "$value"; then
+            printf '%s must be a lowercase DNS hostname with at least one dot; current value is %s; expected %s.\n' "$key" "$value" "$expected"
+            issue=1
+        elif [ -n "$expected" ] && [ "$value" != "$expected" ]; then
+            printf '%s is %s; expected derived value %s for DOMAIN=%s.\n' "$key" "$value" "$expected" "${DOMAIN:-<unset>}"
+            issue=1
+        fi
+    done
+    for pair in SSC_URL:SSC LIM_URL:LIM LIM_API_URL:LIM SCDAST_URL:SCDAST SCSAST_URL:SCSAST SCSAST_CTRL_URL:SCSAST; do
+        url_key="${pair%%:*}"
+        host_key="${pair#*:}"
+        value="${!url_key:-}"
+        host="${!host_key:-}"
+        expected=$(env_expected_url_for_key "$url_key" || true)
+        if [ -z "$value" ]; then
+            printf '%s is unset; expected %s.\n' "$url_key" "$expected"
+            issue=1
+            continue
+        fi
+        if env_placeholder_like "$value"; then
+            printf '%s is set to placeholder-like value %s; expected %s.\n' "$url_key" "$value" "$expected"
+            issue=1
+            continue
+        fi
+        url_host=$(env_url_host "$value")
+        if [ -z "$url_host" ]; then
+            printf '%s must be an https URL; current value is %s; expected %s.\n' "$url_key" "$value" "$expected"
+            issue=1
+        elif [ -n "$host" ] && ! env_placeholder_like "$host" && [ "$url_host" != "$host" ]; then
+            printf '%s host %s does not match %s=%s; expected %s.\n' "$url_key" "$url_host" "$host_key" "$host" "$expected"
+            issue=1
+        elif [ -n "$expected" ] && [ "$value" != "$expected" ]; then
+            printf '%s is %s; expected derived value %s for DOMAIN=%s.\n' "$url_key" "$value" "$expected" "${DOMAIN:-<unset>}"
+            issue=1
+        fi
+    done
+    [ "$issue" -eq 0 ]
+}
+
+env_config_valid() {
+    [ -z "$(env_config_issue_lines)" ]
+}
+
+deployment_config_guard() {
+    local issues
+    issues=$(env_config_issue_lines)
+    [ -z "$issues" ] && return 0
+    error "Configuration has invalid host or URL values; deployment is blocked before Kubernetes changes."
+    printf '%s\n' "$issues" | awk '{ printf "  - %s\n", $0 }'
+    printf '%s\n' 'Use Configuration editor -> Repair derived host and URL values from DOMAIN, or edit .env manually, then retry.'
+    if [ -t 0 ] && confirm "Repair derived host and URL values from DOMAIN now?"; then
+        env_repair_domain_urls --yes
+        printf '%s\n' 'Repair applied. Retry the start operation.'
+    fi
+    return 1
+}
+
+app_start_config_guard() {
+    local idx="$1" step="${APP_GUIDED_STEP[$idx]:-}"
+    case "$step" in
+        ssc|lim|sast|dast) deployment_config_guard ;;
+        *) return 0 ;;
+    esac
+}
+
+env_repair_domain_urls() {
+    local assume_yes="${1:-}" domain updates=()
+    domain="${DOMAIN:-fortifydemo.com}"
+    domain="${domain,,}"
+    env_valid_domain "$domain" || { error "Cannot repair from invalid DOMAIN=${DOMAIN:-<unset>}. Set DOMAIN to a lowercase DNS-style domain first."; return 1; }
+    while IFS= read -r line; do updates+=("$line"); done < <(domain_url_updates "$domain")
+    section "Repair derived host and URL values"
+    env_preview_changes "${updates[@]}"
+    echo
+    if [ "$assume_yes" = "--yes" ] || confirm "Apply these repaired values with a backup first?"; then
+        env_apply_updates repair-domain-url "${updates[@]}"
+    else
+        note "Repair cancelled."
+    fi
+}
+
+env_diagnostics() {
+    local key raw effective expected issues
+    title "Configuration diagnostics"
+    printf '\n.env file: %s\n' "$ENV_FILE"
+    printf 'DOMAIN:   %s\n' "${DOMAIN:-<unset>}"
+    section "Host and URL values"
+    for key in SSC LIM SCDAST SCSAST SSC_URL LIM_URL LIM_API_URL SCDAST_URL SCSAST_URL SCSAST_CTRL_URL; do
+        raw=$(sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?$key=(.*)$/\2/p" "$ENV_FILE" 2>/dev/null | tail -n 1)
+        effective="${!key:-<unset>}"
+        expected=$(env_expected_host_for_key "$key" 2>/dev/null || env_expected_url_for_key "$key" 2>/dev/null || true)
+        printf '  %-16s raw=%-36s effective=%-36s expected=%s\n' "$key" "${raw:-<missing>}" "$effective" "${expected:-<none>}"
+    done
+    section "Issues"
+    issues=$(env_config_issue_lines || true)
+    if [ -z "$issues" ]; then
+        printf '  No host/URL configuration drift detected.\n'
+    else
+        printf '%s\n' "$issues" | awk '{ printf "  - %s\n", $0 }'
+    fi
+    return 0
+}
+
+domain_url_updates() {
+    local domain="$1"
+    printf '%s\n' \
+        "DOMAIN=$domain" \
+        'SSC=__EXPR__ssc.$DOMAIN' \
+        'LIM=__EXPR__lim.$DOMAIN' \
+        'SCDAST=__EXPR__dast.$DOMAIN' \
+        'SCSAST=__EXPR__sast.$DOMAIN' \
+        'SSC_URL=__EXPR__https://$SSC' \
+        'LIM_URL=__EXPR__https://$LIM' \
+        'LIM_API_URL=__EXPR__https://$LIM/LIM.API' \
+        'SCDAST_URL=__EXPR__https://$SCDAST' \
+        'SCSAST_URL=__EXPR__https://$SCSAST' \
+        'SCSAST_CTRL_URL=__EXPR__https://$SCSAST/scancentral-ctrl/'
+}
+
+domain_url_assistant() {
+    local domain updates=()
+    title "Domain and URL assistant"
+    printf '\nCurrent domain: %s\n\n' "${DOMAIN:-<unset>}"
+    ask domain "New base domain, for example fortifydemo.com:"
+    [ -n "$domain" ] || return 0
+    domain=${domain,,}
+    env_valid_domain "$domain" || { error "Use a lowercase DNS-style domain such as fortifydemo.com or lab.example.internal."; press_any; return 1; }
+    while IFS= read -r line; do updates+=("$line"); done < <(domain_url_updates "$domain")
+    section "Pending domain and URL changes"
+    env_preview_changes "${updates[@]}"
+    cat <<EOF
+
+Impact after applying:
+  - Regenerate TLS certificates.
+  - Refresh Kubernetes Secrets.
+  - Reapply ingress resources or restart affected apps.
+  - Update client DNS or /etc/hosts for the new hostnames.
+  - Import or trust the mkcert root CA on client browsers if needed.
+EOF
+    echo
+    if confirm "Apply domain and URL changes with a backup first?"; then
+        env_apply_updates domain-url "${updates[@]}"
+    else
+        note "Domain changes cancelled."
+    fi
+    press_any
+}
+
+mkcert_caroot_path() {
+    mkcert -CAROOT 2>/dev/null
+}
+
+mkcert_root_ca_source() {
+    local caroot
+    caroot=$(mkcert_caroot_path) || return 1
+    [ -n "$caroot" ] || return 1
+    printf '%s/rootCA.pem\n' "$caroot"
+}
+
+mkcert_root_ca_export() {
+    local src dest="$FORTIFY_HOME_K8S/certs/rootCA.pem"
+    command -v mkcert >/dev/null 2>&1 || { error "mkcert is not installed."; return 1; }
+    src=$(mkcert_root_ca_source) || { error "Could not locate mkcert CAROOT."; return 1; }
+    [ -s "$src" ] || { error "mkcert rootCA.pem not found at $src. Run certificate generation first."; return 1; }
+    mkdir -p "$(dirname "$dest")" || return 1
+    cp "$src" "$dest" || return 1
+    wizard_log_event "action=mkcert_root_ca_export destination=$dest"
+    note "Copied public mkcert root CA to $dest"
+    note "Only the public root CA certificate was copied; the private CA key was not touched."
+}
+
+mkcert_trust_instructions() {
+    cat <<'EOF'
+
+Trust the exported public root CA on client machines that open the lab URLs.
+Never import, copy, or share the mkcert private CA key.
+
+Windows:
+  1. Open Manage user certificates.
+  2. Import rootCA.pem into Trusted Root Certification Authorities.
+
+macOS:
+  1. Open Keychain Access.
+  2. Import rootCA.pem into System or login keychain.
+  3. Set the certificate to Always Trust for SSL.
+
+Ubuntu/Debian:
+  sudo cp rootCA.pem /usr/local/share/ca-certificates/fortifylab-mkcert.crt
+  sudo update-ca-certificates
+
+Firefox/NSS stores:
+  Import rootCA.pem in Settings -> Privacy & Security -> Certificates,
+  or use certutil for the relevant browser profile.
+EOF
+}
+
+mkcert_root_ca_menu() {
+    local src
+    title "mkcert root CA"
+    if command -v mkcert >/dev/null 2>&1; then
+        src=$(mkcert_root_ca_source || true)
+        printf '\n  mkcert CAROOT rootCA.pem: %s\n' "${src:-<unavailable>}"
+        printf '  Export target:           %s\n' "$FORTIFY_HOME_K8S/certs/rootCA.pem"
+    else
+        printf '\n  mkcert is not installed. Install prerequisites first.\n'
+    fi
+    cat <<EOF
+
+  1. Export public rootCA.pem to certs/rootCA.pem
+  2. Show trust instructions
+
+  r. Return
+EOF
+    echo
+    ask choice "Select:"
+    case "$choice" in
+        1) mkcert_root_ca_export; mkcert_trust_instructions; press_any ;;
+        2) mkcert_trust_instructions; press_any ;;
+        [Rr]) return ;;
+        *) error "Invalid"; sleep 1 ;;
+    esac
+}
+
+raw_edit_env() {
+    env_prepare_backup raw-editor || { error "Could not create .env backup."; return 1; }
     "${EDITOR:-nano}" "$ENV_FILE"
     # shellcheck disable=SC1090
     source "$ENV_FILE"
+}
+
+edit_env() {
+    local choice
+    while true; do
+        title "Configuration editor"
+        cat <<EOF
+
+  1. Lab identity and domain
+  2. URLs
+  3. Image/chart versions
+  4. Credentials and passwords
+  5. Domain and URL assistant
+  6. Configuration diagnostics
+  7. Repair derived host and URL values from DOMAIN
+  8. mkcert root CA export and trust help
+  9. Roll back last wizard .env change
+  10. Restore selected .env backup
+  11. Open raw .env in editor (backup first)
+
+  r. Return
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) env_guided_section_editor "Lab identity and domain" identity ;;
+            2) env_guided_section_editor "URLs" urls ;;
+            3) env_guided_section_editor "Image/chart versions" versions ;;
+            4) env_guided_section_editor "Credentials and passwords" credentials ;;
+            5) domain_url_assistant ;;
+            6) env_diagnostics; press_any ;;
+            7) env_repair_domain_urls; press_any ;;
+            8) mkcert_root_ca_menu ;;
+            9) env_rollback_last; press_any ;;
+            10) env_restore_selected; press_any ;;
+            11) raw_edit_env; press_any ;;
+            [Rr]) return ;;
+            *) error "Invalid"; sleep 1 ;;
+        esac
+    done
 }
 
 
@@ -1140,7 +1863,7 @@ advanced_menu() {
   2. License files
   3. Generate certificates and Secrets
   4. Configure DNS, SSC token, LIM, and Dashboard access
-  5. Edit .env
+  5. Configuration editor (.env, domain, root CA)
 
   r. Return
 EOF
@@ -1391,6 +2114,14 @@ GUIDED_AUTO_ADVANCE_DELAY="${GUIDED_AUTO_ADVANCE_DELAY:-5}"
 GUIDED_WAIT_INTERVAL="${GUIDED_WAIT_INTERVAL:-5}"
 GUIDED_WAIT_LAST_FAILURE=""
 GUIDED_WAIT_LAST_STATE=""
+GUIDED_MODE_CONTEXT="${GUIDED_MODE_CONTEXT:-fresh}"
+
+GUIDED_PREFLIGHT_MODE_ID=("fresh" "resume" "component")
+GUIDED_PREFLIGHT_MODE_CONTRACT=(
+    "fresh: read-only preflight plus empty managed-release guard before deployment"
+    "resume: read-only preflight; existing managed releases are expected and live state selects the first gap"
+    "component: read-only preflight; existing managed releases are allowed for expert start/upgrade repair"
+)
 
 # Guided lifecycle states: pending -> running -> verifying -> complete/failed/skipped.
 guided_step_index() {
@@ -1429,6 +2160,75 @@ guided_step_help_topic() {
     help_guided_topic "$1"
 }
 
+guided_mode_context_text() {
+    case "${1:-${GUIDED_MODE_CONTEXT:-}}" in
+        fresh)
+            printf '%s\n' "Guided mode: fresh deployment. The wizard runs a read-only preflight, refuses existing managed releases, and advances only after each probe verifies."
+            ;;
+        resume)
+            printf '%s\n' "Guided mode: resume or repair. Live files and Kubernetes resources choose the first incomplete required step; completed steps remain repairable."
+            ;;
+        component)
+            printf '%s\n' "Guided mode: component repair. Expert component actions may run with existing managed releases, while preflight checks remain read-only."
+            ;;
+        auto)
+            printf '%s\n' "Guided mode: auto-advance. Verified non-manual steps continue automatically after the countdown; press i to take control."
+            ;;
+        *)
+            printf '%s\n' "Guided mode: live-derived deployment orchestration."
+            ;;
+    esac
+}
+
+guided_step_action_profile() {
+    local idx
+    idx=$(guided_step_index "$1") || return 1
+    if guided_step_is_manual "$1"; then
+        printf 'manual operator action; %s\n' "${GUIDED_STEP_IMPACT[$idx]}"
+    elif [ "${GUIDED_STEP_IMPACT[$idx]}" = "read-only" ]; then
+        printf '%s\n' "read-only verification"
+    else
+        printf 'idempotent operation; %s\n' "${GUIDED_STEP_IMPACT[$idx]}"
+    fi
+}
+
+guided_preflight_contract() {
+    case "$1" in
+        fresh)
+            printf '%s\n' "fresh: read-only preflight plus empty managed-release guard before deployment"
+            ;;
+        resume)
+            printf '%s\n' "resume: read-only preflight; existing managed releases are expected and live state selects the first gap"
+            ;;
+        component)
+            printf '%s\n' "component: read-only preflight; existing managed releases are allowed for expert start/upgrade repair"
+            ;;
+        *)
+            error "Unknown guided preflight mode: $1"
+            return 1
+            ;;
+    esac
+}
+
+guided_repair_recommendation() {
+    case "$1" in
+        prereqs) printf '%s\n' "Repair recommendation: install or refresh host prerequisites, then retry the prerequisite probe. Retry safety: host-package changes only." ;;
+        inputs) printf '%s\n' "Repair recommendation: review .env and the Fortify license, then rerun configuration validation. Retry safety: read-only until you choose an edit/import action." ;;
+        preflight) printf '%s\n' "Repair recommendation: fix the reported prerequisite, storage, registry, capacity, or required setting before deploying. Retry safety: read-only." ;;
+        certs) printf '%s\n' "Repair recommendation: regenerate TLS material only on a fresh lab or before recreating Secrets. Data risk: certificate and key rotation can invalidate existing trust." ;;
+        dashboard) printf '%s\n' "Repair recommendation: rerun the idempotent Dashboard deployment and verify the ingress and service accounts. Retry safety: idempotent Kubernetes apply." ;;
+        secrets) printf '%s\n' "Repair recommendation: rerun scripts/create-secrets.sh after confirming the license, TLS files, and registry credentials. Data risk: rotating SSC secret.key can invalidate encrypted SSC data." ;;
+        mysql) printf '%s\n' "Repair recommendation: retry MySQL start/upgrade and wait for the StatefulSet plus authenticated query. Retry safety: Helm upgrade preserves PVC data." ;;
+        postgresql) printf '%s\n' "Repair recommendation: retry PostgreSQL start/upgrade and wait for the StatefulSet plus authenticated query. Retry safety: Helm upgrade preserves PVC data." ;;
+        ssc) printf '%s\n' "Repair recommendation: repair MySQL first, then retry SSC and verify service, ingress, and HTTP health. For HTTP 5xx, inspect pod logs locally for migration or database errors." ;;
+        lim) printf '%s\n' "Repair recommendation: retry LIM and verify its service, ingress, and HTTP endpoint before DAST. Retry safety: idempotent Kubernetes apply." ;;
+        sast) printf '%s\n' "Repair recommendation: confirm SSC is healthy and the ControllerToken is configured, then retry SAST. Keep tokens out of logs and command output." ;;
+        dast) printf '%s\n' "Repair recommendation: confirm PostgreSQL, SSC, and LIM are healthy, then retry DAST Core and scanner. Preserve database PVCs while troubleshooting." ;;
+        configure) printf '%s\n' "Repair recommendation: complete DNS, SSC ControllerToken, and LIM pool actions from the Configure menu. Retry safety: manual operator action." ;;
+        *) printf '%s\n' "Repair recommendation: inspect the failing probe detail, fix the underlying resource, then retry. Avoid destructive cleanup unless a step explicitly says data will be deleted." ;;
+    esac
+}
+
 prereqs_complete() {
     local command
     for command in openssl envsubst curl; do
@@ -1440,6 +2240,7 @@ prereqs_complete() {
 
 inputs_complete() {
     [ -s "$ENV_FILE" ] || return 1
+    env_config_valid || return 1
     ( source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh" &&
       fortify_resolve_license_file ) >/dev/null 2>&1
 }
@@ -1449,7 +2250,7 @@ deployment_inputs_menu() {
         title "Configuration and license"
         printf '\n  .env:    %s\n' "$ENV_FILE"
         printf '  License: %s\n\n' "$(status_license)"
-        echo "  1. Edit .env"
+        echo "  1. Configuration editor"
         echo "  2. Add or review the Fortify license"
         echo "  ?. Help for this step"
         echo "  r. Return to the guided step"
@@ -1466,7 +2267,7 @@ deployment_inputs_menu() {
 }
 
 preflight_inputs_complete() {
-    local variable memory_gib disk_gib
+    local variable
     prereqs_complete && inputs_complete && cluster_reachable || return 1
     microk8s status >/dev/null 2>&1 || return 1
     $KUBECTL get storageclass nfs >/dev/null 2>&1 || return 1
@@ -1475,9 +2276,7 @@ preflight_inputs_complete() {
         FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION; do
         [ -n "${!variable:-}" ] || return 1
     done
-    memory_gib=$(awk '/MemTotal:/ {print int($2/1024/1024)}' /proc/meminfo)
-    disk_gib=$(df -Pk "$FORTIFY_HOME_K8S" | awk 'NR==2 {print int($4/1024/1024)}')
-    [ "$memory_gib" -ge 16 ] && [ "$disk_gib" -ge 50 ]
+    return 0
 }
 
 lab_node_ip() {
@@ -1489,7 +2288,7 @@ lab_hostnames() {
 }
 
 lab_hosts_resolution_detail() {
-    local host resolved loopback_hosts node_ip
+    local host resolved loopback_hosts wrong_ip_hosts node_ip
     node_ip=$(lab_node_ip)
     while IFS= read -r host; do
         [ -n "$host" ] || continue
@@ -1500,13 +2299,19 @@ lab_hosts_resolution_detail() {
         fi
         if [[ "$resolved" == 127.* ]]; then
             loopback_hosts="${loopback_hosts:+$loopback_hosts, }$host=$resolved"
+        elif [ -n "$node_ip" ] && [ "$resolved" != "$node_ip" ]; then
+            wrong_ip_hosts="${wrong_ip_hosts:+$wrong_ip_hosts, }$host=$resolved"
         fi
     done < <(lab_hostnames)
     if [ -n "${loopback_hosts:-}" ]; then
         printf 'Lab hostnames resolve to loopback (%s). Map them to the lab node IP%s instead.\n' "$loopback_hosts" "${node_ip:+, for example $node_ip}"
         return 0
     fi
-    printf 'Lab hostnames resolve to non-loopback addresses for client access.\n'
+    if [ -n "${wrong_ip_hosts:-}" ]; then
+        printf 'Lab hostnames resolve to %s, but this lab node appears to be %s. If that address is Traefik or another proxy, the browser may show TRAEFIK DEFAULT CERT and a 404.\n' "$wrong_ip_hosts" "${node_ip:-unknown}"
+        return 0
+    fi
+    printf 'Lab hostnames resolve to the lab node IP for client access.\n'
 }
 
 certs_ready() {
@@ -1735,6 +2540,17 @@ guided_step_progress_message() {
     esac
 }
 
+guided_step_why_pending() {
+    local id="$1"
+    if guided_step_complete "$id"; then
+        printf '%s\n' "Step is complete; no pending action is required."
+    elif guided_step_in_progress "$id"; then
+        printf '%s\n' "Step is in progress; continue watching verification before retrying."
+    else
+        guided_step_progress_message "$id"
+    fi
+}
+
 guided_step_pod_prefixes() {
     case "$1" in
         mysql) printf '%s\n' mysql ;;
@@ -1766,6 +2582,37 @@ guided_print_recent_events() {
         | tail -5 | awk 'NR>0 { printf "  %s\n", $0 }'
 }
 
+
+guided_step_pod_logs() {
+    local id="$1" label="${2:-$1}" prefix pods
+    if ! cluster_reachable; then
+        error "Cluster not reachable"
+        press_any
+        return 1
+    fi
+    prefix=$(guided_step_pod_prefixes "$id")
+    if [ -z "$prefix" ]; then
+        note "No pod logs apply to $label yet."
+        press_any
+        return 1
+    fi
+    mapfile -t pods < <(k8s_resource_names pod "" "$prefix")
+    if [ ${#pods[@]} -eq 0 ]; then
+        note "No pods matching '$prefix' have appeared yet. Recent events may explain what is still pending."
+        section "Recent events"
+        guided_print_recent_events
+        press_any
+        return 1
+    fi
+    if [ ${#pods[@]} -eq 1 ]; then
+        pod_log_action_menu "${pods[0]}"
+        return $?
+    fi
+    if k8s_select_resource pod "Select a pod for $label" "" "$prefix"; then
+        pod_log_action_menu "$K8S_SELECTED_RESOURCE_NAME"
+    fi
+}
+
 guided_diagnostics_bundle() {
     local output_dir bundle
     output_dir="${XDG_STATE_HOME:-$HOME/.local/state}/fortify-lab/diagnostics"
@@ -1780,6 +2627,24 @@ guided_diagnostics_bundle() {
         error "Diagnostics bundle creation failed."
         return 1
     fi
+}
+
+wizard_log_event() {
+    fortify_wizard_log INFO "$@" >/dev/null 2>&1 || true
+}
+
+wizard_log_viewer() {
+    local lines="${FORTIFY_WIZARD_LOG_VIEW_LINES:-120}" log_file
+    title "Wizard log"
+    log_file=$(fortify_wizard_log_file 2>/dev/null || true)
+    if [ -n "$log_file" ]; then
+        printf '\n  Log file: %s\n' "$log_file"
+    fi
+    printf '  Showing the last %s sanitized lines. Review before sharing.\n\n' "$lines"
+    if ! fortify_wizard_log_view "$lines" 2>/dev/null | sed 's/^/  /'; then
+        error "Could not read the wizard log."
+    fi
+    press_any
 }
 
 guided_wait_screen_enter() {
@@ -1810,6 +2675,7 @@ guided_wait_for_step() {
     GUIDED_WAIT_LAST_FAILURE=""
     GUIDED_WAIT_LAST_STATE="verifying"
     probe=$(guided_step_probe "$id") || probe="unknown"
+    wizard_log_event "action=verification_start step=$id probe=$probe timeout=$timeout"
 
     if guided_step_is_manual "$id"; then
         GUIDED_WAIT_LAST_STATE="manual"
@@ -1824,6 +2690,7 @@ guided_wait_for_step() {
         if guided_step_complete "$id"; then
             GUIDED_WAIT_LAST_STATE="complete"
             guided_wait_screen_leave
+            wizard_log_event "action=verification_finish step=$id probe=$probe state=complete elapsed=$((SECONDS - started))"
             note "$label verified ready."
             return 0
         fi
@@ -1834,6 +2701,8 @@ guided_wait_for_step() {
             GUIDED_WAIT_LAST_FAILURE="$label did not verify ready within ${timeout}s; probe $probe is still failing."
             error "$GUIDED_WAIT_LAST_FAILURE"
             guided_wait_screen_leave
+            wizard_log_event "action=verification_finish step=$id probe=$probe state=failed elapsed=$elapsed detail=$GUIDED_WAIT_LAST_FAILURE"
+            guided_repair_recommendation "$id" >&2
             help_print_topic_reference "$(guided_step_help_topic "$id")"
             return 1
         fi
@@ -1852,7 +2721,7 @@ guided_wait_for_step() {
         guided_print_pods "$id"
         section "Recent events"
         guided_print_recent_events
-        printf '\n  r. Retry operation   i. Take interactive control   h. Help   d. Diagnostics   q. Quit safely\n'
+        printf '\n  r. Retry operation   i. Take interactive control   p. Pod logs   l. Wizard log   h. Help   d. Diagnostics   q. Quit safely\n'
         printf '  Waiting %ss before the next refresh' "$interval"
         [ "$timeout" -gt 0 ] && printf ' (%ss remaining)' "$remaining"
         printf '...\n'
@@ -1863,22 +2732,38 @@ guided_wait_for_step() {
                     GUIDED_WAIT_LAST_STATE="retry"
                     guided_wait_screen_leave
                     note "Retry requested."
+                    wizard_log_event "action=user_control step=$id control=retry"
                     return 4
                     ;;
                 [Ii])
                     GUIDED_WAIT_LAST_STATE="interactive"
                     guided_wait_screen_leave
                     note "Interactive control requested."
+                    wizard_log_event "action=user_control step=$id control=interactive_takeover"
                     return 2
                     ;;
                 [Hh]|\?)
                     guided_wait_screen_leave
                     topic=$(guided_step_help_topic "$id") || topic=overview
+                    wizard_log_event "action=user_control step=$id control=help"
                     help_show_topic "$topic"
+                    guided_wait_screen_enter
+                    ;;
+                [Pp])
+                    guided_wait_screen_leave
+                    wizard_log_event "action=user_control step=$id control=pod_logs"
+                    guided_step_pod_logs "$id" "$label"
+                    guided_wait_screen_enter
+                    ;;
+                [Ll])
+                    guided_wait_screen_leave
+                    wizard_log_event "action=user_control step=$id control=view_log"
+                    wizard_log_viewer
                     guided_wait_screen_enter
                     ;;
                 [Dd])
                     guided_wait_screen_leave
+                    wizard_log_event "action=user_control step=$id control=diagnostics"
                     guided_diagnostics_bundle
                     press_any
                     guided_wait_screen_enter
@@ -1887,6 +2772,7 @@ guided_wait_for_step() {
                     GUIDED_WAIT_LAST_STATE="quit"
                     guided_wait_screen_leave
                     note "No wizard state or secrets were written. Live resources will be detected when you resume."
+                    wizard_log_event "action=user_control step=$id control=quit_safely"
                     return 3
                     ;;
             esac
@@ -1928,6 +2814,61 @@ wizard_environment_overview() {
         "$ready_total" "$required_total"
 }
 
+wizard_doctor_load_env() {
+    if [ -f "$ENV_FILE" ]; then
+        # shellcheck disable=SC1090
+        source "$ENV_FILE"
+    fi
+    DOMAIN="${DOMAIN:-fortifydemo.com}"
+    NAMESPACE="${NAMESPACE:-fortify}"
+    SSC="${SSC:-ssc.$DOMAIN}"
+    LIM="${LIM:-lim.$DOMAIN}"
+    SCDAST="${SCDAST:-dast.$DOMAIN}"
+    SCSAST="${SCSAST:-sast.$DOMAIN}"
+    SSC_URL="${SSC_URL:-https://$SSC}"
+    LIM_URL="${LIM_URL:-https://$LIM}"
+    SCDAST_URL="${SCDAST_URL:-https://$SCDAST}"
+    SCSAST_CTRL_URL="${SCSAST_CTRL_URL:-https://$SCSAST}"
+    FORTIFY_OPERATION_NAMESPACE="$NAMESPACE"
+}
+
+wizard_config_diagnostics() {
+    wizard_doctor_load_env
+    env_diagnostics
+}
+
+wizard_doctor() {
+    local id incomplete=0 unavailable=0
+    wizard_doctor_load_env
+    wizard_log_event "action=doctor_start mode=doctor"
+    operational_cluster_available || unavailable=1
+    operational_doctor_compact_health_summary || unavailable=1
+    printf '\nDetailed checks:\n'
+    operational_doctor_hosts_resolution || true
+    operational_doctor_coredns_drift || true
+    operational_doctor_ingress || true
+    operational_doctor_service_endpoints || true
+    operational_doctor_http_status || true
+    printf '\nGuided readiness:\n'
+    for id in prereqs inputs preflight certs dashboard secrets mysql postgresql ssc lim sast dast configure; do
+        if guided_step_complete "$id"; then
+            printf '  %-12s complete\n' "$id"
+        elif guided_step_in_progress "$id"; then
+            printf '  %-12s in-progress - %s\n' "$id" "$(guided_step_why_pending "$id")"
+            incomplete=1
+        else
+            printf '  %-12s needs-attention - %s\n' "$id" "$(guided_step_why_pending "$id")"
+            incomplete=1
+        fi
+    done
+    wizard_log_event "action=doctor_finish state=$([ "$incomplete" -eq 0 ] && [ "$unavailable" -eq 0 ] && printf healthy || printf degraded)"
+    if [ "$unavailable" -ne 0 ]; then
+        return 2
+    fi
+    [ "$incomplete" -eq 0 ] && return 0
+    return 1
+}
+
 managed_release_names() {
     [ -n "${HELM:-}" ] && [ -n "${NAMESPACE:-}" ] && cluster_reachable || return 0
     $HELM -n "$NAMESPACE" list -q 2>/dev/null \
@@ -1951,8 +2892,10 @@ fresh_deployment_guard() {
 # This is the sole operation dispatcher for both interactive deployment modes.
 # Rendering guided status never calls it.
 run_deployment_operation() {
-    ensure_registry_credentials "$1" || return 1
-    case "$1" in
+    local operation="$1" rc
+    wizard_log_event "action=operation_start step=$operation mode=${GUIDED_MODE_CONTEXT:-unknown}"
+    ensure_registry_credentials "$operation" || { rc=$?; wizard_log_event "action=operation_finish step=$operation state=failed exit_code=$rc detail=registry_credentials"; return "$rc"; }
+    case "$operation" in
         prereqs) prereqs_menu ;;
         inputs) deployment_inputs_menu ;;
         preflight) preflight_check ;;
@@ -1961,29 +2904,38 @@ run_deployment_operation() {
         secrets) bash "$FORTIFY_HOME_K8S/scripts/create-secrets.sh" ;;
         mysql) run_app_scripts "apps/mysql/start.sh" ;;
         postgresql) run_app_scripts "apps/postgresql/start.sh" ;;
-        ssc) run_app_scripts "apps/ssc/start.sh" ;;
-        lim) run_app_scripts "apps/lim/start.sh" ;;
-        sast) run_app_scripts "apps/scsast/start.sh" ;;
-        dast) run_app_scripts "apps/scdast/core/start.sh apps/scdast/scanner/start.sh" ;;
+        ssc) deployment_config_guard && run_app_scripts "apps/ssc/start.sh" ;;
+        lim) deployment_config_guard && run_app_scripts "apps/lim/start.sh" ;;
+        sast) deployment_config_guard && run_app_scripts "apps/scsast/start.sh" ;;
+        dast) deployment_config_guard && run_app_scripts "apps/scdast/core/start.sh apps/scdast/scanner/start.sh" ;;
         configure) configure_menu ;;
-        *) error "Unknown deployment operation: $1"; return 1 ;;
+        *) error "Unknown deployment operation: $operation"; return 1 ;;
     esac
+    rc=$?
+    wizard_log_event "action=operation_finish step=$operation state=$([ "$rc" -eq 0 ] && printf complete || printf failed) exit_code=$rc"
+    return "$rc"
 }
 
 guided_run_and_verify() {
-    local id="$1" label="$2" result
+    local id="$1" label="$2" result started elapsed
     section "$label"
+    started=$SECONDS
     GUIDED_WAIT_LAST_STATE="running"
+    wizard_log_event "action=step_enter step=$id label=$label mode=${GUIDED_MODE_CONTEXT:-unknown} profile=$(guided_step_action_profile "$id")"
     if ! run_deployment_operation "$id"; then
         GUIDED_WAIT_LAST_STATE="failed"
         GUIDED_WAIT_LAST_FAILURE="$label operation failed before verification."
         error "$GUIDED_WAIT_LAST_FAILURE"
         error "The step is still incomplete. Correct the issue, then choose Retry."
+        guided_repair_recommendation "$id" >&2
+        wizard_log_event "action=step_exit step=$id state=failed duration=$((SECONDS - started)) detail=$GUIDED_WAIT_LAST_FAILURE"
         help_print_topic_reference "$(guided_step_help_topic "$id")"
         return 1
     fi
     guided_wait_for_step "$id" "$label"
     result=$?
+    elapsed=$((SECONDS - started))
+    wizard_log_event "action=step_exit step=$id state=$GUIDED_WAIT_LAST_STATE duration=$elapsed result=$result"
     case "$result" in
         0)
             if guided_step_is_optional "$id" || guided_step_complete "$id"; then
@@ -1993,11 +2945,13 @@ guided_run_and_verify() {
             GUIDED_WAIT_LAST_FAILURE="$label still needs required operator input."
             error "$GUIDED_WAIT_LAST_FAILURE"
             error "The step is still incomplete. Correct the issue, then choose Retry."
+            guided_repair_recommendation "$id" >&2
             return 1
             ;;
         2|3|4) return "$result" ;;
         *)
             error "The step is still incomplete. Correct the issue, then choose Retry."
+            guided_repair_recommendation "$id" >&2
             return 1
             ;;
     esac
@@ -2029,7 +2983,9 @@ guided_deployment_menu() {
         resume_repair
         return
     fi
+    GUIDED_MODE_CONTEXT=fresh
     title "Guided deployment mode"
+    printf '\n  %s\n' "$(guided_mode_context_text fresh)"
     cat <<EOF
 
   1. Interactive guided deployment
@@ -2041,14 +2997,15 @@ guided_deployment_menu() {
 EOF
     ask choice "Select:"
     case "$choice" in
-        2) GUIDED_AUTO_ADVANCE=1; guided_deployment 0 ;;
-        *) GUIDED_AUTO_ADVANCE=0; guided_deployment 0 ;;
+        2) GUIDED_AUTO_ADVANCE=1; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=auto"; guided_deployment 0 ;;
+        *) GUIDED_AUTO_ADVANCE=0; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=fresh"; guided_deployment 0 ;;
     esac
 }
 
 guided_deployment() {
     local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label
     fortify_lab_require_acknowledgement || return 1
+    wizard_log_event "action=guided_session_start mode=${GUIDED_MODE_CONTEXT:-fresh} start_index=$idx auto_advance=${GUIDED_AUTO_ADVANCE:-0}"
     while [ "$idx" -lt "$total" ]; do
         id="${GUIDED_STEP_ID[$idx]}"
 
@@ -2073,8 +3030,11 @@ guided_deployment() {
         fi
 
         title "Guided deployment - Step $((idx + 1)) of $total"
+        printf '\n  %s\n' "$(guided_mode_context_text "$GUIDED_MODE_CONTEXT")"
         printf '\n  %s%s%s\n\n  %s\n' "$BOLD" "${GUIDED_STEP_LABEL[$idx]}" "$RESET" "${GUIDED_STEP_HELP[$idx]}"
+        printf '  Step type: %s\n' "$(guided_step_action_profile "$id")"
         printf '\n  Current status: %s\n' "$(guided_step_status "$id")"
+        printf '  Why pending: %s\n' "$(guided_step_why_pending "$id")"
         [ "$id" = dashboard ] && printf '  Dashboard URL: https://dashboard.%s\n' "$DOMAIN"
         [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && printf '  Mode: auto-advance is paused for this step\n'
         echo
@@ -2093,6 +3053,7 @@ guided_deployment() {
         [ "${GUIDED_AUTO_ADVANCE:-0}" = "0" ] && echo "  a. Enable auto-advance"
         [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && echo "  i. Stay interactive"
         [ "$idx" -gt 0 ] && echo "  b. Back"
+        echo "  l. View wizard log"
         echo "  d. Diagnostics"
         echo "  ?. Help for this step"
         echo "  q. Quit safely"
@@ -2137,11 +3098,13 @@ guided_deployment() {
                 ;;
             [Aa]) GUIDED_AUTO_ADVANCE=1 ;;
             [Ii]) GUIDED_AUTO_ADVANCE=0 ;;
-            [Dd]) guided_diagnostics_bundle; press_any ;;
+            [Ll]) wizard_log_event "action=user_control step=$id control=view_log"; wizard_log_viewer ;;
+            [Dd]) wizard_log_event "action=user_control step=$id control=diagnostics"; guided_diagnostics_bundle; press_any ;;
             [Ss])
                 if guided_step_is_optional "$id"; then
                     GUIDED_WAIT_LAST_STATE="skipped"
                     note "Skipped optional step; you can return to it later."
+                    wizard_log_event "action=step_exit step=$id state=skipped"
                     idx=$((idx + 1))
                 else
                     error "${GUIDED_STEP_LABEL[$idx]} is required and cannot be skipped"
@@ -2150,10 +3113,11 @@ guided_deployment() {
                 ;;
             [Bb]) [ "$idx" -gt 0 ] && idx=$((idx - 1)) ;;
             \?) help_show_topic "$(guided_step_help_topic "$id")" ;;
-            [Qq]) note "No wizard state or secrets were written. Live resources will be detected when you resume."; return ;;
+            [Qq]) note "No wizard state or secrets were written. Live resources will be detected when you resume."; wizard_log_event "action=user_control step=$id control=quit_safely"; return ;;
             *) error "Invalid selection"; sleep 1 ;;
         esac
     done
+    wizard_log_event "action=guided_session_end mode=${GUIDED_MODE_CONTEXT:-fresh} state=complete"
     note "Guided deployment complete."
     press_any
 }
@@ -2162,7 +3126,9 @@ guided_deployment() {
 resume_repair() {
     local idx id start=0 found=0 total="${#GUIDED_STEP_ID[@]}"
     fortify_lab_require_acknowledgement || return 1
+    GUIDED_MODE_CONTEXT=resume
     title "Resume or repair deployment"
+    printf '\n  %s\n' "$(guided_mode_context_text resume)"
     echo
     echo "  State is derived from current files and Kubernetes; no password or token is persisted."
     echo
@@ -2176,12 +3142,14 @@ resume_repair() {
     done
     echo
     note "Guided mode will start at the first incomplete required step; completed steps remain available for repair."
+    note "$(guided_repair_recommendation "${GUIDED_STEP_ID[$start]}")"
     press_any
     guided_deployment "$start"
 }
 
 deploy_from_scratch() {
     fortify_lab_require_acknowledgement || return 1
+    GUIDED_MODE_CONTEXT=fresh
     title "Deploy lab from scratch"
     fresh_deployment_guard || { press_any; return 1; }
     wizard_deployment_plan
@@ -2218,8 +3186,67 @@ EOF
     press_any
 }
 
+preflight_capacity_is_integer() {
+    [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+preflight_memory_gib() {
+    awk '/MemTotal:/ {print int($2/1024/1024)}' /proc/meminfo 2>/dev/null
+}
+
+preflight_disk_gib() {
+    df -Pk "$FORTIFY_HOME_K8S" 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}'
+}
+
+preflight_resource_warnings() {
+    local memory_gib disk_gib
+    memory_gib=$(preflight_memory_gib)
+    disk_gib=$(preflight_disk_gib)
+    if ! preflight_capacity_is_integer "$memory_gib"; then
+        printf '%s\n' "Host memory is unknown; recommended minimum is ${FORTIFY_RECOMMENDED_MEMORY_GIB} GiB."
+    elif [ "$memory_gib" -lt "$FORTIFY_RECOMMENDED_MEMORY_GIB" ]; then
+        printf '%s\n' "Host memory is ${memory_gib} GiB; recommended minimum is ${FORTIFY_RECOMMENDED_MEMORY_GIB} GiB."
+    fi
+    if ! preflight_capacity_is_integer "$disk_gib"; then
+        printf '%s\n' "Free disk is unknown; recommended minimum is ${FORTIFY_RECOMMENDED_DISK_GIB} GiB."
+    elif [ "$disk_gib" -lt "$FORTIFY_RECOMMENDED_DISK_GIB" ]; then
+        printf '%s\n' "Free disk is ${disk_gib} GiB; recommended minimum is ${FORTIFY_RECOMMENDED_DISK_GIB} GiB."
+    fi
+}
+
+
+preflight_can_prompt_for_low_resources() {
+    [ "${GUIDED_AUTO_ADVANCE:-0}" != 1 ] && [ "${FORTIFY_NONINTERACTIVE:-0}" != 1 ] && [ -t 0 ]
+}
+
+preflight_confirm_low_resources() {
+    local warnings
+    warnings=$(preflight_resource_warnings)
+    [ -z "$warnings" ] && return 0
+    wizard_log_event "action=resource_warning state=detected"
+    printf '\n%s\n' "$warnings" >&2
+    if [ "${FORTIFY_ALLOW_LOW_RESOURCES:-0}" = 1 ]; then
+        note "Continuing below the recommended host profile because FORTIFY_ALLOW_LOW_RESOURCES=1 is set."
+        wizard_log_event "action=resource_warning state=allowed mode=env_override"
+        return 0
+    fi
+    if ! preflight_can_prompt_for_low_resources; then
+        error "Resource warnings require FORTIFY_ALLOW_LOW_RESOURCES=1 in auto-advance or non-interactive mode."
+        wizard_log_event "action=resource_warning state=blocked mode=noninteractive"
+        return 1
+    fi
+    printf '%s %s\n' "$WARN_MARK" "Resource warnings do not block lab deployment if you explicitly continue." >&2
+    if confirm "Continue below the recommended RAM/disk profile?"; then
+        wizard_log_event "action=resource_warning state=allowed mode=interactive"
+        return 0
+    fi
+    wizard_log_event "action=resource_warning state=blocked mode=interactive"
+    return 1
+}
+
+
 preflight_check() {
-    local command memory_gib disk_gib variable
+    local command variable
     for command in microk8s docker mkcert java keytool openssl envsubst curl; do
         command -v "$command" >/dev/null 2>&1 || {
             error "Missing prerequisite: $command (use option 3)"
@@ -2248,16 +3275,7 @@ preflight_check() {
             return 1
         }
     done
-    memory_gib=$(awk '/MemTotal:/ {print int($2/1024/1024)}' /proc/meminfo)
-    disk_gib=$(df -Pk "$FORTIFY_HOME_K8S" | awk 'NR==2 {print int($4/1024/1024)}')
-    [ "$memory_gib" -ge 16 ] || {
-        error "At least 16 GiB host memory is required"
-        return 1
-    }
-    [ "$disk_gib" -ge 50 ] || {
-        error "At least 50 GiB free disk is required for a fresh deployment"
-        return 1
-    }
+    preflight_confirm_low_resources || return 1
     return 0
 }
 
@@ -2321,16 +3339,18 @@ main_menu() {
         echo "   7. Advanced setup and configuration"
 
         section "Operations"
-        echo "   8. Stream logs (all pods)"
-        echo "   9. Cluster snapshot"
-        echo "  10. Tail one pod"
-        echo "  11. URLs & credentials"
-        echo "  12. Image versions"
-        echo "  13. Edit .env"
+        echo "   8. Lab lifecycle controls"
+        echo "   9. Stream logs (all pods)"
+        echo "  10. Cluster snapshot"
+        echo "  11. Tail one pod"
+        echo "  12. URLs & credentials"
+        echo "  13. Image versions"
+        echo "  14. Configuration editor"
 
         section "Learn"
-        echo "  14. Help Center / Fortify Knowledge Center"
-        echo "  15. Operational guidance and troubleshooting"
+        echo "  15. Help Center / Fortify Knowledge Center"
+        echo "  16. Operational guidance and troubleshooting"
+        echo "  17. View wizard log"
 
         echo
         echo "   q. Quit"
@@ -2345,14 +3365,16 @@ main_menu() {
             5)  dashboard_access_menu ;;
             6)  live_status ;;
             7)  advanced_menu ;;
-            8)  stream_logs ;;
-            9)  cluster_status ;;
-           10)  logs_menu ;;
-           11)  urls_creds ;;
-           12)  versions_menu ;;
-           13)  edit_env ;;
-           14)  help_center ;;
-           15)  operational_guidance_menu ;;
+            8)  lab_lifecycle_menu ;;
+            9)  stream_logs ;;
+           10)  cluster_status ;;
+           11)  logs_menu ;;
+           12)  urls_creds ;;
+           13)  versions_menu ;;
+           14)  edit_env ;;
+           15)  help_center ;;
+           16)  operational_guidance_menu ;;
+           17)  wizard_log_viewer ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;
         esac
@@ -2371,11 +3393,14 @@ Fortify Lab management wizard.
 Usage:
   ./start_wizard.sh                  Launch the interactive menu.
   ./start_wizard.sh --accept-lab-use Explicitly acknowledge lab-only use for automation.
+  ./start_wizard.sh doctor           Run a read-only health summary and exit.
+  ./start_wizard.sh config-diagnostics
+                                      Inspect .env host/URL wiring without printing secrets.
   ./start_wizard.sh -h | --help      Show this message.
 
 Environment overrides:
   FORTIFY_HOME_K8S    Repo root (defaults to the script's directory).
-  EDITOR              Editor used by 'Edit .env' (defaults to nano).
+  EDITOR              Editor used by the raw .env editor fallback (defaults to nano).
   NO_COLOR            Disable color output if set to any value.
   WIZARD_NOMAIN       Set to 1 to source this file without entering the menu
                       (for tests / scripting).
@@ -2390,13 +3415,21 @@ EOF
 if [ -z "${WIZARD_NOMAIN:-}" ]; then
     case "${1:-}" in
         -h|--help) usage; exit 0 ;;
-        ''|--accept-lab-use) ;;
+        doctor|config-diagnostics|''|--accept-lab-use) ;;
         *) error "Unsupported argument: ${1}"; usage >&2; exit 2 ;;
     esac
     if [ "$#" -gt 1 ]; then
         error "Only one command-line option is supported."
         usage >&2
         exit 2
+    fi
+    if [ "${1:-}" = doctor ]; then
+        wizard_doctor
+        exit $?
+    fi
+    if [ "${1:-}" = config-diagnostics ]; then
+        wizard_config_diagnostics
+        exit $?
     fi
     fortify_lab_detect_accept_flag "$@"
     fortify_lab_require_acknowledgement || exit 1

@@ -87,7 +87,8 @@ acknowledge it. From the main menu choose one deployment mode:
     mkcert, and MicroK8s access. When MicroK8s is installed but the current
     shell has not picked up the `microk8s` group yet, choose `g` from that
     screen to restart the wizard with group access, or run `newgrp microk8s`
-    before relaunching.
+    before relaunching. Guided wait screens include Retry, Help, Diagnostics,
+    interactive takeover, and contextual pod logs where a component owns pods.
 
 === "Express"
 
@@ -164,13 +165,18 @@ client entry but cannot change your laptop's DNS or hosts file.
 
 Import the public `certs/rootCA.pem` into the trust store of a dedicated lab
 client. Never bypass TLS verification. Regenerating certificates rotates the
-lab CA and requires clients to trust the replacement. Follow
+lab CA and requires clients to trust the replacement. The Secrets step creates
+the Kubernetes `fortify/tls` Secret from the mkcert wildcard leaf and, on
+Traefik-backed MicroK8s ingress, sets it as the default frontend certificate so
+Dashboard and SSC do not present `TRAEFIK DEFAULT CERT`. Follow
 [Networking, URLs, and TLS](../operations/networking-and-tls.md) for platform-specific guidance.
 
 ## 5. Open Kubernetes Dashboard
 
 Open `https://dashboard.<domain>`, then choose **5. Kubernetes Dashboard
-access** in the wizard:
+access** in the main menu. The same workflow is also available under
+**Advanced setup and configuration → Configure DNS, SSC token, LIM, and
+Dashboard access**:
 
 | Choice | Use | Lifetime and risk |
 |---|---|---|
@@ -193,7 +199,7 @@ and modify or delete every workload and persistent resource.
 
 ## 6. Finish application configuration
 
-Use **11. URLs & credentials** to print the configured URLs and safe login
+Use **12. URLs & credentials** to print the configured URLs and safe login
 guidance. The wizard deliberately does not display stored passwords.
 
 Two application tasks still require a person:

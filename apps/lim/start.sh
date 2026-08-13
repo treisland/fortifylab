@@ -9,6 +9,15 @@ if [ -z "$FORTIFY_HOME_K8S" ]; then
 fi
 
 source "$FORTIFY_HOME_K8S/.env"
+# shellcheck source=../../scripts/lib/k8s-hostnames.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
+# shellcheck source=../../scripts/lib/traefik-backend.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
+# shellcheck source=../../scripts/lib/coredns-lab-hosts.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+
+fortify_require_k8s_hostname LIM "$LIM"
+fortify_ensure_coredns_lab_hosts
 
 #get the current directory where this script resides
 CURRENT_DIR="$( dirname -- "${BASH_SOURCE[0]}" )"
@@ -28,6 +37,7 @@ microk8s helm -n "$NAMESPACE" upgrade -i lim oci://registry-1.docker.io/fortifyd
  --set signingCertificate.certificatePasswordSecretName=lim-signing-certificate-password \
  --set dataPersistence.existingClaim=lim-pvc  
 
-envsubst '${LIM}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
+envsubst '${LIM} ${NAMESPACE}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
+fortify_annotate_traefik_https_service "$NAMESPACE" lim
 
 microk8s kubectl -n "$NAMESPACE" scale statefulset lim --replicas=1

@@ -9,6 +9,8 @@ fi
 
 # shellcheck disable=SC1091
 source "$FORTIFY_HOME_K8S/.env"
+# shellcheck source=../../scripts/lib/traefik-backend.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KUBECTL_CMD="${KUBECTL_CMD:-microk8s kubectl}"
@@ -48,6 +50,7 @@ export DASHBOARD_HOST DASHBOARD_NAMESPACE DASHBOARD_SERVICE
 # shellcheck disable=SC2016
 envsubst '${DASHBOARD_HOST} ${DASHBOARD_NAMESPACE} ${DASHBOARD_SERVICE}' < "$CURRENT_DIR/dashboard.yaml" \
   | "${KUBECTL_ARGS[@]}" apply -f - >/dev/null
+fortify_annotate_traefik_https_service "$DASHBOARD_NAMESPACE" "$DASHBOARD_SERVICE" >/dev/null
 
 if [ "$DASHBOARD_NAMESPACE" = kubernetes-dashboard ]; then
     "${KUBECTL_ARGS[@]}" -n "$DASHBOARD_NAMESPACE" rollout status deployment \

@@ -40,6 +40,9 @@ class GettingStartedJourneyTests(unittest.TestCase):
             "countdown",
             "take control",
             "Destroy (deletes data)",
+            "TRAEFIK DEFAULT CERT",
+            "fortify/tls",
+            "contextual pod logs",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, GUIDE)

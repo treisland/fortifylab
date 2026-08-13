@@ -23,6 +23,11 @@ venv/
 
 # Environment config (contains passwords)
 .env
+.env.backups/
+.env.*.bak
+.env.bak
+.env.tmp
+.env.rollback
 
 # Editor artifacts
 *.swp

@@ -70,6 +70,152 @@ class OperationalHelpTests(unittest.TestCase):
         self.assertGreaterEqual(result.stdout.count("[REDACTED]"), 3)
         self.assertIn("[LOCAL_PATH]", result.stdout)
 
+    def test_doctor_hosts_resolution_reports_missing_loopback_and_wrong_ip(self) -> None:
+        result = self.run_helper(
+            "DOMAIN=example.test; "
+            "operational_node_ip() { printf '10.0.0.5'; }; "
+            "getent() { "
+            "case \"$2\" in "
+            "ssc.example.test) printf '10.0.0.5 STREAM\\n' ;; "
+            "sast.example.test) printf '10.0.0.9 STREAM\\n' ;; "
+            "lim.example.test) printf '127.0.0.1 STREAM\\n' ;; "
+            "*) return 2 ;; "
+            "esac; "
+            "}; "
+            "operational_doctor_hosts_resolution"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SSC", result.stdout)
+        self.assertIn("expected lab node IP: 10.0.0.5", result.stdout)
+        self.assertIn("resolved", result.stdout)
+        self.assertIn("loopback", result.stdout)
+        self.assertIn("wrong-ip", result.stdout)
+        self.assertIn("missing", result.stdout)
+        self.assertIn("TRAEFIK DEFAULT CERT", result.stdout)
+
+    def test_doctor_tls_identity_reports_traefik_default_cert(self) -> None:
+        result = self.run_helper(
+            "_operational_lab_hosts() { printf 'SSC|ssc.example.test|https://ssc.example.test\\n'; }; "
+            "_operational_tls_certificate_metadata() { "
+            "printf 'subject=CN = TRAEFIK DEFAULT CERT\\nissuer=CN = TRAEFIK DEFAULT CERT\\n'; "
+            "}; "
+            "operational_doctor_tls_identity"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("wrong-ingress-default-cert", result.stdout)
+        self.assertIn("TRAEFIK DEFAULT CERT", result.stdout)
+
+    def test_doctor_coredns_drift_does_not_print_configmap_data(self) -> None:
+        corefile_marker = "SECRET_CONFIGMAP_DATA_SHOULD_NOT_PRINT"
+        result = self.run_helper(
+            "DOMAIN=example.test; "
+            "operational_cluster_available() { return 0; }; "
+            "_operational_kubectl() { "
+            "case \"$*\" in "
+            "*readyReplicas*) printf 1 ;; "
+            "*spec.replicas*) printf 1 ;; "
+            "*configmap*coredns*) printf '.:53 { hosts { 10.0.0.5 ssc.example.test sast.example.test dast.example.test lim.example.test dashboard.example.test SECRET_CONFIGMAP_DATA_SHOULD_NOT_PRINT fallthrough } }' ;; "
+            "*) return 1 ;; "
+            "esac; "
+            "}; "
+            "operational_doctor_coredns_drift"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("deployment: 1/1 ready", result.stdout)
+        self.assertIn("drift: matches", result.stdout)
+        self.assertIn("Corefile contents not displayed", result.stdout)
+        self.assertNotIn(corefile_marker, result.stdout)
+        self.assertNotIn("10.0.0.5", result.stdout)
+
+    def test_doctor_ingress_and_endpoints_use_read_only_status(self) -> None:
+        result = self.run_helper(
+            "operational_cluster_available() { return 0; }; "
+            "_operational_kubectl() { "
+            "case \"$*\" in "
+            "*ingressclass*) printf 'NAME CONTROLLER\\npublic k8s.io/ingress-nginx\\n' ;; "
+            "*' get ingress '*) printf 'NAME CLASS HOSTS\\nssc-ingress public ssc.example.test\\n' ;; "
+            "*' endpoints ssc-service '*) printf 'x\\nx\\n' ;; "
+            "*' endpoints lim '*) true ;; "
+            "*' endpoints sdast-core-scancentral-dast-core-api '*) printf 'x\\n' ;; "
+            "*) return 1 ;; "
+            "esac; "
+            "}; "
+            "operational_doctor_ingress; operational_doctor_service_endpoints"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ingress classes", result.stdout)
+        self.assertIn("public k8s.io/ingress-nginx", result.stdout)
+        self.assertIn("ssc-ingress", result.stdout)
+        self.assertIn("SSC", result.stdout)
+        self.assertIn("ready", result.stdout)
+        self.assertIn("LIM", result.stdout)
+        self.assertIn("empty", result.stdout)
+
+    def test_doctor_http_status_is_status_only(self) -> None:
+        result = self.run_helper(
+            "DOMAIN=example.test; "
+            "curl() { "
+            "case \"$*\" in "
+            "*ssc.example.test*) printf 401 ;; "
+            "*dast.example.test*) printf 503 ;; "
+            "*) printf 200 ;; "
+            "esac; "
+            "}; "
+            "operational_doctor_http_status"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("HTTP 401", result.stdout)
+        self.assertIn("reachable", result.stdout)
+        self.assertIn("HTTP 503", result.stdout)
+        self.assertIn("server-error", result.stdout)
+        self.assertNotIn("Internal Server Error", result.stdout)
+        self.assertNotIn("--resolve", result.stdout)
+        self.assertNotIn("--max-time", result.stdout)
+
+    def test_doctor_compact_summary_is_secret_safe(self) -> None:
+        result = self.run_helper(
+            "operational_cluster_available() { return 0; }; "
+            "operational_capacity_memory_gib() { printf 32; }; "
+            "operational_capacity_disk_gib() { printf 100; }; "
+            "_operational_endpoint_count() { printf 1; }; "
+            "_operational_kubectl() { "
+            "case \"$*\" in "
+            "*statefulsets,deployments*) printf 'KIND NAME DESIRED READY\\nStatefulSet ssc-webapp 1 1\\n' ;; "
+            "*) return 1 ;; "
+            "esac; "
+            "}; "
+            "curl() { printf 200; }; "
+            "PASSWORD=super-secret TOKEN=hidden operational_doctor_compact_health_summary"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Doctor summary", result.stdout)
+        self.assertIn("cluster: reachable", result.stdout)
+        self.assertIn("HTTP 200", result.stdout)
+        self.assertIn("no obvious", result.stdout)
+        self.assertNotIn("super-secret", result.stdout)
+        self.assertNotIn("hidden", result.stdout)
+
+    def test_doctor_reports_low_capacity_as_action_needed(self) -> None:
+        result = self.run_helper(
+            "operational_cluster_available() { return 0; }; "
+            "operational_capacity_memory_gib() { printf 8; }; "
+            "operational_capacity_disk_gib() { printf 20; }; "
+            "_operational_endpoint_count() { printf 1; }; "
+            "_operational_kubectl() { "
+            "case \"$*\" in "
+            "*statefulsets,deployments*) printf 'KIND NAME DESIRED READY\\nStatefulSet ssc-webapp 1 1\\n' ;; "
+            "*) return 1 ;; "
+            "esac; "
+            "}; "
+            "curl() { printf 200; }; "
+            "operational_doctor_compact_health_summary"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("host capacity", result.stdout)
+        self.assertIn("warning: memory 8 GiB", result.stdout)
+        self.assertIn("warning: free disk 20 GiB", result.stdout)
+        self.assertIn("investigate unavailable", result.stdout)
+
     def test_offline_bundle_has_only_allowlisted_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             result = self.run_helper(
@@ -81,10 +227,20 @@ class OperationalHelpTests(unittest.TestCase):
             with tarfile.open(bundle, "r:gz") as archive:
                 self.assertEqual(
                     sorted(archive.getnames()),
-                    ["README.txt", "cluster-status.txt", "deployment-plan.txt"],
+                    [
+                        "README.txt",
+                        "deployment-plan.txt",
+                        "doctor-summary.txt",
+                        "kubernetes-evidence.txt",
+                        "network-diagnostics.txt",
+                        "wizard-log-excerpt.txt",
+                    ],
                 )
-                cluster = archive.extractfile("cluster-status.txt").read().decode()
-            self.assertIn("unavailable", cluster)
+                evidence = archive.extractfile("kubernetes-evidence.txt").read().decode()
+                readme = archive.extractfile("README.txt").read().decode()
+            self.assertIn("unavailable", evidence)
+            self.assertIn("wizard log excerpt", readme)
+            self.assertIn("pod/application logs", readme)
 
     def test_topics_and_docs_are_complete(self) -> None:
         expected_topics = (

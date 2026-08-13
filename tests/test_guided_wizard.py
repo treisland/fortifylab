@@ -47,6 +47,7 @@ class GuidedWizardTests(unittest.TestCase):
             "Kubernetes Dashboard access",
             "Diagnostics / live status",
             "Advanced setup and configuration",
+            "Lab lifecycle controls",
         ):
             self.assertIn(label, WIZARD)
 
@@ -122,6 +123,60 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertNotIn("Managed releases already exist", preflight_body)
         self.assertNotIn("helm", preflight_body.lower())
 
+    def test_preflight_resource_warnings_identify_low_ram_and_disk(self) -> None:
+        result = self.run_wizard_functions(
+            'preflight_memory_gib() { printf 8; }; '
+            'preflight_disk_gib() { printf 20; }; '
+            'preflight_resource_warnings',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Host memory is 8 GiB", result.stdout)
+        self.assertIn("Free disk is 20 GiB", result.stdout)
+
+    def test_low_resource_preflight_can_continue_with_interactive_confirmation(self) -> None:
+        result = self.run_wizard_functions(
+            'preflight_memory_gib() { printf 8; }; '
+            'preflight_disk_gib() { printf 20; }; '
+            'preflight_can_prompt_for_low_resources() { return 0; }; '
+            'confirm() { return 0; }; '
+            'preflight_confirm_low_resources',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Resource warnings do not block", result.stderr)
+
+    def test_low_resource_preflight_refuses_noninteractive_without_override(self) -> None:
+        result = self.run_wizard_functions(
+            'GUIDED_AUTO_ADVANCE=1; '
+            'preflight_memory_gib() { printf 8; }; '
+            'preflight_disk_gib() { printf 20; }; '
+            'preflight_confirm_low_resources',
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("FORTIFY_ALLOW_LOW_RESOURCES=1", result.stderr)
+
+    def test_low_resource_preflight_allows_noninteractive_env_override(self) -> None:
+        result = self.run_wizard_functions(
+            'GUIDED_AUTO_ADVANCE=1; FORTIFY_ALLOW_LOW_RESOURCES=1; '
+            'preflight_memory_gib() { printf 8; }; '
+            'preflight_disk_gib() { printf 20; }; '
+            'preflight_confirm_low_resources',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("FORTIFY_ALLOW_LOW_RESOURCES=1", result.stdout)
+
+    def test_preflight_readiness_does_not_block_on_low_ram_or_disk(self) -> None:
+        result = self.run_wizard_functions(
+            'mkdir -p "$HOME/.docker"; printf x > "$HOME/.docker/config.json"; '
+            'prereqs_complete() { return 0; }; inputs_complete() { return 0; }; '
+            'cluster_reachable() { return 0; }; microk8s() { return 0; }; '
+            'KUBECTL=mock_kubectl; mock_kubectl() { return 0; }; DOMAIN=demo.test; NAMESPACE=fortify; DEFAULT_PASS=demo; '
+            'FORTIFY_SSC_CHART_VERSION=1; FORTIFY_SSC_IMAGE_TAG=1; '
+            'FORTIFY_SCSAST_CHART_VERSION=1; '
+            'preflight_memory_gib() { printf 4; }; preflight_disk_gib() { printf 4; }; '
+            'preflight_inputs_complete',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_fresh_deploy_guard_refuses_existing_releases(self) -> None:
         result = self.run_wizard_functions(
             'managed_release_names() { printf "mysql\\nssc\\n"; }; fresh_deployment_guard',
@@ -130,6 +185,219 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Managed releases already exist", result.stderr)
         self.assertIn("Resume or repair", result.stderr)
         self.assertIn("existing release: mysql", result.stdout)
+
+    def test_gitignore_covers_wizard_env_backups(self) -> None:
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        for pattern in (
+            ".env.backups/",
+            ".env.*.bak",
+            ".env.bak",
+            ".env.tmp",
+            ".env.rollback",
+        ):
+            self.assertIn(pattern, gitignore)
+
+    def test_env_apply_preserves_comments_unknown_keys_and_writes_metadata(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "# keep this comment" "export DOMAIN=\"old.test\"" "CUSTOM_FLAG=yes" "export DEFAULT_PASS=\"old\"" >"$ENV_FILE"; '
+            'env_apply_updates wizard-test "DOMAIN=new.test" "DEFAULT_PASS=p@ss&word"; '
+            'cat "$ENV_FILE"; printf "META\n"; cat "$ENV_BACKUP_DIR"/.env.*.meta',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("# keep this comment", result.stdout)
+        self.assertIn("CUSTOM_FLAG=yes", result.stdout)
+        self.assertIn("export DOMAIN='new.test'", result.stdout)
+        self.assertIn("export DEFAULT_PASS='p@ss&word'", result.stdout)
+        self.assertIn("reason=wizard-test", result.stdout)
+        self.assertIn("changed_keys=DOMAIN,DEFAULT_PASS", result.stdout)
+
+    def test_env_rollback_last_restores_prior_env(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=\"old.test\"" >"$ENV_FILE"; '
+            'env_apply_updates first "DOMAIN=new.test" >/dev/null; '
+            'env_rollback_last >/dev/null; '
+            'source "$ENV_FILE"; printf "DOMAIN=%s\n" "$DOMAIN"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DOMAIN=old.test", result.stdout)
+
+    def test_domain_assistant_updates_domain_and_derived_urls(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=\"old.test\"" "export SSC=\"ssc.$DOMAIN\"" "export SSC_URL=\"https://$SSC\"" >"$ENV_FILE"; '
+            'updates=(); while IFS= read -r line; do updates+=("$line"); done < <(domain_url_updates lab.example.test); '
+            'env_apply_updates domain-url "${updates[@]}" >/dev/null; '
+            'source "$ENV_FILE"; printf "%s|%s|%s|%s\n" "$DOMAIN" "$SSC" "$LIM" "$SCSAST_CTRL_URL"; '
+            'grep -E "export (DOMAIN|SSC|SSC_URL)=" "$ENV_FILE"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("lab.example.test|ssc.lab.example.test|lim.lab.example.test|https://sast.lab.example.test/scancentral-ctrl/", result.stdout)
+        self.assertIn('export SSC="ssc.$DOMAIN"', result.stdout)
+        self.assertIn('export SSC_URL="https://$SSC"', result.stdout)
+
+    def test_domain_assistant_normalizes_domains_to_lowercase_ingress_hosts(self) -> None:
+        self.assertIn("domain=${domain,,}", WIZARD)
+        self.assertIn("lowercase DNS-style domain", WIZARD)
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=\"old.test\"" "export SSC=\"ssc.$DOMAIN\"" "export SSC_URL=\"https://$SSC\"" >"$ENV_FILE"; '
+            'ask() { local _v="$1"; shift; printf -v "$_v" "%s" "FortifyDemo.COM"; }; '
+            'confirm() { return 0; }; press_any() { :; }; '
+            'domain_url_assistant >/dev/null; source "$ENV_FILE"; printf "%s|%s|%s\n" "$DOMAIN" "$SSC" "$SSC_URL"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fortifydemo.com|ssc.fortifydemo.com|https://ssc.fortifydemo.com", result.stdout)
+
+    def test_app_url_lookup_resolves_ssc_url_not_neighbor_variable(self) -> None:
+        result = self.run_wizard_functions(
+            'SSC_URL=https://ssc.example.test; LIM_URL=https://lim.example.test; '
+            'printf "SSC=%s\nLIM=%s\n" "$(app_url_for_index 2)" "$(app_url_for_index 3)"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SSC=https://ssc.example.test", result.stdout)
+        self.assertIn("LIM=https://lim.example.test", result.stdout)
+        self.assertNotIn("SSC=LIM_URL", result.stdout)
+
+    def test_app_url_display_marks_placeholder_url_values_invalid(self) -> None:
+        result = self.run_wizard_functions(
+            'SSC_URL=LIM_URL; printf "%s\n" "$(app_url_display_for_index 2)"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("<invalid: SSC_URL=LIM_URL>", result.stdout)
+
+    def test_config_validation_flags_placeholder_host_and_url_drift(self) -> None:
+        result = self.run_wizard_functions(
+            'DOMAIN=fortifydemo.com; SSC=LIM; LIM=lim.fortifydemo.com; '
+            'SCDAST=dast.fortifydemo.com; SCSAST=sast.fortifydemo.com; '
+            'SSC_URL=LIM_URL; LIM_URL=https://lim.fortifydemo.com; '
+            'SCDAST_URL=https://dast.fortifydemo.com; SCSAST_URL=https://sast.fortifydemo.com; '
+            'SCSAST_CTRL_URL=https://sast.fortifydemo.com/scancentral-ctrl/; '
+            'if deployment_config_guard; then printf BAD; else printf BLOCKED; fi'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("BLOCKED", result.stdout)
+        self.assertIn("SSC is set to placeholder-like value LIM", result.stdout)
+        self.assertIn("SSC_URL is set to placeholder-like value LIM_URL", result.stdout)
+        self.assertIn("Repair derived host and URL values from DOMAIN", result.stdout)
+
+    def test_config_diagnostics_reports_raw_effective_expected_without_secrets(self) -> None:
+        self.assertIn("config-diagnostics", WIZARD)
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; '
+            'printf "%s\n" "export DOMAIN=\"fortifydemo.proxmox\"" "export SSC=\"LIM\"" "export SSC_URL=\"LIM_URL\"" "export DEFAULT_PASS=\"do-not-print\"" >"$ENV_FILE"; '
+            'source "$ENV_FILE"; env_diagnostics'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("raw=LIM", result.stdout)
+        self.assertIn("effective=LIM", result.stdout)
+        self.assertEqual(result.stdout.count("SSC_URL is set to placeholder-like value LIM_URL"), 1)
+        self.assertIn("expected=ssc.fortifydemo.proxmox", result.stdout)
+        self.assertIn("SSC_URL is set to placeholder-like value LIM_URL", result.stdout)
+        self.assertNotIn("do-not-print", result.stdout)
+
+    def test_repair_domain_urls_rewrites_bad_derived_values_with_backup(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=\"fortifydemo.com\"" "export SSC=\"LIM\"" "export SSC_URL=\"LIM_URL\"" >"$ENV_FILE"; '
+            'source "$ENV_FILE"; confirm() { return 0; }; env_repair_domain_urls >/dev/null; '
+            'source "$ENV_FILE"; printf "%s|%s|%s|%s\n" "$SSC" "$SSC_URL" "$LIM" "$LIM_URL"; '
+            'test -f "$FORTIFY_HOME_K8S/.env.rollback" && printf "ROLLBACK"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ssc.fortifydemo.com|https://ssc.fortifydemo.com|lim.fortifydemo.com|https://lim.fortifydemo.com", result.stdout)
+        self.assertIn("ROLLBACK", result.stdout)
+
+    def test_lab_hosts_resolution_warns_when_dns_points_at_proxy_endpoint(self) -> None:
+        result = self.run_wizard_functions(
+            'DOMAIN=example.test; lab_node_ip() { printf "10.0.0.5"; }; '
+            'getent() { case "$2" in '
+            'ssc.example.test) printf "10.0.0.9 STREAM\n" ;; '
+            '*) printf "10.0.0.5 STREAM\n" ;; '
+            'esac; }; '
+            'lab_hosts_resolution_detail'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ssc.example.test=10.0.0.9", result.stdout)
+        self.assertIn("TRAEFIK DEFAULT CERT", result.stdout)
+        self.assertIn("404", result.stdout)
+
+
+    def test_coredns_patch_refreshes_legacy_lab_hosts_block(self) -> None:
+        helper = ROOT / "scripts/lib/coredns-lab-hosts.sh"
+        corefile = ".:53 {\n    errors\n    hosts {\n        10.0.0.4 ssc.example.test sast.example.test\n        fallthrough\n    }\n    forward . 1.1.1.1\n}\n"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; printf "%s" "$2" | fortify_patch_coredns_corefile 10.0.0.5 "ssc.lab.test sast.lab.test dast.lab.test lim.lab.test dashboard.lab.test"',
+                "coredns-test",
+                str(helper),
+                corefile,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("# fortifylab hosts begin", result.stdout)
+        self.assertIn("10.0.0.5 ssc.lab.test sast.lab.test dast.lab.test lim.lab.test dashboard.lab.test", result.stdout)
+        self.assertNotIn("10.0.0.4 ssc.example.test", result.stdout)
+        self.assertEqual(result.stdout.count("hosts {"), 1)
+
+    def test_coredns_patch_refreshes_managed_lab_hosts_block(self) -> None:
+        helper = ROOT / "scripts/lib/coredns-lab-hosts.sh"
+        corefile = ".:53 {\n    # fortifylab hosts begin\n    hosts {\n        10.0.0.4 ssc.old.test sast.old.test dast.old.test lim.old.test dashboard.old.test\n        fallthrough\n    }\n    # fortifylab hosts end\n    forward . 1.1.1.1\n}\n"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; printf "%s" "$2" | fortify_patch_coredns_corefile 10.0.0.6 "ssc.new.test sast.new.test dast.new.test lim.new.test dashboard.new.test"',
+                "coredns-test",
+                str(helper),
+                corefile,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("10.0.0.6 ssc.new.test sast.new.test dast.new.test lim.new.test dashboard.new.test", result.stdout)
+        self.assertNotIn("old.test", result.stdout)
+        self.assertEqual(result.stdout.count("# fortifylab hosts begin"), 1)
+
+    def test_secret_values_are_redacted_in_preview(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DEFAULT_PASS=\"old-secret\"" >"$ENV_FILE"; '
+            'env_preview_changes "DEFAULT_PASS=new-secret"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DEFAULT_PASS", result.stdout)
+        self.assertIn("<redacted> -> <redacted>", result.stdout)
+        self.assertNotIn("old-secret", result.stdout)
+        self.assertNotIn("new-secret", result.stdout)
+
+    def test_mkcert_root_ca_export_copies_public_ca_only(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'mkdir -p "$tmp/bin" "$tmp/caroot"; printf PUBLIC >"$tmp/caroot/rootCA.pem"; printf PRIVATE >"$tmp/caroot/rootCA-key.pem"; '
+            'printf "%s\n" "#!/bin/sh" "echo \"$tmp/caroot\"" >"$tmp/bin/mkcert"; chmod +x "$tmp/bin/mkcert"; PATH="$tmp/bin:$PATH"; '
+            'mkcert_root_ca_export; printf "DEST="; cat "$tmp/certs/rootCA.pem"; printf "\nFILES="; ls "$tmp/certs"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DEST=PUBLIC", result.stdout)
+        self.assertIn("rootCA.pem", result.stdout)
+        self.assertNotIn("rootCA-key.pem", result.stdout)
+        self.assertNotIn("private rootCA", result.stdout)
+        self.assertNotIn("PRIVATE", result.stdout)
+
+    def test_mkcert_trust_guidance_warns_not_to_share_private_key(self) -> None:
+        result = self.run_wizard_functions('mkcert_trust_instructions')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for expected in ("Windows", "macOS", "Ubuntu/Debian", "Firefox/NSS", "Never import, copy, or share the mkcert private CA key"):
+            self.assertIn(expected, result.stdout)
 
     def test_optional_skip_is_explicit_and_required_skip_is_rejected(self) -> None:
         self.assertIn("GUIDED_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 1)", WIZARD)
@@ -156,7 +424,7 @@ class GuidedWizardTests(unittest.TestCase):
 
     def test_status_rendering_does_not_dispatch_mutations(self) -> None:
         status_body = WIZARD.split("guided_step_status()", 1)[1].split(
-            "run_deployment_operation()", 1
+            "guided_component_endpoint_detail()", 1
         )[0]
         for mutation in ("apply", "upgrade", "create-certs", "create-secrets"):
             self.assertNotIn(mutation, status_body)
@@ -281,6 +549,103 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Probe:", WIZARD)
         self.assertIn("probe $probe is still failing", WIZARD)
 
+    def test_numbered_kubernetes_resource_selector_filters_resources(self) -> None:
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; '
+            'kube() { case "$*" in '
+            '"-n fortify get pod -o name") printf "pod/mysql-0\npod/ssc-webapp-0\npod/ssc-worker-0\n" ;; '
+            'esac; }; '
+            'k8s_select_resource pod "Pick pod" ssc; '
+            'printf "SELECTED=%s/%s\n" "$K8S_SELECTED_RESOURCE_KIND" "$K8S_SELECTED_RESOURCE_NAME"',
+            "2\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Filter: ssc", result.stdout)
+        self.assertIn("1. ssc-webapp-0", result.stdout)
+        self.assertIn("2. ssc-worker-0", result.stdout)
+        self.assertIn("SELECTED=pod/ssc-worker-0", result.stdout)
+
+    def test_numbered_kubernetes_resource_selector_handles_empty_lists(self) -> None:
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; '
+            'kube() { case "$*" in '
+            '"-n fortify get pod -o name") printf "pod/mysql-0\n" ;; '
+            'esac; }; '
+            'if k8s_select_resource pod "Pick pod" ssc; then printf BAD; else printf EMPTY_BACK; fi',
+            "b\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("No pods matched 'ssc'", result.stdout)
+        self.assertIn("EMPTY_BACK", result.stdout)
+
+    def test_logs_menus_reuse_numbered_selector_and_pod_log_actions(self) -> None:
+        self.assertIn("k8s_select_resource()", WIZARD)
+        self.assertIn("k8s_resource_names()", WIZARD)
+        self.assertIn("pod_log_action_menu()", WIZARD)
+        self.assertIn('k8s_select_resource pod "Select a pod"', WIZARD)
+        self.assertIn('k8s_select_resource pod "Select a pod" "" "$prefix"', WIZARD)
+        self.assertIn("--follow --tail=100", WIZARD)
+        self.assertIn("--previous --tail=200", WIZARD)
+
+        result = self.run_wizard_functions(
+            'cluster_reachable() { return 0; }; '
+            'k8s_resource_names() { printf "ssc-webapp-0\nssc-webapp-1\n"; }; '
+            'k8s_select_resource() { printf "SELECTOR:%s|%s|%s|%s\n" "$1" "$2" "$3" "$4"; K8S_SELECTED_RESOURCE_NAME=ssc-webapp-1; return 0; }; '
+            'pod_log_action_menu() { printf "LOGS:%s\n" "$1"; }; '
+            'logs_for_prefix ssc-webapp'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SELECTOR:pod|Select a pod||ssc-webapp", result.stdout)
+        self.assertIn("LOGS:ssc-webapp-1", result.stdout)
+
+    def test_scoped_logs_skip_selector_when_only_one_pod_matches(self) -> None:
+        result = self.run_wizard_functions(
+            'cluster_reachable() { return 0; }; '
+            'k8s_resource_names() { printf "ssc-webapp-0\n"; }; '
+            'k8s_select_resource() { printf BAD_SELECTOR; return 1; }; '
+            'pod_log_action_menu() { printf "LOGS:%s\n" "$1"; }; '
+            'logs_for_prefix ssc-webapp'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("LOGS:ssc-webapp-0", result.stdout)
+        self.assertNotIn("BAD_SELECTOR", result.stdout)
+
+    def test_guided_wait_logs_skip_selector_when_only_one_pod_matches(self) -> None:
+        result = self.run_wizard_functions(
+            'cluster_reachable() { return 0; }; '
+            'guided_step_pod_prefixes() { printf "ssc-webapp"; }; '
+            'k8s_resource_names() { printf "ssc-webapp-0\n"; }; '
+            'k8s_select_resource() { printf BAD_SELECTOR; return 1; }; '
+            'pod_log_action_menu() { printf "LOGS:%s\n" "$1"; }; '
+            'guided_step_pod_logs ssc SSC'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("LOGS:ssc-webapp-0", result.stdout)
+        self.assertNotIn("BAD_SELECTOR", result.stdout)
+
+    def test_wait_screen_exposes_contextual_pod_logs_without_losing_wizard_log(self) -> None:
+        self.assertIn("guided_step_pod_logs()", WIZARD)
+        self.assertIn("p. Pod logs", WIZARD)
+        self.assertIn("l. Wizard log", WIZARD)
+        self.assertIn('[Pp])', WIZARD)
+        self.assertIn('guided_step_pod_logs "$id" "$label"', WIZARD)
+        self.assertIn("control=pod_logs", WIZARD)
+        self.assertIn("control=view_log", WIZARD)
+
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; '
+            'cluster_reachable() { return 0; }; '
+            'kube() { case "$*" in '
+            '"-n fortify get pod -o name") return 0 ;; '
+            '"-n fortify get events --sort-by=.lastTimestamp") printf "LAST EVENT\n" ;; '
+            'esac; }; '
+            'press_any() { :; }; '
+            'guided_step_pod_logs mysql MySQL || true'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("No pods matching 'mysql' have appeared yet", result.stdout)
+        self.assertIn("Recent events", result.stdout)
+
     def test_failure_screen_can_create_sanitized_diagnostics(self) -> None:
         self.assertIn("guided_diagnostics_bundle()", WIZARD)
         self.assertIn("Create sanitized diagnostics bundle", WIZARD)
@@ -288,6 +653,192 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("r. Retry operation", WIZARD)
         self.assertIn('GUIDED_WAIT_LAST_STATE="retry"', WIZARD)
 
+
+
+    def test_guided_preflight_contracts_are_mode_specific(self) -> None:
+        self.assertIn('GUIDED_PREFLIGHT_MODE_ID=("fresh" "resume" "component")', WIZARD)
+        self.assertIn("guided_preflight_contract()", WIZARD)
+        self.assertIn("fresh: read-only preflight plus empty managed-release guard", WIZARD)
+        self.assertIn("resume: read-only preflight; existing managed releases are expected", WIZARD)
+        self.assertIn("component: read-only preflight; existing managed releases are allowed", WIZARD)
+
+        result = self.run_wizard_functions(
+            'guided_preflight_contract fresh; '
+            'guided_preflight_contract resume; '
+            'guided_preflight_contract component'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fresh: read-only preflight plus empty managed-release guard", result.stdout)
+        self.assertIn("resume: read-only preflight; existing managed releases are expected", result.stdout)
+        self.assertIn("component: read-only preflight; existing managed releases are allowed", result.stdout)
+
+    def test_guided_mode_banner_and_context_text_are_rendered(self) -> None:
+        self.assertIn("guided_mode_context_text()", WIZARD)
+        self.assertIn("Guided mode: fresh deployment", WIZARD)
+        self.assertIn("Guided mode: resume or repair", WIZARD)
+        self.assertIn("Guided mode: component repair", WIZARD)
+        self.assertIn("printf '\\n  %s\\n' \"$(guided_mode_context_text fresh)\"", WIZARD)
+        self.assertIn("printf '\\n  %s\\n' \"$(guided_mode_context_text \"$GUIDED_MODE_CONTEXT\")\"", WIZARD)
+        self.assertIn("GUIDED_MODE_CONTEXT=resume", WIZARD)
+
+        result = self.run_wizard_functions(
+            'guided_mode_context_text fresh; '
+            'guided_mode_context_text resume; '
+            'guided_mode_context_text component; '
+            'GUIDED_MODE_CONTEXT=resume; guided_mode_context_text'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fresh deployment", result.stdout)
+        self.assertEqual(result.stdout.count("resume or repair"), 2)
+        self.assertIn("component repair", result.stdout)
+
+    def test_guided_why_pending_detail_covers_state_machine_steps(self) -> None:
+        self.assertIn("guided_step_why_pending()", WIZARD)
+        self.assertIn("Why pending:", WIZARD)
+        progress_body = WIZARD.split("guided_step_progress_message()", 1)[1].split(
+            "guided_step_why_pending()", 1
+        )[0]
+        for step in (
+            "prereqs", "inputs", "preflight", "certs", "dashboard", "secrets",
+            "mysql", "postgresql", "ssc", "lim", "sast", "dast", "configure",
+        ):
+            with self.subTest(step=step):
+                self.assertIn(f"{step})", progress_body)
+
+        pending = self.run_wizard_functions(
+            'NAMESPACE=fortify; DOMAIN=lab.test; '
+            'guided_step_complete() { return 1; }; '
+            'guided_step_in_progress() { return 1; }; '
+            'cluster_reachable() { return 1; }; '
+            'guided_step_why_pending secrets; guided_step_why_pending configure'
+        )
+        self.assertEqual(pending.returncode, 0, pending.stderr)
+        self.assertIn("Cluster is not reachable while checking Kubernetes Secrets", pending.stdout)
+        self.assertIn("Hostname ssc.lab.test", pending.stdout)
+
+        complete = self.run_wizard_functions(
+            'guided_step_complete() { return 0; }; guided_step_why_pending mysql'
+        )
+        self.assertEqual(complete.returncode, 0, complete.stderr)
+        self.assertIn("Step is complete; no pending action is required", complete.stdout)
+
+    def test_guided_repair_recommendations_are_step_specific(self) -> None:
+        self.assertIn("guided_repair_recommendation()", WIZARD)
+        self.assertIn('note "$(guided_repair_recommendation "${GUIDED_STEP_ID[$start]}")"', WIZARD)
+        self.assertIn("Repair recommendation: repair MySQL first, then retry SSC", WIZARD)
+        self.assertIn("Data risk: rotating SSC secret.key", WIZARD)
+        self.assertIn("Avoid destructive cleanup unless a step explicitly says data will be deleted", WIZARD)
+
+        result = self.run_wizard_functions(
+            'guided_repair_recommendation ssc; '
+            'guided_repair_recommendation secrets; '
+            'guided_repair_recommendation unknown'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("repair MySQL first", result.stdout)
+        self.assertIn("rotating SSC secret.key", result.stdout)
+        self.assertIn("Avoid destructive cleanup", result.stdout)
+
+
+    def test_doctor_command_is_read_only_and_secret_safe(self) -> None:
+        self.assertIn("./start_wizard.sh doctor", WIZARD)
+        self.assertIn("wizard_doctor()", WIZARD)
+        self.assertIn("wizard_doctor_load_env()", WIZARD)
+        doctor_body = WIZARD.split("wizard_doctor()", 1)[1].split("managed_release_names()", 1)[0]
+        self.assertNotIn("bootstrap_env", doctor_body)
+        self.assertIn("operational_doctor_compact_health_summary", doctor_body)
+        self.assertIn("operational_doctor_http_status", doctor_body)
+        self.assertIn("Guided readiness", doctor_body)
+        self.assertIn("operational_cluster_available || unavailable=1", doctor_body)
+        self.assertIn("return 2", doctor_body)
+        self.assertIn("Step type:", WIZARD)
+
+    def test_lab_lifecycle_controls_use_existing_component_scripts(self) -> None:
+        self.assertIn("lab_lifecycle_menu()", WIZARD)
+        self.assertIn("APP_GUIDED_STEP=", WIZARD)
+        self.assertIn('run_app_scripts "${APP_STOP[$idx]}"', WIZARD)
+        self.assertIn('run_app_scripts "${APP_DESTROY[$idx]}"', WIZARD)
+        self.assertIn('guided_run_and_verify "${APP_GUIDED_STEP[$idx]}"', WIZARD)
+        self.assertIn("DESTROY FORTIFY LAB", WIZARD)
+        self.assertIn("action=lab_lifecycle_start operation=shutdown", WIZARD)
+        self.assertIn("action=lab_lifecycle_start operation=destroy", WIZARD)
+
+    def test_lab_shutdown_stops_workloads_in_reverse_dependency_order(self) -> None:
+        result = self.run_wizard_functions(
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
+            'wizard_log_event() { :; }; '
+            'lab_shutdown_deployments'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runs = [line.removeprefix("RUN:") for line in result.stdout.splitlines() if line.startswith("RUN:")]
+        self.assertEqual(
+            runs,
+            [
+                "apps/scdast/core/stop.sh apps/scdast/scanner/stop.sh",
+                "apps/scsast/stop.sh",
+                "apps/lim/stop.sh",
+                "apps/ssc/stop.sh",
+                "apps/postgresql/stop.sh",
+                "apps/mysql/stop.sh",
+            ],
+        )
+        self.assertIn("Persistent data is preserved", result.stdout)
+
+    def test_lab_start_runs_forward_and_verifies_each_component(self) -> None:
+        result = self.run_wizard_functions(
+            'guided_run_and_verify() { printf "VERIFY:%s:%s:%s\n" "$1" "$2" "$GUIDED_MODE_CONTEXT"; }; '
+            'wizard_log_event() { :; }; '
+            'GUIDED_MODE_CONTEXT=resume; lab_start_deployments; printf "MODE=%s\n" "$GUIDED_MODE_CONTEXT"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        verifies = [line for line in result.stdout.splitlines() if line.startswith("VERIFY:")]
+        self.assertEqual(
+            verifies,
+            [
+                "VERIFY:mysql:MySQL:lifecycle",
+                "VERIFY:postgresql:PostgreSQL:lifecycle",
+                "VERIFY:ssc:SSC:lifecycle",
+                "VERIFY:lim:LIM:lifecycle",
+                "VERIFY:sast:ScanCentral SAST:lifecycle",
+                "VERIFY:dast:ScanCentral DAST:lifecycle",
+            ],
+        )
+        self.assertIn("MODE=resume", result.stdout)
+
+    def test_full_lab_destroy_requires_typed_confirmation_and_uses_reverse_order(self) -> None:
+        cancelled = self.run_wizard_functions(
+            'fortify_lab_show_action_warning() { :; }; '
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
+            'wizard_log_event() { :; }; '
+            'read _lab_ack; lab_destroy_deployments; printf "RC=%s\n" "$?"',
+            "not today\n",
+        )
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertIn("Full teardown cancelled", cancelled.stdout)
+        self.assertNotIn("RUN:", cancelled.stdout)
+        self.assertIn("RC=1", cancelled.stdout)
+
+        confirmed = self.run_wizard_functions(
+            'fortify_lab_show_action_warning() { :; }; '
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
+            'wizard_log_event() { :; }; '
+            'read _lab_ack; lab_destroy_deployments',
+            "DESTROY FORTIFY LAB\n",
+        )
+        self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
+        runs = [line.removeprefix("RUN:") for line in confirmed.stdout.splitlines() if line.startswith("RUN:")]
+        self.assertEqual(
+            runs,
+            [
+                "apps/scdast/core/destroy.sh apps/scdast/scanner/destroy.sh",
+                "apps/scsast/destroy.sh",
+                "apps/lim/destroy.sh",
+                "apps/ssc/destroy.sh",
+                "apps/postgresql/destroy.sh",
+                "apps/mysql/destroy.sh",
+            ],
+        )
+        self.assertIn("Full lab teardown preview", confirmed.stdout)
 
     def test_live_plan_uses_guided_registry_and_labels_impact(self) -> None:
         self.assertIn("wizard_deployment_plan()", WIZARD)

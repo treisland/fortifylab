@@ -46,6 +46,24 @@ trap 'rm -f "$PRESERVED_SECRET_KEY"' EXIT
 
 KUBECTL="microk8s kubectl"
 
+configure_microk8s_ingress_default_tls() {
+  local cert_ref="$NAMESPACE/tls"
+
+  # MicroK8s 1.35+ backs the ingress addon with Traefik. Some migrated
+  # clusters route Ingress TLS but still serve Traefik's generated default
+  # certificate unless the addon has an explicit default certificate. Keep this
+  # best-effort so older MicroK8s tracks do not block secret creation.
+  if microk8s enable ingress --help 2>&1 | grep -q -- '--default-ssl-certificate'; then
+    if microk8s enable ingress --default-ssl-certificate "$cert_ref" >/dev/null 2>&1; then
+      echo "✅ MicroK8s ingress default TLS certificate set to $cert_ref"
+    else
+      echo "⚠️ Could not update MicroK8s ingress default TLS certificate to $cert_ref."
+      echo "   If Traefik still serves TRAEFIK DEFAULT CERT, run:"
+      echo "   microk8s enable ingress --default-ssl-certificate $cert_ref"
+    fi
+  fi
+}
+
 
 #--------------------------
 # SECTION: PRE-FLIGHT CHECKS
@@ -184,9 +202,10 @@ $KUBECTL -n "$NAMESPACE" create secret generic fortify-secrets \
 # rejects the StatefulSet update ("doesn't match $setElementOrder list"). See
 # apps/ssc/start.sh, which maps each field to one of these unique keys.
 
-# Ingress server cert (kubernetes.io/tls type — required by nginx ingress).
+# Ingress server cert (kubernetes.io/tls type — required by ingress controllers).
 $KUBECTL -n "$NAMESPACE" create secret tls tls \
   --cert="$SERVER_CERT" --key="$SERVER_KEY"
+configure_microk8s_ingress_default_tls
 
 # LIM signing cert (PFX) + password.
 $KUBECTL -n "$NAMESPACE" create secret generic tls-pfx \
