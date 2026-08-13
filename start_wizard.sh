@@ -21,6 +21,7 @@ fi
 
 ENV_FILE="$FORTIFY_HOME_K8S/.env"
 ENV_EXAMPLE="$FORTIFY_HOME_K8S/.env.example"
+ENV_BACKUP_DIR="$FORTIFY_HOME_K8S/.env.backups"
 
 
 # ============================================================
@@ -93,7 +94,7 @@ bootstrap_env() {
         if [ -f "$ENV_EXAMPLE" ]; then
             cp "$ENV_EXAMPLE" "$ENV_FILE"
             note "Created $ENV_FILE from .env.example."
-            note "Edit it (option 13) to set your domain, passwords, and image versions."
+            note "Use Advanced setup -> Configuration editor to set your domain, passwords, and image versions."
             press_any
         else
             error "Neither .env nor .env.example found in $FORTIFY_HOME_K8S."
@@ -1027,67 +1028,126 @@ live_status() {
     clear
 }
 
+k8s_resource_names() {
+    local kind="$1" filter="${2:-}" prefix="${3:-}" name
+    [ -n "$KUBECTL" ] || return 1
+    while IFS= read -r name; do
+        name="${name#*/}"
+        [ -n "$name" ] || continue
+        [ -z "$prefix" ] || [[ "$name" == "$prefix"* ]] || continue
+        [ -z "$filter" ] || [[ "$name" == *"$filter"* ]] || continue
+        printf '%s\n' "$name"
+    done < <($KUBECTL -n "$NAMESPACE" get "$kind" -o name 2>/dev/null)
+}
+
+k8s_select_resource() {
+    local kind="$1" prompt="${2:-Select resource}" filter="${3:-}" prefix="${4:-}"
+    local resources=() i sel exact
+    K8S_SELECTED_RESOURCE_KIND=""
+    K8S_SELECTED_RESOURCE_NAME=""
+
+    while true; do
+        mapfile -t resources < <(k8s_resource_names "$kind" "$filter" "$prefix")
+        printf '\n%s\n' "$prompt"
+        if [ -n "$filter" ]; then
+            printf '  Filter: %s\n' "$filter"
+        fi
+        if [ -n "$prefix" ]; then
+            printf '  Scope:  %s*\n' "$prefix"
+        fi
+        if [ ${#resources[@]} -eq 0 ]; then
+            note "No ${kind}s matched '${filter:-all}'."
+        else
+            for i in "${!resources[@]}"; do
+                printf '  %2d. %s\n' $((i + 1)) "${resources[$i]}"
+            done
+        fi
+        printf '\n  f. Filter list   x. Enter exact name   b. Back\n'
+        ask sel "${kind^} number:"
+        case "$sel" in
+            [Bb]|"") return 1 ;;
+            [Ff])
+                ask filter "Filter (substring, blank=all):"
+                ;;
+            [Xx])
+                ask exact "Exact ${kind} name:"
+                [ -n "$exact" ] || { error "Name cannot be blank"; continue; }
+                K8S_SELECTED_RESOURCE_KIND="$kind"
+                K8S_SELECTED_RESOURCE_NAME="$exact"
+                return 0
+                ;;
+            *)
+                if [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le ${#resources[@]} ]; then
+                    K8S_SELECTED_RESOURCE_KIND="$kind"
+                    K8S_SELECTED_RESOURCE_NAME="${resources[$((sel-1))]}"
+                    return 0
+                fi
+                error "Invalid selection."
+                ;;
+        esac
+    done
+}
+
+pod_has_restarts() {
+    local pod="$1"
+    $KUBECTL -n "$NAMESPACE" get pod "$pod" \
+        -o jsonpath='{range .status.containerStatuses[*]}{.restartCount}{"\\n"}{end}' 2>/dev/null \
+        | awk '$1 > 0 { found=1 } END { exit found ? 0 : 1 }'
+}
+
+pod_log_action_menu() {
+    local pod="$1" choice previous_label
+    while true; do
+        previous_label="Previous container logs"
+        pod_has_restarts "$pod" || previous_label="Previous container logs (if available)"
+        printf '\nPod: %s\n' "$pod"
+        printf '  1. Recent logs\n'
+        printf '  2. Follow logs\n'
+        printf '  3. %s\n' "$previous_label"
+        printf '  b. Back\n'
+        ask choice "Select:"
+        case "$choice" in
+            1)
+                $KUBECTL -n "$NAMESPACE" logs --tail=200 "$pod" || true
+                press_any
+                return 0
+                ;;
+            2)
+                note "Following logs for $pod. Press Ctrl+C to return."
+                $KUBECTL -n "$NAMESPACE" logs --follow --tail=100 "$pod" || true
+                press_any
+                return 0
+                ;;
+            3)
+                $KUBECTL -n "$NAMESPACE" logs --previous --tail=200 "$pod" || true
+                press_any
+                return 0
+                ;;
+            [Bb]|"") return 1 ;;
+            *) error "Invalid selection." ;;
+        esac
+    done
+}
+
 logs_menu() {
     title "Pod logs"
-    local pods=()
     if ! cluster_reachable; then
         error "Cluster not reachable"
         press_any; return
     fi
-    mapfile -t pods < <($KUBECTL -n "$NAMESPACE" get pods -o name 2>/dev/null | sed 's|^pod/||')
-    if [ ${#pods[@]} -eq 0 ]; then
-        note "No pods in '$NAMESPACE'"
-        press_any; return
-    fi
-    ask filter "Filter (substring, blank=all):"
-    local matched=() i
-    for i in "${!pods[@]}"; do
-        if [ -z "$filter" ] || [[ "${pods[$i]}" == *"$filter"* ]]; then
-            matched+=("${pods[$i]}")
-        fi
-    done
-    if [ ${#matched[@]} -eq 0 ]; then
-        note "No pods matched '$filter'"
-        press_any; return
-    fi
-    echo
-    for i in "${!matched[@]}"; do
-        printf '  %2d. %s\n' $((i + 1)) "${matched[$i]}"
-    done
-    echo
-    ask sel "Pod number:"
-    [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le ${#matched[@]} ] || {
-        error "Invalid"; press_any; return
-    }
-    local pod="${matched[$((sel-1))]}"
-    if confirm "Follow logs (Ctrl+C to exit)?"; then
-        $KUBECTL -n "$NAMESPACE" logs --follow "$pod" || true
-    else
-        $KUBECTL -n "$NAMESPACE" logs --tail=200 "$pod" || true
-        press_any
+    if k8s_select_resource pod "Select a pod"; then
+        pod_log_action_menu "$K8S_SELECTED_RESOURCE_NAME"
     fi
 }
 
 logs_for_prefix() {
-    local prefix="$1" pods=() i
-    mapfile -t pods < <($KUBECTL -n "$NAMESPACE" get pods -o name 2>/dev/null \
-                       | sed 's|^pod/||' | grep "^$prefix")
-    if [ ${#pods[@]} -eq 0 ]; then
-        note "No pods matching '$prefix'"
-        press_any; return
-    fi
-    if [ ${#pods[@]} -eq 1 ]; then
-        $KUBECTL -n "$NAMESPACE" logs --tail=200 "${pods[0]}" || true
+    local prefix="$1"
+    if k8s_select_resource pod "Select a pod" "" "$prefix"; then
+        pod_log_action_menu "$K8S_SELECTED_RESOURCE_NAME"
     else
-        echo
-        for i in "${!pods[@]}"; do
-            printf '  %2d. %s\n' $((i + 1)) "${pods[$i]}"
-        done
-        ask sel "Pod number:"
-        [[ "$sel" =~ ^[0-9]+$ ]] || return
-        $KUBECTL -n "$NAMESPACE" logs --tail=200 "${pods[$((sel-1))]}" || true
+        note "No pod selected."
+        press_any
     fi
-    press_any
 }
 
 # Multi-pod log streamer. Tails every pod in $NAMESPACE in parallel,
@@ -1218,10 +1278,366 @@ versions_menu() {
     press_any
 }
 
-edit_env() {
+env_is_secret_key() {
+    case "$1" in
+        *PASS*|*PASSWORD*|*TOKEN*|*SECRET*|*KEY*|*LICENSE*|*CREDENTIAL*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+env_display_value() {
+    local key="$1" value="${2:-}"
+    if env_is_secret_key "$key"; then
+        [ -n "$value" ] && printf '%s\n' '<redacted>' || printf '%s\n' '<unset>'
+    else
+        printf '%s\n' "${value:-<unset>}"
+    fi
+}
+
+env_shell_quote() {
+    local value="$1"
+    printf "'%s'" "${value//\'/\'\\\'\'}"
+}
+
+env_assignment_expr() {
+    local key="$1" value="$2" mode="${3:-literal}"
+    if [ "$mode" = expr ]; then
+        printf 'export %s="%s"' "$key" "$value"
+    else
+        printf 'export %s=%s' "$key" "$(env_shell_quote "$value")"
+    fi
+}
+
+env_backup_timestamp() { date +%Y%m%d-%H%M%S; }
+
+env_prepare_backup() {
+    local reason="${1:-wizard-edit}" timestamp backup meta
+    timestamp=$(env_backup_timestamp)
+    mkdir -p "$ENV_BACKUP_DIR" || return 1
+    backup="$ENV_BACKUP_DIR/.env.$timestamp.$reason.bak"
+    meta="$ENV_BACKUP_DIR/.env.$timestamp.$reason.meta"
+    cp "$ENV_FILE" "$backup" || return 1
+    ENV_LAST_BACKUP="$backup"
+    ENV_LAST_BACKUP_META="$meta"
+    printf 'created_by=fortifylab-wizard\ncreated_at=%s\nreason=%s\n' "$timestamp" "$reason" >"$meta"
+    printf '%s\n' "$backup" >"$FORTIFY_HOME_K8S/.env.rollback"
+}
+
+env_current_value() {
+    local key="$1"
+    ( set -a; source "$ENV_FILE" >/dev/null 2>&1; printf '%s\n' "${!key:-}" )
+}
+
+env_apply_updates() {
+    local reason="$1" key value mode pair changed_keys=() tmp line
+    shift
+    [ -s "$ENV_FILE" ] || { error "$ENV_FILE does not exist or is empty."; return 1; }
+    [ "$#" -gt 0 ] || { note "No changes selected."; return 0; }
+    env_prepare_backup "$reason" || { error "Could not create .env backup."; return 1; }
+    tmp="$FORTIFY_HOME_K8S/.env.tmp"
+    cp "$ENV_FILE" "$tmp" || return 1
+    for pair in "$@"; do
+        key="${pair%%=*}"
+        value="${pair#*=}"
+        mode=literal
+        case "$value" in
+            __EXPR__*) mode=expr; value="${value#__EXPR__}" ;;
+        esac
+        line=$(env_assignment_expr "$key" "$value" "$mode")
+        awk -v key="$key" -v newline="$line" '
+            BEGIN { replaced = 0 }
+            $0 ~ "^[[:space:]]*(export[[:space:]]+)?" key "=" { print newline; replaced = 1; next }
+            { print }
+            END { if (!replaced) { print ""; print newline } }
+        ' "$tmp" >"$tmp.next" || return 1
+        mv "$tmp.next" "$tmp" || return 1
+        changed_keys+=("$key")
+    done
+    mv "$tmp" "$ENV_FILE" || return 1
+    {
+        printf 'changed_keys='
+        local sep=""
+        for key in "${changed_keys[@]}"; do
+            printf '%s%s' "$sep" "$key"
+            sep=,
+        done
+        printf '\n'
+    } >>"$ENV_LAST_BACKUP_META"
+    wizard_log_event "action=env_update reason=$reason backup=$(basename "$ENV_LAST_BACKUP") keys=${changed_keys[*]}"
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    note "Updated .env. Backup: $ENV_LAST_BACKUP"
+    section "Changed keys"
+    for key in "${changed_keys[@]}"; do
+        printf '  - %s\n' "$key"
+    done
+}
+
+env_preview_changes() {
+    local key new mode old display_old display_new pair
+    for pair in "$@"; do
+        key="${pair%%=*}"
+        new="${pair#*=}"
+        mode=literal
+        case "$new" in
+            __EXPR__*) mode=expr; new="${new#__EXPR__}" ;;
+        esac
+        old=$(env_current_value "$key")
+        if [ "$mode" = expr ]; then
+            display_new="$new"
+        else
+            display_new="$new"
+        fi
+        display_old=$(env_display_value "$key" "$old")
+        display_new=$(env_display_value "$key" "$display_new")
+        printf '  %-32s %s -> %s\n' "$key" "$display_old" "$display_new"
+    done
+}
+
+env_backup_files() {
+    find "$ENV_BACKUP_DIR" -maxdepth 1 -type f -name '.env.*.bak' 2>/dev/null | sort -r
+}
+
+env_restore_backup() {
+    local backup="$1" reason="${2:-restore}"
+    [ -s "$backup" ] || { error "Backup not found: $backup"; return 1; }
+    env_prepare_backup "before-$reason" || return 1
+    cp "$backup" "$ENV_FILE" || return 1
+    wizard_log_event "action=env_restore restored=$(basename "$backup") rollback=$(basename "$ENV_LAST_BACKUP")"
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    note "Restored .env from $backup"
+}
+
+env_rollback_last() {
+    local backup
+    if [ -s "$FORTIFY_HOME_K8S/.env.rollback" ]; then
+        backup=$(cat "$FORTIFY_HOME_K8S/.env.rollback")
+    else
+        backup=$(env_backup_files | head -n 1)
+    fi
+    [ -n "${backup:-}" ] || { error "No .env backups are available."; return 1; }
+    env_restore_backup "$backup" rollback-last
+}
+
+env_restore_selected() {
+    local backups=() choice idx
+    while IFS= read -r choice; do backups+=("$choice"); done < <(env_backup_files)
+    [ "${#backups[@]}" -gt 0 ] || { error "No .env backups are available."; press_any; return 1; }
+    section "Available .env backups"
+    for idx in "${!backups[@]}"; do
+        printf '  %d. %s\n' $((idx + 1)) "${backups[$idx]}"
+    done
+    echo
+    ask choice "Restore which backup number (or empty to cancel):"
+    [ -z "$choice" ] && return 0
+    [[ "$choice" =~ ^[0-9]+$ ]] || { error "Invalid selection"; return 1; }
+    [ "$choice" -ge 1 ] && [ "$choice" -le "${#backups[@]}" ] || { error "Out of range"; return 1; }
+    env_restore_backup "${backups[$((choice - 1))]}" restore-selected
+}
+
+env_section_keys() {
+    case "$1" in
+        identity) printf '%s\n' NAMESPACE DOMAIN ;;
+        urls) printf '%s\n' SSC LIM SCDAST SCSAST SSC_URL LIM_URL LIM_API_URL SCDAST_URL SCSAST_URL SCSAST_CTRL_URL ;;
+        versions) printf '%s\n' FORTIFY_SSC_CHART_VERSION FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION FORTIFY_SCSAST_CTRL_IMAGE_TAG FORTIFY_SCSAST_WORKER_IMAGE_TAG FORTIFY_SCDAST_CHART_VERSION FORTIFY_LIM_CHART_VERSION FORTIFY_MYSQL_CHART_VERSION FORTIFY_POSTGRES_CHART_VERSION FORTIFY_POSTGRES_IMAGE_TAG FORTIFY_MYSQL_IMAGE_TAG ;;
+        credentials) printf '%s\n' DEFAULT_PASS SCDAST_SSC_USER SCDAST_SSC_PASS SCDAST_DB_OWNER_USER SCDAST_DB_OWNER_PASS SCDAST_DB_STANDARD_USER SCDAST_DB_STANDARD_PASS LIM_POOL_NAME LIM_POOL_PASS ;;
+        *) return 1 ;;
+    esac
+}
+
+env_guided_section_editor() {
+    local section_name="$1" reason="$2" key current value updates=()
+    title "Configuration editor"
+    section "$section_name"
+    while IFS= read -r key; do
+        current=$(env_current_value "$key")
+        printf '\n%s [%s]\n' "$key" "$(env_display_value "$key" "$current")"
+        if env_is_secret_key "$key"; then
+            read -rsp "New value (empty to keep current): " value
+            echo
+        else
+            read -rp "New value (empty to keep current): " value
+        fi
+        [ -z "$value" ] && continue
+        updates+=("$key=$value")
+    done < <(env_section_keys "$reason")
+    [ "${#updates[@]}" -gt 0 ] || { note "No changes selected."; press_any; return 0; }
+    section "Pending .env changes"
+    env_preview_changes "${updates[@]}"
+    echo
+    if confirm "Apply these .env changes with a backup first?"; then
+        env_apply_updates "$reason" "${updates[@]}"
+    else
+        note "Configuration changes cancelled."
+    fi
+    press_any
+}
+
+env_valid_domain() {
+    [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]]
+}
+
+domain_url_updates() {
+    local domain="$1"
+    printf '%s\n' \
+        "DOMAIN=$domain" \
+        'SSC=__EXPR__ssc.$DOMAIN' \
+        'LIM=__EXPR__lim.$DOMAIN' \
+        'SCDAST=__EXPR__dast.$DOMAIN' \
+        'SCSAST=__EXPR__sast.$DOMAIN' \
+        'SSC_URL=__EXPR__https://$SSC' \
+        'LIM_URL=__EXPR__https://$LIM' \
+        'LIM_API_URL=__EXPR__https://$LIM/LIM.API' \
+        'SCDAST_URL=__EXPR__https://$SCDAST' \
+        'SCSAST_URL=__EXPR__https://$SCSAST' \
+        'SCSAST_CTRL_URL=__EXPR__https://$SCSAST/scancentral-ctrl/'
+}
+
+domain_url_assistant() {
+    local domain updates=()
+    title "Domain and URL assistant"
+    printf '\nCurrent domain: %s\n\n' "${DOMAIN:-<unset>}"
+    ask domain "New base domain, for example fortifydemo.com:"
+    [ -n "$domain" ] || return 0
+    env_valid_domain "$domain" || { error "Use a DNS-style domain such as fortifydemo.com or lab.example.internal."; press_any; return 1; }
+    while IFS= read -r line; do updates+=("$line"); done < <(domain_url_updates "$domain")
+    section "Pending domain and URL changes"
+    env_preview_changes "${updates[@]}"
+    cat <<EOF
+
+Impact after applying:
+  - Regenerate TLS certificates.
+  - Refresh Kubernetes Secrets.
+  - Reapply ingress resources or restart affected apps.
+  - Update client DNS or /etc/hosts for the new hostnames.
+  - Import or trust the mkcert root CA on client browsers if needed.
+EOF
+    echo
+    if confirm "Apply domain and URL changes with a backup first?"; then
+        env_apply_updates domain-url "${updates[@]}"
+    else
+        note "Domain changes cancelled."
+    fi
+    press_any
+}
+
+mkcert_caroot_path() {
+    mkcert -CAROOT 2>/dev/null
+}
+
+mkcert_root_ca_source() {
+    local caroot
+    caroot=$(mkcert_caroot_path) || return 1
+    [ -n "$caroot" ] || return 1
+    printf '%s/rootCA.pem\n' "$caroot"
+}
+
+mkcert_root_ca_export() {
+    local src dest="$FORTIFY_HOME_K8S/certs/rootCA.pem"
+    command -v mkcert >/dev/null 2>&1 || { error "mkcert is not installed."; return 1; }
+    src=$(mkcert_root_ca_source) || { error "Could not locate mkcert CAROOT."; return 1; }
+    [ -s "$src" ] || { error "mkcert rootCA.pem not found at $src. Run certificate generation first."; return 1; }
+    mkdir -p "$(dirname "$dest")" || return 1
+    cp "$src" "$dest" || return 1
+    wizard_log_event "action=mkcert_root_ca_export destination=$dest"
+    note "Copied public mkcert root CA to $dest"
+    note "Only the public root CA certificate was copied; the private CA key was not touched."
+}
+
+mkcert_trust_instructions() {
+    cat <<'EOF'
+
+Trust the exported public root CA on client machines that open the lab URLs.
+Never import, copy, or share the mkcert private CA key.
+
+Windows:
+  1. Open Manage user certificates.
+  2. Import rootCA.pem into Trusted Root Certification Authorities.
+
+macOS:
+  1. Open Keychain Access.
+  2. Import rootCA.pem into System or login keychain.
+  3. Set the certificate to Always Trust for SSL.
+
+Ubuntu/Debian:
+  sudo cp rootCA.pem /usr/local/share/ca-certificates/fortifylab-mkcert.crt
+  sudo update-ca-certificates
+
+Firefox/NSS stores:
+  Import rootCA.pem in Settings -> Privacy & Security -> Certificates,
+  or use certutil for the relevant browser profile.
+EOF
+}
+
+mkcert_root_ca_menu() {
+    local src
+    title "mkcert root CA"
+    if command -v mkcert >/dev/null 2>&1; then
+        src=$(mkcert_root_ca_source || true)
+        printf '\n  mkcert CAROOT rootCA.pem: %s\n' "${src:-<unavailable>}"
+        printf '  Export target:           %s\n' "$FORTIFY_HOME_K8S/certs/rootCA.pem"
+    else
+        printf '\n  mkcert is not installed. Install prerequisites first.\n'
+    fi
+    cat <<EOF
+
+  1. Export public rootCA.pem to certs/rootCA.pem
+  2. Show trust instructions
+
+  r. Return
+EOF
+    echo
+    ask choice "Select:"
+    case "$choice" in
+        1) mkcert_root_ca_export; mkcert_trust_instructions; press_any ;;
+        2) mkcert_trust_instructions; press_any ;;
+        [Rr]) return ;;
+        *) error "Invalid"; sleep 1 ;;
+    esac
+}
+
+raw_edit_env() {
+    env_prepare_backup raw-editor || { error "Could not create .env backup."; return 1; }
     "${EDITOR:-nano}" "$ENV_FILE"
     # shellcheck disable=SC1090
     source "$ENV_FILE"
+}
+
+edit_env() {
+    local choice
+    while true; do
+        title "Configuration editor"
+        cat <<EOF
+
+  1. Lab identity and domain
+  2. URLs
+  3. Image/chart versions
+  4. Credentials and passwords
+  5. Domain and URL assistant
+  6. mkcert root CA export and trust help
+  7. Roll back last wizard .env change
+  8. Restore selected .env backup
+  9. Open raw .env in editor (backup first)
+
+  r. Return
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) env_guided_section_editor "Lab identity and domain" identity ;;
+            2) env_guided_section_editor "URLs" urls ;;
+            3) env_guided_section_editor "Image/chart versions" versions ;;
+            4) env_guided_section_editor "Credentials and passwords" credentials ;;
+            5) domain_url_assistant ;;
+            6) mkcert_root_ca_menu ;;
+            7) env_rollback_last; press_any ;;
+            8) env_restore_selected; press_any ;;
+            9) raw_edit_env; press_any ;;
+            [Rr]) return ;;
+            *) error "Invalid"; sleep 1 ;;
+        esac
+    done
 }
 
 
@@ -1268,7 +1684,7 @@ advanced_menu() {
   2. License files
   3. Generate certificates and Secrets
   4. Configure DNS, SSC token, LIM, and Dashboard access
-  5. Edit .env
+  5. Configuration editor (.env, domain, root CA)
 
   r. Return
 EOF
@@ -1654,7 +2070,7 @@ deployment_inputs_menu() {
         title "Configuration and license"
         printf '\n  .env:    %s\n' "$ENV_FILE"
         printf '  License: %s\n\n' "$(status_license)"
-        echo "  1. Edit .env"
+        echo "  1. Configuration editor"
         echo "  2. Add or review the Fortify license"
         echo "  ?. Help for this step"
         echo "  r. Return to the guided step"
@@ -1980,6 +2396,33 @@ guided_print_recent_events() {
         | tail -5 | awk 'NR>0 { printf "  %s\n", $0 }'
 }
 
+
+guided_step_pod_logs() {
+    local id="$1" label="${2:-$1}" prefix pods
+    if ! cluster_reachable; then
+        error "Cluster not reachable"
+        press_any
+        return 1
+    fi
+    prefix=$(guided_step_pod_prefixes "$id")
+    if [ -z "$prefix" ]; then
+        note "No pod logs apply to $label yet."
+        press_any
+        return 1
+    fi
+    mapfile -t pods < <(k8s_resource_names pod "" "$prefix")
+    if [ ${#pods[@]} -eq 0 ]; then
+        note "No pods matching '$prefix' have appeared yet. Recent events may explain what is still pending."
+        section "Recent events"
+        guided_print_recent_events
+        press_any
+        return 1
+    fi
+    if k8s_select_resource pod "Select a pod for $label" "" "$prefix"; then
+        pod_log_action_menu "$K8S_SELECTED_RESOURCE_NAME"
+    fi
+}
+
 guided_diagnostics_bundle() {
     local output_dir bundle
     output_dir="${XDG_STATE_HOME:-$HOME/.local/state}/fortify-lab/diagnostics"
@@ -2088,7 +2531,7 @@ guided_wait_for_step() {
         guided_print_pods "$id"
         section "Recent events"
         guided_print_recent_events
-        printf '\n  r. Retry operation   i. Take interactive control   h. Help   d. Diagnostics   q. Quit safely\n'
+        printf '\n  r. Retry operation   i. Take interactive control   p. Pod logs   l. Wizard log   h. Help   d. Diagnostics   q. Quit safely\n'
         printf '  Waiting %ss before the next refresh' "$interval"
         [ "$timeout" -gt 0 ] && printf ' (%ss remaining)' "$remaining"
         printf '...\n'
@@ -2114,6 +2557,12 @@ guided_wait_for_step() {
                     topic=$(guided_step_help_topic "$id") || topic=overview
                     wizard_log_event "action=user_control step=$id control=help"
                     help_show_topic "$topic"
+                    guided_wait_screen_enter
+                    ;;
+                [Pp])
+                    guided_wait_screen_leave
+                    wizard_log_event "action=user_control step=$id control=pod_logs"
+                    guided_step_pod_logs "$id" "$label"
                     guided_wait_screen_enter
                     ;;
                 [Ll])
@@ -2701,7 +3150,7 @@ main_menu() {
         echo "  11. Tail one pod"
         echo "  12. URLs & credentials"
         echo "  13. Image versions"
-        echo "  14. Edit .env"
+        echo "  14. Configuration editor"
 
         section "Learn"
         echo "  15. Help Center / Fortify Knowledge Center"
@@ -2754,7 +3203,7 @@ Usage:
 
 Environment overrides:
   FORTIFY_HOME_K8S    Repo root (defaults to the script's directory).
-  EDITOR              Editor used by 'Edit .env' (defaults to nano).
+  EDITOR              Editor used by the raw .env editor fallback (defaults to nano).
   NO_COLOR            Disable color output if set to any value.
   WIZARD_NOMAIN       Set to 1 to source this file without entering the menu
                       (for tests / scripting).

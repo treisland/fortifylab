@@ -186,6 +186,89 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Resume or repair", result.stderr)
         self.assertIn("existing release: mysql", result.stdout)
 
+    def test_gitignore_covers_wizard_env_backups(self) -> None:
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        for pattern in (
+            ".env.backups/",
+            ".env.*.bak",
+            ".env.bak",
+            ".env.tmp",
+            ".env.rollback",
+        ):
+            self.assertIn(pattern, gitignore)
+
+    def test_env_apply_preserves_comments_unknown_keys_and_writes_metadata(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "# keep this comment" "export DOMAIN=\"old.test\"" "CUSTOM_FLAG=yes" "export DEFAULT_PASS=\"old\"" >"$ENV_FILE"; '
+            'env_apply_updates wizard-test "DOMAIN=new.test" "DEFAULT_PASS=p@ss&word"; '
+            'cat "$ENV_FILE"; printf "META\n"; cat "$ENV_BACKUP_DIR"/.env.*.meta',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("# keep this comment", result.stdout)
+        self.assertIn("CUSTOM_FLAG=yes", result.stdout)
+        self.assertIn("export DOMAIN='new.test'", result.stdout)
+        self.assertIn("export DEFAULT_PASS='p@ss&word'", result.stdout)
+        self.assertIn("reason=wizard-test", result.stdout)
+        self.assertIn("changed_keys=DOMAIN,DEFAULT_PASS", result.stdout)
+
+    def test_env_rollback_last_restores_prior_env(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=\"old.test\"" >"$ENV_FILE"; '
+            'env_apply_updates first "DOMAIN=new.test" >/dev/null; '
+            'env_rollback_last >/dev/null; '
+            'source "$ENV_FILE"; printf "DOMAIN=%s\n" "$DOMAIN"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DOMAIN=old.test", result.stdout)
+
+    def test_domain_assistant_updates_domain_and_derived_urls(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=\"old.test\"" "export SSC=\"ssc.$DOMAIN\"" "export SSC_URL=\"https://$SSC\"" >"$ENV_FILE"; '
+            'updates=(); while IFS= read -r line; do updates+=("$line"); done < <(domain_url_updates lab.example.test); '
+            'env_apply_updates domain-url "${updates[@]}" >/dev/null; '
+            'source "$ENV_FILE"; printf "%s|%s|%s|%s\n" "$DOMAIN" "$SSC" "$LIM" "$SCSAST_CTRL_URL"; '
+            'grep -E "export (DOMAIN|SSC|SSC_URL)=" "$ENV_FILE"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("lab.example.test|ssc.lab.example.test|lim.lab.example.test|https://sast.lab.example.test/scancentral-ctrl/", result.stdout)
+        self.assertIn('export SSC="ssc.$DOMAIN"', result.stdout)
+        self.assertIn('export SSC_URL="https://$SSC"', result.stdout)
+
+    def test_secret_values_are_redacted_in_preview(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DEFAULT_PASS=\"old-secret\"" >"$ENV_FILE"; '
+            'env_preview_changes "DEFAULT_PASS=new-secret"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DEFAULT_PASS", result.stdout)
+        self.assertIn("<redacted> -> <redacted>", result.stdout)
+        self.assertNotIn("old-secret", result.stdout)
+        self.assertNotIn("new-secret", result.stdout)
+
+    def test_mkcert_root_ca_export_copies_public_ca_only(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'mkdir -p "$tmp/bin" "$tmp/caroot"; printf PUBLIC >"$tmp/caroot/rootCA.pem"; printf PRIVATE >"$tmp/caroot/rootCA-key.pem"; '
+            'printf "%s\n" "#!/bin/sh" "echo \"$tmp/caroot\"" >"$tmp/bin/mkcert"; chmod +x "$tmp/bin/mkcert"; PATH="$tmp/bin:$PATH"; '
+            'mkcert_root_ca_export; printf "DEST="; cat "$tmp/certs/rootCA.pem"; printf "\nFILES="; ls "$tmp/certs"',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DEST=PUBLIC", result.stdout)
+        self.assertIn("rootCA.pem", result.stdout)
+        self.assertNotIn("rootCA-key.pem", result.stdout)
+        self.assertNotIn("private rootCA", result.stdout)
+        self.assertNotIn("PRIVATE", result.stdout)
+
+    def test_mkcert_trust_guidance_warns_not_to_share_private_key(self) -> None:
+        result = self.run_wizard_functions('mkcert_trust_instructions')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for expected in ("Windows", "macOS", "Ubuntu/Debian", "Firefox/NSS", "Never import, copy, or share the mkcert private CA key"):
+            self.assertIn(expected, result.stdout)
+
     def test_optional_skip_is_explicit_and_required_skip_is_rejected(self) -> None:
         self.assertIn("GUIDED_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 1)", WIZARD)
         self.assertIn("Skip optional step", WIZARD)
@@ -211,7 +294,7 @@ class GuidedWizardTests(unittest.TestCase):
 
     def test_status_rendering_does_not_dispatch_mutations(self) -> None:
         status_body = WIZARD.split("guided_step_status()", 1)[1].split(
-            "run_deployment_operation()", 1
+            "guided_component_endpoint_detail()", 1
         )[0]
         for mutation in ("apply", "upgrade", "create-certs", "create-secrets"):
             self.assertNotIn(mutation, status_body)
@@ -335,6 +418,77 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Watch verification", WIZARD)
         self.assertIn("Probe:", WIZARD)
         self.assertIn("probe $probe is still failing", WIZARD)
+
+    def test_numbered_kubernetes_resource_selector_filters_resources(self) -> None:
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; '
+            'kube() { case "$*" in '
+            '"-n fortify get pod -o name") printf "pod/mysql-0\npod/ssc-webapp-0\npod/ssc-worker-0\n" ;; '
+            'esac; }; '
+            'k8s_select_resource pod "Pick pod" ssc; '
+            'printf "SELECTED=%s/%s\n" "$K8S_SELECTED_RESOURCE_KIND" "$K8S_SELECTED_RESOURCE_NAME"',
+            "2\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Filter: ssc", result.stdout)
+        self.assertIn("1. ssc-webapp-0", result.stdout)
+        self.assertIn("2. ssc-worker-0", result.stdout)
+        self.assertIn("SELECTED=pod/ssc-worker-0", result.stdout)
+
+    def test_numbered_kubernetes_resource_selector_handles_empty_lists(self) -> None:
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; '
+            'kube() { case "$*" in '
+            '"-n fortify get pod -o name") printf "pod/mysql-0\n" ;; '
+            'esac; }; '
+            'if k8s_select_resource pod "Pick pod" ssc; then printf BAD; else printf EMPTY_BACK; fi',
+            "b\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("No pods matched 'ssc'", result.stdout)
+        self.assertIn("EMPTY_BACK", result.stdout)
+
+    def test_logs_menus_reuse_numbered_selector_and_pod_log_actions(self) -> None:
+        self.assertIn("k8s_select_resource()", WIZARD)
+        self.assertIn("k8s_resource_names()", WIZARD)
+        self.assertIn("pod_log_action_menu()", WIZARD)
+        self.assertIn('k8s_select_resource pod "Select a pod"', WIZARD)
+        self.assertIn('k8s_select_resource pod "Select a pod" "" "$prefix"', WIZARD)
+        self.assertIn("--follow --tail=100", WIZARD)
+        self.assertIn("--previous --tail=200", WIZARD)
+
+        result = self.run_wizard_functions(
+            'cluster_reachable() { return 0; }; '
+            'k8s_select_resource() { printf "SELECTOR:%s|%s|%s|%s\n" "$1" "$2" "$3" "$4"; K8S_SELECTED_RESOURCE_NAME=ssc-webapp-0; return 0; }; '
+            'pod_log_action_menu() { printf "LOGS:%s\n" "$1"; }; '
+            'logs_for_prefix ssc-webapp'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SELECTOR:pod|Select a pod||ssc-webapp", result.stdout)
+        self.assertIn("LOGS:ssc-webapp-0", result.stdout)
+
+    def test_wait_screen_exposes_contextual_pod_logs_without_losing_wizard_log(self) -> None:
+        self.assertIn("guided_step_pod_logs()", WIZARD)
+        self.assertIn("p. Pod logs", WIZARD)
+        self.assertIn("l. Wizard log", WIZARD)
+        self.assertIn('[Pp])', WIZARD)
+        self.assertIn('guided_step_pod_logs "$id" "$label"', WIZARD)
+        self.assertIn("control=pod_logs", WIZARD)
+        self.assertIn("control=view_log", WIZARD)
+
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; '
+            'cluster_reachable() { return 0; }; '
+            'kube() { case "$*" in '
+            '"-n fortify get pod -o name") return 0 ;; '
+            '"-n fortify get events --sort-by=.lastTimestamp") printf "LAST EVENT\n" ;; '
+            'esac; }; '
+            'press_any() { :; }; '
+            'guided_step_pod_logs mysql MySQL || true'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("No pods matching 'mysql' have appeared yet", result.stdout)
+        self.assertIn("Recent events", result.stdout)
 
     def test_failure_screen_can_create_sanitized_diagnostics(self) -> None:
         self.assertIn("guided_diagnostics_bundle()", WIZARD)
