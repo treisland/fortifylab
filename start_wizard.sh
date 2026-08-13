@@ -3108,24 +3108,82 @@ wizard_log_viewer() {
     press_any
 }
 
+GUIDED_WAIT_SCREEN_LINES=0
+
 guided_wait_screen_enter() {
+    GUIDED_WAIT_SCREEN_LINES=0
     [ -t 1 ] || return 0
-    printf '\033[?25l'
+    printf '\033[?25l\033[H\033[J'
 }
 
 guided_wait_screen_render_start() {
     if [ -t 1 ]; then
-        printf '\033[H\033[J'
+        if [ "${GUIDED_WAIT_SCREEN_LINES:-0}" -gt 0 ]; then
+            printf '\033[%sA' "$GUIDED_WAIT_SCREEN_LINES"
+        fi
     else
         printf '\n'
     fi
 }
 
+guided_wait_screen_render_finish() {
+    local rendered_lines="$1" previous_lines="${GUIDED_WAIT_SCREEN_LINES:-0}" extra
+    [ -t 1 ] || return 0
+    if [ "$previous_lines" -gt "$rendered_lines" ]; then
+        extra=$((previous_lines - rendered_lines))
+        while [ "$extra" -gt 0 ]; do
+            printf '\r\033[K\n'
+            extra=$((extra - 1))
+        done
+        printf '\033[%sA' "$((previous_lines - rendered_lines))"
+    fi
+    GUIDED_WAIT_SCREEN_LINES="$rendered_lines"
+}
+
+guided_wait_screen_line() {
+    printf '\r\033[K%s\n' "$*"
+}
+
 guided_wait_screen_leave() {
     [ -t 1 ] || return 0
     printf '\033[?25h'
+    GUIDED_WAIT_SCREEN_LINES=0
 }
 
+guided_wait_render() {
+    local id="$1" label="$2" elapsed="$3" remaining="$4" interval="$5" timeout="$6" probe="$7"
+    printf '\n%s%s%s\n' "$BOLD" "Verifying $label" "$RESET"
+    hr
+    printf '\n  State:   %s\n' "$(guided_step_live_status "$id")"
+    printf '  Probe:   %s\n' "$probe"
+    printf '  Elapsed: %ss' "$elapsed"
+    [ "$timeout" -gt 0 ] && printf ' / %ss' "$timeout"
+    printf '\n  Detail:  %s\n\n' "$(guided_step_progress_message "$id")"
+    section "Pods"
+    guided_print_pods "$id"
+    section "Recent events"
+    guided_print_recent_events
+    printf '\n  r. Retry operation   i. Take interactive control   p. Pod logs   l. Wizard log   h. Help\n'
+    printf '  d. Live diagnostics   x. Export diagnostics bundle   q. Quit safely\n'
+    printf '  Waiting %ss before the next refresh' "$interval"
+    [ "$timeout" -gt 0 ] && printf ' (%ss remaining)' "$remaining"
+    printf '...\n'
+}
+
+guided_wait_screen_render() {
+    local content line rendered_lines=0
+    content=$(guided_wait_render "$@")
+    guided_wait_screen_render_start
+    if [ -t 1 ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            guided_wait_screen_line "$line"
+            rendered_lines=$((rendered_lines + 1))
+        done <<< "$content"
+        guided_wait_screen_render_finish "$rendered_lines"
+    else
+        printf '%s\n' "$content"
+    fi
+}
 
 guided_wait_for_step() {
     local id="$1" label="$2" timeout interval started elapsed remaining control topic probe
@@ -3170,23 +3228,7 @@ guided_wait_for_step() {
 
         remaining=$((timeout - elapsed))
         [ "$timeout" -eq 0 ] && remaining=0
-        guided_wait_screen_render_start
-        printf '\n%s%s%s\n' "$BOLD" "Verifying $label" "$RESET"
-        hr
-        printf '\n  State:   %s\n' "$(guided_step_live_status "$id")"
-        printf '  Probe:   %s\n' "$probe"
-        printf '  Elapsed: %ss' "$elapsed"
-        [ "$timeout" -gt 0 ] && printf ' / %ss' "$timeout"
-        printf '\n  Detail:  %s\n\n' "$(guided_step_progress_message "$id")"
-        section "Pods"
-        guided_print_pods "$id"
-        section "Recent events"
-        guided_print_recent_events
-        printf '\n  r. Retry operation   i. Take interactive control   p. Pod logs   l. Wizard log   h. Help\n'
-        printf '  d. Live diagnostics   x. Export diagnostics bundle   q. Quit safely\n'
-        printf '  Waiting %ss before the next refresh' "$interval"
-        [ "$timeout" -gt 0 ] && printf ' (%ss remaining)' "$remaining"
-        printf '...\n'
+        guided_wait_screen_render "$id" "$label" "$elapsed" "$remaining" "$interval" "$timeout" "$probe"
 
         if read -rsn1 -t "$interval" control; then
             case "$control" in
