@@ -61,10 +61,13 @@ class WizardContractTests(unittest.TestCase):
         app_credentials = wizard.split("show_app_creds()", 1)[1].split(
             "# License menu", 1
         )[0]
-        url_credentials = wizard.split("urls_creds()", 1)[1].split(
+        url_credentials = wizard.split("credential_retrieval_commands()", 1)[1].split(
             "versions_menu()", 1
         )[0]
-        self.assertNotIn("base64 -d", app_credentials + url_credentials)
+        self.assertNotIn("base64 -d", app_credentials)
+        self.assertIn("Show retrieval commands", url_credentials)
+        self.assertIn("base64 -d", url_credentials)
+        self.assertIn("Type REVEAL to display this value once", wizard)
         self.assertNotIn('controller.sscScanCentralCtrlToken="$token"', wizard)
         self.assertIn("--set-string controller.sscScanCentralCtrlToken=", wizard)
         for legacy_value in (
@@ -77,7 +80,8 @@ class WizardContractTests(unittest.TestCase):
         self.assertNotIn("controller.sscScanCentralCtrlToken", sast)
         self.assertIn('read -rsp "Paste ControllerToken', wizard)
         self.assertIn("--patch-file /dev/stdin", wizard)
-        self.assertIn("configured lab password (not displayed)", wizard)
+        self.assertIn("stored in Kubernetes Secret lim-admin-credentials", wizard)
+        self.assertIn("refer to the SSC documentation for the default password", wizard)
 
     def test_controller_token_update_keeps_value_out_of_output_and_arguments(self) -> None:
         token = "synthetic-controller-secret"

@@ -80,11 +80,52 @@ class GuidedWizardTests(unittest.TestCase):
             'GUIDED_STEP_ID=(demo); GUIDED_STEP_LABEL=(Demo); '
             'GUIDED_STEP_OPTIONAL=(0); GUIDED_STEP_HELP=(Help); COMPLETE=0; '
             'guided_step_complete() { [ "$COMPLETE" -eq 1 ]; }; '
+            'guided_step_live_complete() { [ "$COMPLETE" -eq 1 ]; }; '
             'run_deployment_operation() { COMPLETE=1; }; guided_deployment',
             "r\n\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Guided deployment complete", result.stdout)
+        self.assertIn("Congratulations, FortifyLab is ready", result.stdout)
+
+
+    def test_completion_screen_and_credential_handoff_are_safe_by_default(self) -> None:
+        for expected in (
+            "Access & credentials",
+            "Reveal one credential",
+            "Type REVEAL to display this value once",
+            "The wizard will not write this value to logs, diagnostics, .env",
+            "refer to the SSC documentation for the default password",
+            "FortifyLab does not store or display that vendor default password",
+            "Credential availability",
+            "Certificate trust",
+        ):
+            self.assertIn(expected, WIZARD)
+        self.assertNotIn("see initial admin password in SSC startup logs", WIZARD)
+        self.assertNotIn("search the log for 'admin'", WIZARD)
+
+    def test_completion_screen_lists_profile_status_and_next_actions(self) -> None:
+        result = self.run_wizard_functions(
+            'DOMAIN=fortifydemo.test; NAMESPACE=fortify; KUBECTL=kube; '
+            'SSC_URL=https://ssc.fortifydemo.test; LIM_URL=https://lim.fortifydemo.test; '
+            'SCSAST_CTRL_URL=https://sast.fortifydemo.test/scancentral-ctrl; SCDAST_URL=https://dast.fortifydemo.test; '
+            'GUIDED_DEPLOYMENT_PROFILE_LABEL="SAST Full"; GUIDED_DEPLOYMENT_COMPONENTS="ssc,sast_controller,sast_sensor"; '
+            'GUIDED_STEP_ID=(dashboard ssc sast_controller sast_sensor); '
+            'GUIDED_STEP_LABEL=(Dashboard SSC SASTController SASTSensor); '
+            'GUIDED_STEP_OPTIONAL=(0 0 0 0); GUIDED_STEP_HELP=(Help Help Help Help); COMPLETE=0; '
+            'cluster_reachable() { return 0; }; secret_key_exists() { return 1; }; '
+            'app_status() { printf "1/1 running"; }; guided_step_live_status() { printf complete; }; '
+            'guided_step_complete() { [ "$COMPLETE" -eq 1 ]; }; '
+            'guided_step_live_complete() { [ "$COMPLETE" -eq 1 ]; }; '
+            'run_deployment_operation() { COMPLETE=1; }; guided_deployment',
+            "r\nn\nn\nn\nr\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Congratulations, FortifyLab is ready", result.stdout)
+        self.assertIn("Profile: SAST Full", result.stdout)
+        self.assertIn("SSC", result.stdout)
+        self.assertIn("ScanCentral SAST", result.stdout)
+        self.assertIn("https://ssc.fortifydemo.test", result.stdout)
+        self.assertIn("create an SSC ControllerToken", result.stdout)
 
     def test_resume_is_live_derived_and_starts_at_first_required_gap(self) -> None:
         self.assertIn("State is derived from current files and Kubernetes", WIZARD)
@@ -581,8 +622,16 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Correct the issue, then choose Retry", result.stderr)
 
 
-    def test_auto_advance_default_countdown_is_five_seconds(self) -> None:
+    def test_auto_advance_countdown_uses_numbered_ephemeral_status(self) -> None:
         self.assertIn('GUIDED_AUTO_ADVANCE_DELAY="${GUIDED_AUTO_ADVANCE_DELAY:-5}"', WIZARD)
+        countdown = WIZARD.split("guided_countdown()", 1)[1].split("guided_step_enabled()", 1)[0]
+        self.assertIn('GUIDED_AUTO_ADVANCE_DELAY:-5', countdown)
+        self.assertIn('read -rsn1 -t 1 control', countdown)
+        self.assertIn("[%d/%d]", countdown)
+        self.assertIn("Press i to stay here", countdown)
+        self.assertIn("Auto-advance paused: staying interactive", countdown)
+        self.assertIn("\\r\\033[K", countdown)
+        self.assertNotIn("Press i for interactive control", countdown)
 
     def test_prerequisite_menu_shows_completion_indicators(self) -> None:
         self.assertIn("prereqs_status_table()", WIZARD)
@@ -607,7 +656,8 @@ class GuidedWizardTests(unittest.TestCase):
             "\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Guided deployment complete", result.stdout)
+        self.assertIn("Congratulations, FortifyLab is ready", result.stdout)
+        self.assertIn("[1/2] One already complete; continuing to [2/2] Two.", result.stdout)
 
 
     def test_wait_screen_redraws_without_full_clear_flash(self) -> None:
@@ -615,15 +665,17 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("guided_wait_screen_render_start()", WIZARD)
         self.assertIn("guided_wait_screen_render_finish()", WIZARD)
         self.assertIn("guided_wait_screen_leave()", WIZARD)
-        self.assertIn("printf '\\033[?25l\\033[H\\033[J'", WIZARD)
-        self.assertIn("printf '\\033[?25h'", WIZARD)
-        self.assertIn("printf '\\033[%sA'", WIZARD)
-        self.assertIn("printf '\\r\\033[K%s\\n'", WIZARD)
+        self.assertIn("guided_wait_screen_tty()", WIZARD)
+        self.assertIn("FORTIFY_GUIDED_WAIT_ALT_SCREEN", WIZARD)
+        self.assertIn("terminal alternate screen", WIZARD)
+        self.assertIn(r"printf '\033[?1049h\033[?25l\033[H\033[J'", WIZARD)
+        self.assertIn(r"printf '\033[H\033[J'", WIZARD)
+        self.assertIn(r"printf '\033[?25h\033[?1049l'", WIZARD)
+        self.assertIn(r"printf '\033[K%s\n'", WIZARD)
         self.assertNotIn("trap guided_wait_screen_leave RETURN", WIZARD)
 
         wait_body = WIZARD.split("guided_wait_for_step()", 1)[1].split("wizard_deployment_plan()", 1)[0]
         self.assertNotIn("clear", wait_body)
-        self.assertNotIn("\\033[H\\033[J", wait_body)
         self.assertIn('guided_wait_screen_render "$id" "$label"', wait_body)
         self.assertIn("guided_wait_screen_leave", wait_body)
 
@@ -873,12 +925,14 @@ class GuidedWizardTests(unittest.TestCase):
     def test_lab_lifecycle_controls_use_existing_component_scripts(self) -> None:
         self.assertIn("lab_lifecycle_menu()", WIZARD)
         self.assertIn("APP_GUIDED_STEP=", WIZARD)
-        self.assertIn('run_app_scripts "${APP_STOP[$idx]}"', WIZARD)
-        self.assertIn('run_app_scripts "${APP_DESTROY[$idx]}"', WIZARD)
-        self.assertIn('guided_run_and_verify "${APP_GUIDED_STEP[$idx]}"', WIZARD)
+        self.assertIn("lab_lifecycle_app_index_selected()", WIZARD)
+        self.assertIn("lab_lifecycle_selected_step_indexes()", WIZARD)
+        self.assertIn("Start selected profile workloads", WIZARD)
+        self.assertIn("Start all lab deployments", WIZARD)
+        self.assertIn("DESTROY SELECTED PROFILE", WIZARD)
         self.assertIn("DESTROY FORTIFY LAB", WIZARD)
-        self.assertIn("action=lab_lifecycle_start operation=shutdown", WIZARD)
-        self.assertIn("action=lab_lifecycle_start operation=destroy", WIZARD)
+        self.assertIn("action=lab_lifecycle_start operation=shutdown scope=selected", WIZARD)
+        self.assertIn("action=lab_lifecycle_start operation=destroy scope=$scope", WIZARD)
 
     def test_lab_shutdown_stops_workloads_in_reverse_dependency_order(self) -> None:
         result = self.run_wizard_functions(
@@ -891,7 +945,8 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertEqual(
             runs,
             [
-                "apps/scdast/core/stop.sh apps/scdast/scanner/stop.sh",
+                "apps/scdast/scanner/stop.sh",
+                "apps/scdast/core/stop.sh",
                 "apps/scsast/stop.sh",
                 "apps/lim/stop.sh",
                 "apps/ssc/stop.sh",
@@ -914,10 +969,12 @@ class GuidedWizardTests(unittest.TestCase):
             [
                 "VERIFY:mysql:MySQL:lifecycle",
                 "VERIFY:postgresql:PostgreSQL:lifecycle",
-                "VERIFY:ssc:SSC:lifecycle",
+                "VERIFY:ssc:Software Security Center:lifecycle",
                 "VERIFY:lim:LIM:lifecycle",
-                "VERIFY:sast:ScanCentral SAST:lifecycle",
-                "VERIFY:dast:ScanCentral DAST:lifecycle",
+                "VERIFY:sast_controller:ScanCentral SAST Controller:lifecycle",
+                "VERIFY:sast_sensor:ScanCentral SAST Sensor:lifecycle",
+                "VERIFY:dast_core:ScanCentral DAST Core:lifecycle",
+                "VERIFY:dast_scanner:ScanCentral DAST Scanner:lifecycle",
             ],
         )
         self.assertIn("MODE=resume", result.stdout)
@@ -927,11 +984,11 @@ class GuidedWizardTests(unittest.TestCase):
             'fortify_lab_show_action_warning() { :; }; '
             'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
             'wizard_log_event() { :; }; '
-            'read _lab_ack; lab_destroy_deployments; printf "RC=%s\n" "$?"',
+            'read _lab_ack; lab_destroy_deployments all; printf "RC=%s\n" "$?"',
             "not today\n",
         )
         self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
-        self.assertIn("Full teardown cancelled", cancelled.stdout)
+        self.assertIn("Teardown cancelled", cancelled.stdout)
         self.assertNotIn("RUN:", cancelled.stdout)
         self.assertIn("RC=1", cancelled.stdout)
 
@@ -939,7 +996,7 @@ class GuidedWizardTests(unittest.TestCase):
             'fortify_lab_show_action_warning() { :; }; '
             'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
             'wizard_log_event() { :; }; '
-            'read _lab_ack; lab_destroy_deployments',
+            'read _lab_ack; lab_destroy_deployments all',
             "DESTROY FORTIFY LAB\n",
         )
         self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
@@ -956,6 +1013,66 @@ class GuidedWizardTests(unittest.TestCase):
             ],
         )
         self.assertIn("Full lab teardown preview", confirmed.stdout)
+
+    def test_lifecycle_start_uses_selected_profile_steps(self) -> None:
+        result = self.run_wizard_functions(
+            'FORTIFY_DEPLOYMENT_PROFILE=sast_full; guided_apply_deployment_profile sast_full; '
+            'guided_run_and_verify() { printf "VERIFY:%s:%s\n" "$1" "$2"; }; '
+            'wizard_log_event() { :; }; '
+            'lab_start_deployments selected'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        verifies = [line for line in result.stdout.splitlines() if line.startswith("VERIFY:")]
+        self.assertEqual(
+            verifies,
+            [
+                "VERIFY:mysql:MySQL",
+                "VERIFY:ssc:Software Security Center",
+                "VERIFY:sast_controller:ScanCentral SAST Controller",
+                "VERIFY:sast_sensor:ScanCentral SAST Sensor",
+            ],
+        )
+        self.assertNotIn("VERIFY:postgresql", result.stdout)
+        self.assertNotIn("VERIFY:lim", result.stdout)
+        self.assertNotIn("VERIFY:dast", result.stdout)
+
+    def test_lifecycle_shutdown_uses_selected_profile_scripts(self) -> None:
+        result = self.run_wizard_functions(
+            'FORTIFY_DEPLOYMENT_PROFILE=sast_full; guided_apply_deployment_profile sast_full; '
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
+            'wizard_log_event() { :; }; '
+            'lab_shutdown_deployments selected'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runs = [line.removeprefix("RUN:") for line in result.stdout.splitlines() if line.startswith("RUN:")]
+        self.assertEqual(
+            runs,
+            [
+                "apps/scsast/stop.sh",
+                "apps/ssc/stop.sh",
+                "apps/mysql/stop.sh",
+            ],
+        )
+        self.assertNotIn("apps/postgresql/stop.sh", result.stdout)
+        self.assertNotIn("apps/lim/stop.sh", result.stdout)
+        self.assertNotIn("apps/scdast", result.stdout)
+
+    def test_cluster_status_is_profile_aware_for_limited_deployments(self) -> None:
+        result = self.run_wizard_functions(
+            'FORTIFY_DEPLOYMENT_PROFILE=sast_full; guided_apply_deployment_profile sast_full; '
+            'NAMESPACE=fortify; KUBECTL=kube; cluster_reachable() { return 0; }; '
+            'kube() { printf "%s\n" '
+            '"mysql-0 1/1 Running 0 1m" '
+            '"ssc-webapp-0 1/1 Running 0 1m" '
+            '"scancentral-sast-controller-0 1/1 Running 0 1m" '
+            '"postgresql-0 0/1 Running 0 1m" '
+            '"lim-0 0/1 Running 0 1m" '
+            '"sdast-core-0 0/1 Pending 0 1m"; }; '
+            'status_cluster'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Cluster: selected profile pods ready (3/3 running)", result.stdout)
+        self.assertNotIn("3/6", result.stdout)
 
 
     def test_destroy_scripts_treat_missing_helm_releases_as_already_absent(self) -> None:
@@ -977,6 +1094,55 @@ class GuidedWizardTests(unittest.TestCase):
                 body = (ROOT / script).read_text(encoding="utf-8")
                 self.assertIn("scripts/lib/k8s-destroy.sh", body)
                 self.assertIn("fortify_helm_delete_if_exists", body)
+
+
+    def test_stop_scripts_treat_missing_statefulsets_as_already_stopped(self) -> None:
+        helper = (ROOT / "scripts/lib/k8s-scale.sh").read_text(encoding="utf-8")
+        self.assertIn("fortify_scale_statefulset_if_exists()", helper)
+        self.assertIn('get statefulset "$statefulset"', helper)
+        self.assertIn("already stopped", helper)
+
+        expected_statefulsets = {
+            "apps/mysql/stop.sh": ["mysql"],
+            "apps/postgresql/stop.sh": ["postgresql"],
+            "apps/ssc/stop.sh": ["ssc-webapp"],
+            "apps/lim/stop.sh": ["lim"],
+            "apps/scsast/stop.sh": ["scancentral-sast-controller", "scancentral-sast-worker-linux"],
+            "apps/scdast/core/stop.sh": [
+                "sdast-core-scancentral-dast-core-api",
+                "sdast-core-scancentral-dast-core-globalservice",
+                "sdast-core-scancentral-dast-core-utilityservice",
+            ],
+            "apps/scdast/scanner/stop.sh": ["sdast-scanner-scancentral-dast-scanner"],
+        }
+        for script, statefulsets in expected_statefulsets.items():
+            with self.subTest(script=script):
+                body = (ROOT / script).read_text(encoding="utf-8")
+                self.assertIn("scripts/lib/k8s-scale.sh", body)
+                self.assertIn("fortify_scale_statefulset_if_exists", body)
+                for statefulset in statefulsets:
+                    self.assertIn(statefulset, body)
+
+    def test_scale_helper_treats_missing_statefulset_as_success(self) -> None:
+        helper = ROOT / "scripts/lib/k8s-scale.sh"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; '
+                'FORTIFY_OPERATION_KUBECTL=fake_kubectl; '
+                'fake_kubectl() { case "$*" in *" get statefulset "*) return 1 ;; esac; printf "SCALE:%s\n" "$*"; }; '
+                'fortify_scale_statefulset_if_exists fortify missing-statefulset 0',
+                "scale-helper-test",
+                str(helper),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('statefulset.apps "missing-statefulset" not found', result.stdout)
+        self.assertNotIn("SCALE:", result.stdout)
 
     def test_helm_delete_helper_treats_missing_release_as_success(self) -> None:
         helper = ROOT / "scripts/lib/k8s-destroy.sh"
@@ -1003,7 +1169,7 @@ class GuidedWizardTests(unittest.TestCase):
             'fortify_lab_show_action_warning() { :; }; '
             'run_app_scripts() { printf "RUN:%s\n" "$1"; return 0; }; '
             'wizard_log_event() { :; }; '
-            'read _lab_ack; lab_destroy_deployments; printf "RC=%s\n" "$?"',
+            'read _lab_ack; lab_destroy_deployments all; printf "RC=%s\n" "$?"',
             "DESTROY FORTIFY LAB\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)

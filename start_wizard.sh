@@ -196,14 +196,43 @@ status_cluster() {
         printf '%s Cluster not reachable\n' "$FAIL_MARK"
         return
     fi
-    local total ready
-    total=$($KUBECTL -n "$NAMESPACE" get pods --no-headers 2>/dev/null | wc -l)
+    local pods total ready prefixes selected_total selected_ready
+    pods=$($KUBECTL -n "$NAMESPACE" get pods --no-headers 2>/dev/null || true)
+    total=$(printf '%s\n' "$pods" | awk 'NF {c++} END{print c+0}')
     if [ "$total" -eq 0 ]; then
         printf '%s Cluster up, no pods deployed yet\n' "$WARN_MARK"
         return
     fi
-    ready=$($KUBECTL -n "$NAMESPACE" get pods --no-headers 2>/dev/null \
-        | awk '$3=="Running" {n=split($2,a,"/"); if (a[1]==a[2]) c++} END{print c+0}')
+    prefixes=$(lab_lifecycle_selected_pod_prefixes)
+    if [ -n "$prefixes" ]; then
+        read -r selected_ready selected_total <<EOF
+$(printf '%s\n' "$pods" | awk -v prefixes="$prefixes" '
+BEGIN { prefix_count=split(prefixes,p," ") }
+NF {
+    matched=0
+    for (idx=1; idx<=prefix_count; idx++) {
+        if (p[idx] != "" && index($1,p[idx]) == 1) { matched=1; break }
+    }
+    if (matched) {
+        total++
+        if ($3 == "Running") {
+            n=split($2,a,"/")
+            if (a[1] == a[2]) ready++
+        }
+    }
+}
+END { print ready+0, total+0 }')
+EOF
+        if [ "$selected_total" -eq 0 ]; then
+            printf '%s Cluster: selected profile has no pods deployed yet\n' "$WARN_MARK"
+        elif [ "$selected_ready" -eq "$selected_total" ]; then
+            printf '%s Cluster: selected profile pods ready (%d/%d running)\n' "$OK_MARK" "$selected_ready" "$selected_total"
+        else
+            printf '%s Cluster: selected profile pods ready (%d/%d running)\n' "$WARN_MARK" "$selected_ready" "$selected_total"
+        fi
+        return
+    fi
+    ready=$(printf '%s\n' "$pods" | awk '$3=="Running" {n=split($2,a,"/"); if (a[1]==a[2]) c++} END{print c+0}')
     if [ "$ready" -eq "$total" ]; then
         printf '%s Cluster: %d/%d pods ready\n' "$OK_MARK" "$ready" "$total"
     else
@@ -253,105 +282,269 @@ run_app_scripts() {
     done
 }
 
-lab_lifecycle_script_list() {
-    local idx field script
-    for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
-        case "$1" in
-            destroy) field="${APP_DESTROY[$idx]}" ;;
-            stop) field="${APP_STOP[$idx]}" ;;
-            *) return 1 ;;
+lab_lifecycle_current_profile() {
+    guided_apply_deployment_profile "${GUIDED_DEPLOYMENT_PROFILE:-${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}}"
+}
+
+lab_lifecycle_step_is_workload() {
+    case "$1" in
+        mysql|postgresql|ssc|lim|sast_controller|sast_sensor|dast_core|dast_scanner) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+lab_lifecycle_app_index_selected() {
+    local idx="$1" step="${APP_GUIDED_STEP[$idx]:-}"
+    case "$step" in
+        mysql|postgresql|ssc|lim) guided_component_selected "$step" ;;
+        sast) guided_component_selected sast_controller || guided_component_selected sast_sensor ;;
+        dast) guided_component_selected dast_core || guided_component_selected dast_scanner ;;
+        *) return 1 ;;
+    esac
+}
+
+lab_lifecycle_selected_pod_prefixes() {
+    local idx prefix prefixes=""
+    lab_lifecycle_current_profile >/dev/null 2>&1 || true
+    for idx in "${!APP_PODS[@]}"; do
+        lab_lifecycle_app_index_selected "$idx" || continue
+        prefix="${APP_PODS[$idx]}"
+        case " $prefixes " in
+            *" $prefix "*) ;;
+            *) prefixes="${prefixes:+$prefixes }$prefix" ;;
         esac
-        for script in $field; do
-            printf '  - %-20s %s\n' "${APP_LABEL[$idx]}" "$script"
+    done
+    printf '%s\n' "$prefixes"
+}
+
+lab_lifecycle_selected_step_indexes() {
+    local idx id
+    lab_lifecycle_current_profile >/dev/null 2>&1 || true
+    for idx in "${!GUIDED_STEP_ID[@]}"; do
+        id="${GUIDED_STEP_ID[$idx]}"
+        lab_lifecycle_step_is_workload "$id" && printf '%s\n' "$idx"
+    done
+}
+
+lab_lifecycle_step_stop_destroy_script() {
+    local operation="$1" step="$2"
+    case "$operation:$step" in
+        stop:mysql) printf '%s\n' "apps/mysql/stop.sh" ;;
+        stop:postgresql) printf '%s\n' "apps/postgresql/stop.sh" ;;
+        stop:ssc) printf '%s\n' "apps/ssc/stop.sh" ;;
+        stop:lim) printf '%s\n' "apps/lim/stop.sh" ;;
+        stop:sast_controller|stop:sast_sensor) printf '%s\n' "apps/scsast/stop.sh" ;;
+        stop:dast_core) printf '%s\n' "apps/scdast/core/stop.sh" ;;
+        stop:dast_scanner) printf '%s\n' "apps/scdast/scanner/stop.sh" ;;
+        destroy:mysql) printf '%s\n' "apps/mysql/destroy.sh" ;;
+        destroy:postgresql) printf '%s\n' "apps/postgresql/destroy.sh" ;;
+        destroy:ssc) printf '%s\n' "apps/ssc/destroy.sh" ;;
+        destroy:lim) printf '%s\n' "apps/lim/destroy.sh" ;;
+        destroy:sast_controller|destroy:sast_sensor) printf '%s\n' "apps/scsast/destroy.sh" ;;
+        destroy:dast_core) printf '%s\n' "apps/scdast/core/destroy.sh" ;;
+        destroy:dast_scanner) printf '%s\n' "apps/scdast/scanner/destroy.sh" ;;
+        *) return 1 ;;
+    esac
+}
+
+lab_lifecycle_script_list() {
+    local operation="$1" scope="${2:-selected}" idx field script seen="" step
+    if [ "$scope" = "all" ]; then
+        for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+            case "$operation" in
+                destroy) field="${APP_DESTROY[$idx]}" ;;
+                stop) field="${APP_STOP[$idx]}" ;;
+                *) return 1 ;;
+            esac
+            for script in $field; do
+                printf '  - %-20s %s\n' "${APP_LABEL[$idx]}" "$script"
+            done
         done
+        return 0
+    fi
+    mapfile -t _lab_lifecycle_indexes < <(lab_lifecycle_selected_step_indexes)
+    for ((idx=${#_lab_lifecycle_indexes[@]} - 1; idx >= 0; idx--)); do
+        step="${GUIDED_STEP_ID[${_lab_lifecycle_indexes[$idx]}]}"
+        script=$(lab_lifecycle_step_stop_destroy_script "$operation" "$step") || continue
+        case " $seen " in
+            *" $script "*) continue ;;
+        esac
+        seen="${seen:+$seen }$script"
+        printf '  - %-20s %s\n' "${GUIDED_STEP_LABEL[${_lab_lifecycle_indexes[$idx]}]}" "$script"
     done
 }
 
 lab_shutdown_deployments() {
-    local idx rc=0
+    local scope="${1:-selected}" idx rc=0 script step seen=""
     section "Shutdown lab deployments"
-    note "Stopping workloads in dependency-safe order. Persistent data is preserved."
-    wizard_log_event "action=lab_lifecycle_start operation=shutdown mode=non_destructive"
-    for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
-        note "Stopping ${APP_LABEL[$idx]}..."
-        wizard_log_event "action=lab_lifecycle_component operation=shutdown component=${APP_GUIDED_STEP[$idx]}"
-        run_app_scripts "${APP_STOP[$idx]}"
-        rc=$?
-        if [ "$rc" -ne 0 ]; then
-            wizard_log_event "action=lab_lifecycle_finish operation=shutdown state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
-            return "$rc"
-        fi
-    done
-    wizard_log_event "action=lab_lifecycle_finish operation=shutdown state=complete"
+    if [ "$scope" = "all" ]; then
+        note "Stopping all lab workloads in dependency-safe order. Persistent data is preserved."
+        wizard_log_event "action=lab_lifecycle_start operation=shutdown scope=all mode=non_destructive"
+        for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+            note "Stopping ${APP_LABEL[$idx]}..."
+            wizard_log_event "action=lab_lifecycle_component operation=shutdown scope=all component=${APP_GUIDED_STEP[$idx]}"
+            run_app_scripts "${APP_STOP[$idx]}"
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+                wizard_log_event "action=lab_lifecycle_finish operation=shutdown scope=all state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+                return "$rc"
+            fi
+        done
+    else
+        lab_lifecycle_current_profile
+        note "Stopping selected profile workloads: $GUIDED_DEPLOYMENT_PROFILE_LABEL. Persistent data is preserved."
+        wizard_log_event "action=lab_lifecycle_start operation=shutdown scope=selected profile=$GUIDED_DEPLOYMENT_PROFILE mode=non_destructive"
+        mapfile -t _lab_lifecycle_indexes < <(lab_lifecycle_selected_step_indexes)
+        for ((idx=${#_lab_lifecycle_indexes[@]} - 1; idx >= 0; idx--)); do
+            step="${GUIDED_STEP_ID[${_lab_lifecycle_indexes[$idx]}]}"
+            script=$(lab_lifecycle_step_stop_destroy_script stop "$step") || continue
+            case " $seen " in
+                *" $script "*) continue ;;
+            esac
+            seen="${seen:+$seen }$script"
+            note "Stopping ${GUIDED_STEP_LABEL[${_lab_lifecycle_indexes[$idx]}]}..."
+            wizard_log_event "action=lab_lifecycle_component operation=shutdown scope=selected component=$step"
+            run_app_scripts "$script"
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+                wizard_log_event "action=lab_lifecycle_finish operation=shutdown scope=selected state=failed component=$step exit_code=$rc"
+                return "$rc"
+            fi
+        done
+    fi
+    wizard_log_event "action=lab_lifecycle_finish operation=shutdown scope=$scope state=complete"
     note "Lab workloads stopped. Data volumes and configuration remain in place."
 }
 
 lab_start_deployments() {
-    local idx rc=0 previous_mode="${GUIDED_MODE_CONTEXT:-}"
+    local scope="${1:-selected}" idx rc=0 previous_mode="${GUIDED_MODE_CONTEXT:-}" step label
     section "Start lab deployments"
-    note "Starting workloads in dependency order and verifying readiness after each component."
-    wizard_log_event "action=lab_lifecycle_start operation=start mode=non_destructive"
-    GUIDED_MODE_CONTEXT=lifecycle
-    for idx in "${!APP_LABEL[@]}"; do
-        guided_run_and_verify "${APP_GUIDED_STEP[$idx]}" "${APP_LABEL[$idx]}"
-        rc=$?
-        if [ "$rc" -ne 0 ]; then
-            GUIDED_MODE_CONTEXT="$previous_mode"
-            wizard_log_event "action=lab_lifecycle_finish operation=start state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
-            return "$rc"
-        fi
-    done
+    if [ "$scope" = "all" ]; then
+        note "Starting all lab workloads in dependency order and verifying readiness after each component."
+        wizard_log_event "action=lab_lifecycle_start operation=start scope=all mode=non_destructive"
+        GUIDED_MODE_CONTEXT=lifecycle
+        for idx in "${!APP_LABEL[@]}"; do
+            guided_run_and_verify "${APP_GUIDED_STEP[$idx]}" "${APP_LABEL[$idx]}"
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+                GUIDED_MODE_CONTEXT="$previous_mode"
+                wizard_log_event "action=lab_lifecycle_finish operation=start scope=all state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+                return "$rc"
+            fi
+        done
+    else
+        lab_lifecycle_current_profile
+        note "Starting selected profile workloads: $GUIDED_DEPLOYMENT_PROFILE_LABEL."
+        wizard_log_event "action=lab_lifecycle_start operation=start scope=selected profile=$GUIDED_DEPLOYMENT_PROFILE mode=non_destructive"
+        GUIDED_MODE_CONTEXT=lifecycle
+        mapfile -t _lab_lifecycle_indexes < <(lab_lifecycle_selected_step_indexes)
+        for idx in "${_lab_lifecycle_indexes[@]}"; do
+            step="${GUIDED_STEP_ID[$idx]}"
+            label="${GUIDED_STEP_LABEL[$idx]}"
+            guided_run_and_verify "$step" "$label"
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+                GUIDED_MODE_CONTEXT="$previous_mode"
+                wizard_log_event "action=lab_lifecycle_finish operation=start scope=selected state=failed component=$step exit_code=$rc"
+                return "$rc"
+            fi
+        done
+    fi
     GUIDED_MODE_CONTEXT="$previous_mode"
-    wizard_log_event "action=lab_lifecycle_finish operation=start state=complete"
+    wizard_log_event "action=lab_lifecycle_finish operation=start scope=$scope state=complete"
     note "Lab workloads are started and verified."
 }
 
 lab_teardown_preview() {
-    section "Full lab teardown preview"
-    cat <<EOF
-This destructive operation runs the component destroy scripts below in
+    local scope="${1:-selected}"
+    if [ "$scope" = "all" ]; then
+        section "Full lab teardown preview"
+        cat <<EOF
+This destructive operation runs every component destroy script below in
 dependency-safe order. It deletes application deployments and their data so
 the lab can be started again from a clean slate.
 
 EOF
-    lab_lifecycle_script_list destroy
+    else
+        lab_lifecycle_current_profile
+        section "Selected profile teardown preview"
+        cat <<EOF
+This destructive operation runs destroy scripts only for the selected profile:
+$GUIDED_DEPLOYMENT_PROFILE_LABEL. Dependencies are included only when the
+profile requires them, and unrelated lab workloads are left alone.
+
+EOF
+    fi
+    lab_lifecycle_script_list destroy "$scope"
 }
 
 lab_destroy_deployments() {
-    local idx rc=0 confirmation expected="DESTROY FORTIFY LAB"
+    local scope="${1:-selected}" idx rc=0 confirmation expected script step seen=""
+    if [ "$scope" = "all" ]; then
+        expected="DESTROY FORTIFY LAB"
+    else
+        expected="DESTROY SELECTED PROFILE"
+    fi
     fortify_lab_show_action_warning destructive
-    lab_teardown_preview
+    lab_teardown_preview "$scope"
     printf '\nType %s to continue: ' "$expected"
     IFS= read -r confirmation
     if [ "$confirmation" != "$expected" ]; then
-        note "Full teardown cancelled."
-        wizard_log_event "action=lab_lifecycle_finish operation=destroy state=cancelled"
+        note "Teardown cancelled."
+        wizard_log_event "action=lab_lifecycle_finish operation=destroy scope=$scope state=cancelled"
         return 1
     fi
-    wizard_log_event "action=lab_lifecycle_start operation=destroy mode=destructive"
-    for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
-        note "Destroying ${APP_LABEL[$idx]}..."
-        wizard_log_event "action=lab_lifecycle_component operation=destroy component=${APP_GUIDED_STEP[$idx]}"
-        run_app_scripts "${APP_DESTROY[$idx]}"
-        rc=$?
-        if [ "$rc" -ne 0 ]; then
-            wizard_log_event "action=lab_lifecycle_finish operation=destroy state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
-            return "$rc"
-        fi
-    done
-    wizard_log_event "action=lab_lifecycle_finish operation=destroy state=complete"
-    note "Lab deployments and data have been destroyed. You can start from scratch now."
+    wizard_log_event "action=lab_lifecycle_start operation=destroy scope=$scope mode=destructive"
+    if [ "$scope" = "all" ]; then
+        for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+            note "Destroying ${APP_LABEL[$idx]}..."
+            wizard_log_event "action=lab_lifecycle_component operation=destroy scope=all component=${APP_GUIDED_STEP[$idx]}"
+            run_app_scripts "${APP_DESTROY[$idx]}"
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+                wizard_log_event "action=lab_lifecycle_finish operation=destroy scope=all state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+                return "$rc"
+            fi
+        done
+    else
+        mapfile -t _lab_lifecycle_indexes < <(lab_lifecycle_selected_step_indexes)
+        for ((idx=${#_lab_lifecycle_indexes[@]} - 1; idx >= 0; idx--)); do
+            step="${GUIDED_STEP_ID[${_lab_lifecycle_indexes[$idx]}]}"
+            script=$(lab_lifecycle_step_stop_destroy_script destroy "$step") || continue
+            case " $seen " in
+                *" $script "*) continue ;;
+            esac
+            seen="${seen:+$seen }$script"
+            note "Destroying ${GUIDED_STEP_LABEL[${_lab_lifecycle_indexes[$idx]}]}..."
+            wizard_log_event "action=lab_lifecycle_component operation=destroy scope=selected component=$step"
+            run_app_scripts "$script"
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+                wizard_log_event "action=lab_lifecycle_finish operation=destroy scope=selected state=failed component=$step exit_code=$rc"
+                return "$rc"
+            fi
+        done
+    fi
+    wizard_log_event "action=lab_lifecycle_finish operation=destroy scope=$scope state=complete"
+    note "Lab deployments and data have been destroyed for the requested scope."
 }
 
 lab_lifecycle_menu() {
     local choice
     while true; do
+        lab_lifecycle_current_profile
         title "Lab lifecycle controls"
         cat <<EOF
 
-  1. Shutdown lab deployments (preserve data)
-  2. Start lab deployments
-  3. Destroy lab deployments and data
+  Active profile: $GUIDED_DEPLOYMENT_PROFILE_LABEL
+
+  1. Shutdown selected profile workloads (preserve data)
+  2. Start selected profile workloads
+  3. Destroy selected profile deployments and data
+
+  4. Shutdown all lab deployments (preserve data)
+  5. Start all lab deployments
+  6. Destroy all lab deployments and data
 
   r. Return
   q. Quit
@@ -360,14 +553,24 @@ EOF
         ask choice "Select:"
         case "$choice" in
             1)
-                confirm "Stop all lab workloads while preserving data?" || continue
-                lab_shutdown_deployments
+                confirm "Stop selected profile workloads while preserving data?" || continue
+                lab_shutdown_deployments selected
                 press_any ;;
             2)
-                lab_start_deployments
+                lab_start_deployments selected
                 press_any ;;
             3)
-                lab_destroy_deployments
+                lab_destroy_deployments selected
+                press_any ;;
+            4)
+                confirm "Stop all lab workloads while preserving data?" || continue
+                lab_shutdown_deployments all
+                press_any ;;
+            5)
+                lab_start_deployments all
+                press_any ;;
+            6)
+                lab_destroy_deployments all
                 press_any ;;
             [Rr]) return ;;
             [Qq]) clear; exit 0 ;;
@@ -489,19 +692,20 @@ show_app_creds() {
     [ -n "$url" ] && printf '  URL: %s\n' "$url"
     case "${APP_LABEL[$idx]}" in
         SSC)
-            echo "  Login: see SSC startup logs for the initial admin password"
-            echo "         (option 4 → SSC, search the log for 'admin')"
+            echo "  Login username: admin"
+            echo "  Password: refer to the SSC documentation for the default password."
             ;;
         LIM)
             echo "  Login username: lim_admin"
-            echo "  Password: use the configured lab default password (not displayed)"
+            echo "  Password: stored in Kubernetes Secret lim-admin-credentials"
             ;;
         "ScanCentral SAST")
             echo "  Controller URL: $url"
-            echo "  Generate the controller token from SSC and apply via option 6 (Configure)."
+            echo "  Tokens: use URLs & credentials to reveal or retrieve commands."
             ;;
         "ScanCentral DAST")
             echo "  API URL: ${SCDAST_API_URL:-<unset>}"
+            echo "  Credentials: use URLs & credentials to reveal or retrieve commands."
             ;;
     esac
 }
@@ -908,8 +1112,8 @@ configure_lim() {
   LIM's web UI:
 
     1. Open ${LIM_URL:-https://lim.$DOMAIN}
-    2. Sign in as lim_admin using the configured lab default password.
-       The wizard deliberately does not display passwords.
+    2. Sign in as lim_admin. Retrieve the lab-generated password from
+       URLs & credentials if you need to recover it.
     3. Upload your DAST license file.
     4. Create a pool named 'Default' (matches \$LIM_POOL_NAME in .env).
     5. Generate seats / activate as documented by Fortify.
@@ -1263,27 +1467,219 @@ stream_logs() {
     trap - INT
 }
 
-urls_creds() {
-    title "URLs & credentials"
+credential_value_from_secret() {
+    local secret="$1" key="$2" encoded
+    cluster_reachable || { error "Cluster is not reachable."; return 1; }
+    encoded=$($KUBECTL -n "$NAMESPACE" get secret "$secret" \
+        -o "go-template={{ index .data \"$key\" }}" 2>/dev/null) || {
+        error "Could not read secret $secret/$key."
+        return 1
+    }
+    [ -n "$encoded" ] || { error "Secret value $secret/$key is empty or missing."; return 1; }
+    printf '%s' "$encoded" | base64 -d
+}
+
+credential_present_label() {
+    local secret="$1" key="$2"
+    if cluster_reachable && secret_key_exists "$secret" "$key"; then
+        printf '%savailable%s' "$GREEN" "$RESET"
+    else
+        printf '%sunavailable%s' "$YELLOW" "$RESET"
+    fi
+}
+
+credential_reveal_once() {
+    local label="$1" secret="$2" key="$3" confirmation
+    title "Reveal credential once"
     cat <<EOF
 
-  SSC          ${SSC_URL:-<unset>}
-                login: see initial admin password in SSC startup logs
+  Credential: $label
+  Source:     $secret/$key
 
-  LIM          ${LIM_URL:-<unset>}
-                login: lim_admin / configured lab password (not displayed)
+  This may expose a password or token in your terminal scrollback or screen
+  capture. The wizard will not write this value to logs, diagnostics, .env,
+  or any file.
 
-  SAST ctrl    ${SCSAST_CTRL_URL:-<unset>}
-                shared secret applied via Configure → option 2
+EOF
+    ask confirmation "Type REVEAL to display this value once:"
+    [ "$confirmation" = REVEAL ] || { note "Reveal cancelled."; press_any; return 1; }
+    echo
+    section "$label"
+    credential_value_from_secret "$secret" "$key" || { press_any; return 1; }
+    echo
+    note "Press Enter to clear this screen and return to the credentials menu."
+    read -r _
+    clear
+}
 
-  DAST API     ${SCDAST_URL:-<unset>}
-                login: SSC user mapped to DAST role
+credential_reveal_menu() {
+    local choice
+    while true; do
+        title "Reveal one credential"
+        cat <<EOF
 
-  K8s dashboard https://dashboard.$DOMAIN
-                access: Configure → Kubernetes Dashboard access
+  1. LIM admin password
+  2. LIM pool password
+  3. ScanCentral SAST client auth token
+  4. ScanCentral SAST worker auth token
+  5. ScanCentral SAST SSC ControllerToken
+  6. ScanCentral DAST service token
+  7. ScanCentral DAST SSC service account password
+  8. ScanCentral DAST database owner password
+  9. ScanCentral DAST database standard user password
+
+  b. Back
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) credential_reveal_once "LIM admin password" lim-admin-credentials password ;;
+            2) credential_reveal_once "LIM pool password" lim-pool password ;;
+            3) credential_reveal_once "ScanCentral SAST client auth token" fortify-secrets scancentral-client-auth-token ;;
+            4) credential_reveal_once "ScanCentral SAST worker auth token" fortify-secrets scancentral-worker-auth-token ;;
+            5) credential_reveal_once "ScanCentral SAST SSC ControllerToken" fortify-secrets scancentral-ssc-scancentral-ctrl-secret ;;
+            6) credential_reveal_once "ScanCentral DAST service token" scdast-service-token service-token ;;
+            7) credential_reveal_once "ScanCentral DAST SSC service account password" scdast-ssc-serviceaccount password ;;
+            8) credential_reveal_once "ScanCentral DAST database owner password" scdast-db-owner password ;;
+            9) credential_reveal_once "ScanCentral DAST database standard user password" scdast-db-standard password ;;
+            [Bb]) return ;;
+            *) error "Invalid selection"; sleep 1 ;;
+        esac
+    done
+}
+
+credential_retrieval_commands() {
+    title "Credential retrieval commands"
+    cat <<EOF
+
+  Use these commands when you prefer to retrieve a value yourself. Values are
+  decoded from Kubernetes Secrets and are not written by the wizard.
+
+  LIM admin password:
+    $KUBECTL -n $NAMESPACE get secret lim-admin-credentials -o go-template='{{ index .data "password" }}' | base64 -d
+
+  LIM pool password:
+    $KUBECTL -n $NAMESPACE get secret lim-pool -o go-template='{{ index .data "password" }}' | base64 -d
+
+  SAST client auth token:
+    $KUBECTL -n $NAMESPACE get secret fortify-secrets -o go-template='{{ index .data "scancentral-client-auth-token" }}' | base64 -d
+
+  SAST worker auth token:
+    $KUBECTL -n $NAMESPACE get secret fortify-secrets -o go-template='{{ index .data "scancentral-worker-auth-token" }}' | base64 -d
+
+  SAST SSC ControllerToken:
+    $KUBECTL -n $NAMESPACE get secret fortify-secrets -o go-template='{{ index .data "scancentral-ssc-scancentral-ctrl-secret" }}' | base64 -d
+
+  DAST service token:
+    $KUBECTL -n $NAMESPACE get secret scdast-service-token -o go-template='{{ index .data "service-token" }}' | base64 -d
+
+  DAST SSC service account password:
+    $KUBECTL -n $NAMESPACE get secret scdast-ssc-serviceaccount -o go-template='{{ index .data "password" }}' | base64 -d
 
 EOF
     press_any
+}
+
+certificate_trust_handoff() {
+    title "Certificate trust"
+    cat <<EOF
+
+  mkcert root CA:
+    ${ROOTCA_CERT:-$FORTIFY_CERTS/rootCA.pem}
+
+  Import the mkcert root CA into each client machine or browser trust store
+  that will access the lab URLs. FortifyLab serves workload TLS from the
+  Kubernetes Secret $NAMESPACE/tls and configures MicroK8s ingress to use it
+  as the default certificate when the installed ingress addon supports that.
+
+  Lab hostnames:
+    ssc.$DOMAIN
+    lim.$DOMAIN
+    sast.$DOMAIN
+    dast.$DOMAIN
+    dashboard.$DOMAIN
+
+EOF
+    press_any
+}
+
+ssc_login_guidance() {
+    title "SSC login guidance"
+    cat <<EOF
+
+  SSC URL:
+    ${SSC_URL:-<unset>}
+
+  Username:
+    admin
+
+  Password:
+    Refer to the SSC documentation for the default administrator password.
+    FortifyLab does not store or display that vendor default password.
+
+  After first login, change the password inside SSC and store it in your own
+  password manager.
+
+EOF
+    press_any
+}
+
+urls_creds_summary() {
+    title "URLs & credentials"
+    cat <<EOF
+
+  Service URLs
+    SSC             ${SSC_URL:-<unset>}
+    LIM             ${LIM_URL:-<unset>}
+    SAST controller ${SCSAST_CTRL_URL:-<unset>}
+    DAST            ${SCDAST_URL:-<unset>}
+    Dashboard       https://dashboard.$DOMAIN
+
+  Login guidance
+    SSC             admin / refer to the SSC documentation for the default password
+    LIM             lim_admin / stored in lim-admin-credentials
+    DAST            SSC user mapped to a DAST role
+    Dashboard       generate a token from Kubernetes Dashboard access
+
+  Credential availability
+    LIM admin password              $(credential_present_label lim-admin-credentials password)
+    LIM pool password               $(credential_present_label lim-pool password)
+    SAST client auth token           $(credential_present_label fortify-secrets scancentral-client-auth-token)
+    SAST worker auth token           $(credential_present_label fortify-secrets scancentral-worker-auth-token)
+    SAST SSC ControllerToken         $(credential_present_label fortify-secrets scancentral-ssc-scancentral-ctrl-secret)
+    DAST service token               $(credential_present_label scdast-service-token service-token)
+    DAST SSC service account         $(credential_present_label scdast-ssc-serviceaccount password)
+
+EOF
+}
+
+urls_creds() {
+    local choice
+    while true; do
+        urls_creds_summary
+        cat <<EOF
+  1. Reveal one credential
+  2. Show retrieval commands
+  3. SSC login guidance
+  4. Kubernetes Dashboard token menu
+  5. Certificate trust instructions
+
+  r. Return
+  q. Quit
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) credential_reveal_menu ;;
+            2) credential_retrieval_commands ;;
+            3) ssc_login_guidance ;;
+            4) dashboard_access_menu ;;
+            5) certificate_trust_handoff ;;
+            [Rr]|"") return ;;
+            [Qq]) clear; exit 0 ;;
+            *) error "Invalid selection"; sleep 1 ;;
+        esac
+    done
 }
 
 versions_menu() {
@@ -3109,44 +3505,42 @@ wizard_log_viewer() {
 }
 
 GUIDED_WAIT_SCREEN_LINES=0
+GUIDED_WAIT_SCREEN_ACTIVE=0
+
+guided_wait_screen_tty() {
+    [ -t 1 ] && [ "${FORTIFY_GUIDED_WAIT_ALT_SCREEN:-1}" != 0 ]
+}
 
 guided_wait_screen_enter() {
     GUIDED_WAIT_SCREEN_LINES=0
-    [ -t 1 ] || return 0
-    printf '\033[?25l\033[H\033[J'
+    GUIDED_WAIT_SCREEN_ACTIVE=0
+    guided_wait_screen_tty || return 0
+    # Use the terminal alternate screen for live verification dashboards so
+    # repeated refreshes do not push older frames into scrollback.
+    printf '\033[?1049h\033[?25l\033[H\033[J'
+    GUIDED_WAIT_SCREEN_ACTIVE=1
 }
 
 guided_wait_screen_render_start() {
-    if [ -t 1 ]; then
-        if [ "${GUIDED_WAIT_SCREEN_LINES:-0}" -gt 0 ]; then
-            printf '\033[%sA' "$GUIDED_WAIT_SCREEN_LINES"
-        fi
+    if guided_wait_screen_tty; then
+        printf '\033[H\033[J'
     else
         printf '\n'
     fi
 }
 
 guided_wait_screen_render_finish() {
-    local rendered_lines="$1" previous_lines="${GUIDED_WAIT_SCREEN_LINES:-0}" extra
-    [ -t 1 ] || return 0
-    if [ "$previous_lines" -gt "$rendered_lines" ]; then
-        extra=$((previous_lines - rendered_lines))
-        while [ "$extra" -gt 0 ]; do
-            printf '\r\033[K\n'
-            extra=$((extra - 1))
-        done
-        printf '\033[%sA' "$((previous_lines - rendered_lines))"
-    fi
-    GUIDED_WAIT_SCREEN_LINES="$rendered_lines"
+    GUIDED_WAIT_SCREEN_LINES="${1:-0}"
 }
 
 guided_wait_screen_line() {
-    printf '\r\033[K%s\n' "$*"
+    printf '\033[K%s\n' "$*"
 }
 
 guided_wait_screen_leave() {
-    [ -t 1 ] || return 0
-    printf '\033[?25h'
+    [ "${GUIDED_WAIT_SCREEN_ACTIVE:-0}" -eq 1 ] || return 0
+    printf '\033[?25h\033[?1049l'
+    GUIDED_WAIT_SCREEN_ACTIVE=0
     GUIDED_WAIT_SCREEN_LINES=0
 }
 
@@ -3476,20 +3870,141 @@ guided_run_and_verify() {
 }
 
 guided_countdown() {
-    local next_label="$1" delay="${GUIDED_AUTO_ADVANCE_DELAY:-10}" remaining control
-    [[ "$delay" =~ ^[0-9]+$ ]] || delay=10
+    local current_idx="$1" current_label="$2" next_idx="$3" next_label="$4" reason="${5:-verified}"
+    local delay="${GUIDED_AUTO_ADVANCE_DELAY:-5}" remaining control total="${#GUIDED_STEP_ID[@]}"
+    local current_num next_num
+    [[ "$delay" =~ ^[0-9]+$ ]] || delay=5
+    current_num=$((current_idx + 1))
+    next_num=$((next_idx + 1))
     remaining="$delay"
     while [ "$remaining" -gt 0 ]; do
-        printf '\r  Continuing to %s in %ss. Press i for interactive control. ' "$next_label" "$remaining"
+        printf '\r\033[K  [%d/%d] %s %s. Continuing to [%d/%d] %s in %ss. Press i to stay here.' \
+            "$current_num" "$total" "$current_label" "$reason" \
+            "$next_num" "$total" "$next_label" "$remaining"
         if read -rsn1 -t 1 control; then
             case "$control" in
-                [Ii]) printf '\n'; GUIDED_AUTO_ADVANCE=0; return 1 ;;
+                [Ii])
+                    printf '\r\033[K'
+                    GUIDED_AUTO_ADVANCE=0
+                    note "[$next_num/$total] Auto-advance paused: staying interactive at $next_label."
+                    return 1
+                    ;;
             esac
         fi
         remaining=$((remaining - 1))
     done
-    printf '\n'
+    printf '\r\033[K%s [%d/%d] %s %s; continuing to [%d/%d] %s.\n' \
+        "$OK_MARK" "$current_num" "$total" "$current_label" "$reason" \
+        "$next_num" "$total" "$next_label"
     return 0
+}
+
+guided_step_enabled() {
+    local wanted="$1"
+    guided_step_index "$wanted" >/dev/null 2>&1
+}
+
+guided_completion_service_line() {
+    local label="$1" url="$2" status="$3"
+    printf '    %-22s %-18s %s\n' "$label" "$status" "$url"
+}
+
+guided_completion_print_services() {
+    if ! cluster_reachable; then
+        note "Cluster is not reachable; live service status is unavailable."
+        return
+    fi
+    printf '    %-22s %-18s %s\n' "Service" "Status" "URL"
+    printf '    %s\n' "────────────────────────────────────────────────────────────"
+    if guided_step_enabled ssc; then
+        guided_completion_service_line "SSC" "${SSC_URL:-<unset>}" "$(app_status ssc-webapp)"
+    fi
+    if guided_step_enabled lim; then
+        guided_completion_service_line "LIM" "${LIM_URL:-<unset>}" "$(app_status lim)"
+    fi
+    if guided_step_enabled sast_controller || guided_step_enabled sast_sensor; then
+        guided_completion_service_line "ScanCentral SAST" "${SCSAST_CTRL_URL:-<unset>}" "$(app_status scancentral-sast)"
+    fi
+    if guided_step_enabled dast_core || guided_step_enabled dast_scanner; then
+        guided_completion_service_line "ScanCentral DAST" "${SCDAST_URL:-<unset>}" "$(app_status sdast)"
+    fi
+    if guided_step_enabled dashboard; then
+        guided_completion_service_line "K8s Dashboard" "https://dashboard.$DOMAIN" "$(guided_step_live_status dashboard)"
+    fi
+}
+
+sast_controller_token_configured() {
+    cluster_reachable || return 1
+    [ "$($KUBECTL -n "$NAMESPACE" get secret fortify-secrets \
+        -o 'go-template={{ index .metadata.annotations "fortify.dev/ssc-controller-token-configured" }}' \
+        2>/dev/null)" = true ]
+}
+
+guided_completion_print_next_steps() {
+    local printed=0
+    if guided_step_enabled ssc; then
+        printf '    - SSC: sign in as admin; refer to the SSC documentation for the default password, then change it.\n'
+        printed=1
+    fi
+    if guided_step_enabled sast_controller || guided_step_enabled sast_sensor; then
+        if sast_controller_token_configured; then
+            printf '    - ScanCentral SAST: SSC ControllerToken is configured in Kubernetes.\n'
+        else
+            printf '    - ScanCentral SAST: create an SSC ControllerToken in SSC and apply it from Configure.\n'
+        fi
+        printed=1
+    fi
+    if guided_step_enabled dast_core || guided_step_enabled dast_scanner; then
+        printf '    - ScanCentral DAST: finish LIM DAST license and default pool setup when ready.\n'
+        printed=1
+    fi
+    printf '    - Client access: import the mkcert root CA on machines that browse lab URLs.\n'
+    printed=1
+    [ "$printed" -eq 1 ] || printf '    - No manual next steps detected for this profile.\n'
+}
+
+guided_completion_screen() {
+    local choice
+    while true; do
+        title "Guided deployment complete"
+        cat <<EOF
+
+  Congratulations, FortifyLab is ready.
+
+  Your selected deployment profile completed successfully. Below is a live
+  access handoff so you can open the lab, retrieve credentials deliberately,
+  and finish any product-level configuration.
+
+EOF
+        guided_print_profile_summary
+        echo
+        section "Deployed services"
+        guided_completion_print_services
+        echo
+        section "Recommended next steps"
+        guided_completion_print_next_steps
+        cat <<EOF
+
+  1. Access & credentials
+  2. Certificate trust instructions
+  3. View deployment plan summary
+  4. View wizard log
+
+  r. Return to main menu
+  q. Quit
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) urls_creds ;;
+            2) certificate_trust_handoff ;;
+            3) wizard_deployment_plan; press_any ;;
+            4) wizard_log_viewer ;;
+            [Rr]|"") return ;;
+            [Qq]) clear; exit 0 ;;
+            *) error "Invalid selection"; sleep 1 ;;
+        esac
+    done
 }
 
 guided_deployment_menu() {
@@ -3523,28 +4038,30 @@ EOF
 }
 
 guided_deployment() {
-    local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label
+    local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label transition_reason completed_idx
     fortify_lab_require_acknowledgement || return 1
     wizard_log_event "action=guided_session_start mode=${GUIDED_MODE_CONTEXT:-fresh} start_index=$idx auto_advance=${GUIDED_AUTO_ADVANCE:-0}"
     while [ "$idx" -lt "$total" ]; do
         id="${GUIDED_STEP_ID[$idx]}"
 
         if [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && ! guided_step_is_manual "$id"; then
+            transition_reason="already complete"
             if ! guided_step_live_complete "$id"; then
                 guided_run_and_verify "$id" "${GUIDED_STEP_LABEL[$idx]}"
                 result=$?
                 case "$result" in
-                    0) ;;
+                    0) transition_reason="verified" ;;
                     2) GUIDED_AUTO_ADVANCE=0; continue ;;
                     3) return ;;
                     4) continue ;;
                     *) GUIDED_AUTO_ADVANCE=0; press_any; continue ;;
                 esac
             fi
+            completed_idx="$idx"
             idx=$((idx + 1))
             if [ "$idx" -lt "$total" ]; then
                 next_label="${GUIDED_STEP_LABEL[$idx]}"
-                guided_countdown "$next_label" || continue
+                guided_countdown "$completed_idx" "${GUIDED_STEP_LABEL[$completed_idx]}" "$idx" "$next_label" "$transition_reason" || continue
             fi
             continue
         fi
@@ -3650,8 +4167,7 @@ guided_deployment() {
         esac
     done
     wizard_log_event "action=guided_session_end mode=${GUIDED_MODE_CONTEXT:-fresh} state=complete"
-    note "Guided deployment complete."
-    press_any
+    guided_completion_screen
 }
 
 
