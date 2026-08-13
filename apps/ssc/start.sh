@@ -49,6 +49,6 @@ microk8s helm -n "$NAMESPACE" upgrade -i ssc \
 		--set resources.limits.cpu=1 \
 		--set service.type=ClusterIP
 
-microk8s kubectl -n "$NAMESPACE" apply -f $CURRENT_DIR/ingress.yaml
+envsubst '${SSC}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
 
 microk8s kubectl -n "$NAMESPACE" scale statefulsets ssc-webapp --replicas=1

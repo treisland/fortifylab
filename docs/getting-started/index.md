@@ -77,6 +77,18 @@ acknowledge it. From the main menu choose one deployment mode:
     steps cannot be skipped. Enter `?` for contextual help, or quit safely and
     return later.
 
+    The guided flow is expected to wait through lifecycle verification after
+    each operation. While work is still starting, the wait screen should show
+    gradual readiness updates instead of requiring repeated menu refreshes.
+    Interactive mode pauses after a verified step; auto-advance mode continues
+    after a 5-second countdown unless you take control.
+
+    The prerequisite screen shows readiness indicators for JDK, Docker login,
+    mkcert, and MicroK8s access. When MicroK8s is installed but the current
+    shell has not picked up the `microk8s` group yet, choose `g` from that
+    screen to restart the wizard with group access, or run `newgrp microk8s`
+    before relaunching.
+
 === "Express"
 
     Choose **2. Express deployment** after you understand the plan. It runs the
@@ -96,9 +108,9 @@ Both paths run in this order:
 
 The preflight verifies the license, required commands, MicroK8s, the `nfs`
 storage class, registry login, required settings, memory, and free disk. It is
-read-only. Express deployment refuses to continue if managed Helm releases
-already exist; use **Resume or repair** or **Manage individual components** for
-an existing lab.
+read-only and can run during resume/repair. The fresh/express deployment path
+refuses to continue if managed Helm releases already exist; Guided deployment
+routes existing labs to **Resume or repair** automatically.
 
 !!! important "SSC cannot outrun MySQL"
 

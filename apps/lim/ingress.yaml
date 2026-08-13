@@ -10,11 +10,11 @@ spec:
   ingressClassName: public
   tls:
   - hosts:
-    - lim.fortifydemo.com
+    - ${LIM}
     secretName: tls
 
   rules:
-  - host: lim.fortifydemo.com
+  - host: ${LIM}
     http:
       paths:
       - path: /

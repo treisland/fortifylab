@@ -12,4 +12,4 @@ microk8s helm -n $NAMESPACE delete lim
 
 microk8s kubectl -n $NAMESPACE delete -f $CURRENT_DIR/pvc.yaml
 
-microk8s kubectl -n $NAMESPACE delete -f $CURRENT_DIR/ingress.yaml
+microk8s kubectl -n "$NAMESPACE" delete ingress lim-ingress --ignore-not-found
