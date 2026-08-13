@@ -79,6 +79,10 @@ operational_cluster_available() {
     _operational_kubectl version --request-timeout="${FORTIFY_OPERATION_TIMEOUT}s" >/dev/null 2>&1
 }
 
+operational_node_ip() {
+    hostname -I 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i !~ /^127\./) { print $i; exit } }'
+}
+
 operational_print_urls() {
     local domain="${DOMAIN:-fortifydemo.com}"
     printf '%s\n' \
@@ -102,8 +106,10 @@ _operational_lab_hosts() {
 }
 
 operational_doctor_hosts_resolution() {
-    local label host url resolved state
+    local label host url resolved state node_ip
+    node_ip=$(operational_node_ip)
     printf '%s\n' 'Hosts resolution (first IPv4 answer only):'
+    [ -n "$node_ip" ] && printf '  expected lab node IP: %s\n' "$node_ip"
     while IFS='|' read -r label host url; do
         resolved=$(getent ahostsv4 "$host" 2>/dev/null | awk 'NR==1 {print $1}')
         if [ -z "$resolved" ]; then
@@ -111,6 +117,8 @@ operational_doctor_hosts_resolution() {
             resolved="-"
         elif printf '%s\n' "$resolved" | grep -Eq '^(127\.|0\.0\.0\.0$)'; then
             state=loopback
+        elif [ -n "$node_ip" ] && [ "$resolved" != "$node_ip" ]; then
+            state=wrong-ip
         else
             state=resolved
         fi
@@ -118,6 +126,7 @@ operational_doctor_hosts_resolution() {
     done <<EOF
 $(_operational_lab_hosts)
 EOF
+    printf '%s\n' '  If a browser shows TRAEFIK DEFAULT CERT or a plain 404, client DNS/hosts is usually pointing at a Traefik or reverse-proxy endpoint instead of the MicroK8s lab node IP.'
 }
 
 operational_doctor_coredns_drift() {
@@ -228,6 +237,35 @@ operational_doctor_http_status() {
     done <<EOF
 $(_operational_lab_hosts)
 EOF
+}
+
+_operational_tls_certificate_metadata() {
+    local host="$1"
+    command -v timeout >/dev/null 2>&1 || return 1
+    command -v openssl >/dev/null 2>&1 || return 1
+    timeout "$FORTIFY_OPERATION_HTTP_TIMEOUT" openssl s_client -connect 127.0.0.1:443 -servername "$host" </dev/null 2>/dev/null |
+        openssl x509 -noout -subject -issuer -ext subjectAltName 2>/dev/null
+}
+
+operational_doctor_tls_identity() {
+    local label host url metadata state
+    printf '%s\n' 'TLS certificate identity through local ingress:'
+    while IFS='|' read -r label host url; do
+        metadata=$(_operational_tls_certificate_metadata "$host") || metadata=""
+        if [ -z "$metadata" ]; then
+            state=unavailable
+        elif printf '%s\n' "$metadata" | grep -Fq 'TRAEFIK DEFAULT CERT'; then
+            state=wrong-ingress-default-cert
+        elif printf '%s\n' "$metadata" | grep -Eq "DNS:${host}([,[:space:]]|$)|CN[ =]+${host}([,[:space:]]|$)"; then
+            state=matches-host
+        else
+            state=mismatch
+        fi
+        printf '  %-10s %-34s %s\n' "$label" "$host" "$state"
+    done <<EOF
+$(_operational_lab_hosts)
+EOF
+    printf '%s\n' '  Seeing TRAEFIK DEFAULT CERT from a client means that client is reaching Traefik/default routing, not the Fortify Lab ingress certificate.'
 }
 
 operational_doctor_compact_health_summary() {
@@ -531,6 +569,7 @@ operational_create_diagnostics_bundle() {
         operational_doctor_ingress
         operational_doctor_service_endpoints
         operational_doctor_http_status
+        operational_doctor_tls_identity
     } | _operational_sanitize_stream >"$work/network-diagnostics.txt"
     _operational_wizard_log_excerpt | _operational_sanitize_stream >"$work/wizard-log-excerpt.txt"
     if operational_cluster_available; then

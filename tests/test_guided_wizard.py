@@ -250,6 +250,30 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("fortifydemo.com|ssc.fortifydemo.com|https://ssc.fortifydemo.com", result.stdout)
 
+    def test_app_url_lookup_resolves_ssc_url_not_neighbor_variable(self) -> None:
+        result = self.run_wizard_functions(
+            'SSC_URL=https://ssc.example.test; LIM_URL=https://lim.example.test; '
+            'printf "SSC=%s\nLIM=%s\n" "$(app_url_for_index 2)" "$(app_url_for_index 3)"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SSC=https://ssc.example.test", result.stdout)
+        self.assertIn("LIM=https://lim.example.test", result.stdout)
+        self.assertNotIn("SSC=LIM_URL", result.stdout)
+
+    def test_lab_hosts_resolution_warns_when_dns_points_at_proxy_endpoint(self) -> None:
+        result = self.run_wizard_functions(
+            'DOMAIN=example.test; lab_node_ip() { printf "10.0.0.5"; }; '
+            'getent() { case "$2" in '
+            'ssc.example.test) printf "10.0.0.9 STREAM\n" ;; '
+            '*) printf "10.0.0.5 STREAM\n" ;; '
+            'esac; }; '
+            'lab_hosts_resolution_detail'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ssc.example.test=10.0.0.9", result.stdout)
+        self.assertIn("TRAEFIK DEFAULT CERT", result.stdout)
+        self.assertIn("404", result.stdout)
+
     def test_secret_values_are_redacted_in_preview(self) -> None:
         result = self.run_wizard_functions(
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '

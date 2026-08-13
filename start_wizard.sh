@@ -140,6 +140,13 @@ APP_DESTROY=(
     "apps/scdast/core/destroy.sh apps/scdast/scanner/destroy.sh"
 )
 
+app_url_for_index() {
+    local idx="$1" variable=""
+    variable="${APP_URL_VAR[$idx]:-}"
+    [ -n "$variable" ] || return 0
+    printf '%s\n' "${!variable:-}"
+}
+
 
 # ============================================================
 # Status checks (cheap; called every menu render)
@@ -396,7 +403,7 @@ app_action_menu() {
     while true; do
         title "${APP_LABEL[$idx]}"
         local url=""
-        [ -n "${APP_URL_VAR[$idx]}" ] && url="${!APP_URL_VAR[$idx]:-}"
+        url=$(app_url_for_index "$idx")
 
         echo
         printf '  Status: %s\n' "$(app_status "${APP_PODS[$idx]}")"
@@ -460,7 +467,7 @@ scale_workers() {
 
 show_app_creds() {
     local idx="$1" url=""
-    [ -n "${APP_URL_VAR[$idx]}" ] && url="${!APP_URL_VAR[$idx]:-}"
+    url=$(app_url_for_index "$idx")
     section "${APP_LABEL[$idx]}"
     [ -n "$url" ] && printf '  URL: %s\n' "$url"
     case "${APP_LABEL[$idx]}" in
@@ -814,6 +821,10 @@ configure_dns() {
   Add to your client's /etc/hosts (or Pi-hole DNS):
 
     $ip   ssc.$DOMAIN sast.$DOMAIN dast.$DOMAIN lim.$DOMAIN dashboard.$DOMAIN
+
+  Use the MicroK8s lab node IP shown above. If the names point at a Proxmox,
+  Traefik, or other reverse-proxy endpoint without matching routes, browsers
+  commonly show TRAEFIK DEFAULT CERT and then a plain 404 page.
 
   ── In-cluster side ─────────────────────────────────────
   Pods inside the cluster need to resolve $DOMAIN themselves
@@ -2109,7 +2120,7 @@ lab_hostnames() {
 }
 
 lab_hosts_resolution_detail() {
-    local host resolved loopback_hosts node_ip
+    local host resolved loopback_hosts wrong_ip_hosts node_ip
     node_ip=$(lab_node_ip)
     while IFS= read -r host; do
         [ -n "$host" ] || continue
@@ -2120,13 +2131,19 @@ lab_hosts_resolution_detail() {
         fi
         if [[ "$resolved" == 127.* ]]; then
             loopback_hosts="${loopback_hosts:+$loopback_hosts, }$host=$resolved"
+        elif [ -n "$node_ip" ] && [ "$resolved" != "$node_ip" ]; then
+            wrong_ip_hosts="${wrong_ip_hosts:+$wrong_ip_hosts, }$host=$resolved"
         fi
     done < <(lab_hostnames)
     if [ -n "${loopback_hosts:-}" ]; then
         printf 'Lab hostnames resolve to loopback (%s). Map them to the lab node IP%s instead.\n' "$loopback_hosts" "${node_ip:+, for example $node_ip}"
         return 0
     fi
-    printf 'Lab hostnames resolve to non-loopback addresses for client access.\n'
+    if [ -n "${wrong_ip_hosts:-}" ]; then
+        printf 'Lab hostnames resolve to %s, but this lab node appears to be %s. If that address is Traefik or another proxy, the browser may show TRAEFIK DEFAULT CERT and a 404.\n' "$wrong_ip_hosts" "${node_ip:-unknown}"
+        return 0
+    fi
+    printf 'Lab hostnames resolve to the lab node IP for client access.\n'
 }
 
 certs_ready() {

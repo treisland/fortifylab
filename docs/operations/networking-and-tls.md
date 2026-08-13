@@ -14,3 +14,10 @@ the trust root and requires clients to trust the new lab CA.
 Check in order: client name resolution, node reachability, ingress readiness,
 configured hostname, certificate name, then CA trust. Do not publish this
 single-node lab directly to an untrusted network.
+If a browser shows `TRAEFIK DEFAULT CERT` for a Fortify Lab hostname and then a
+plain `404 page not found`, verify the client is not resolving that hostname to
+a Proxmox, Traefik, or other reverse-proxy address. The simple hosts-file path
+should use the MicroK8s lab node IP. An external proxy can work only when it has
+matching routes for each lab hostname and presents the generated lab certificate
+for those names.
+

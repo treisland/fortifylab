@@ -154,6 +154,14 @@ Follow one direction through the request path:
 5. The certificate includes the requested hostname.
 6. The dedicated lab client trusts the lab-local CA.
 
+A browser certificate viewer that says `TRAEFIK DEFAULT CERT`, followed by a plain
+`404 page not found` after accepting the warning, usually means the client is
+reaching a Traefik or reverse-proxy default route instead of the MicroK8s lab
+node ingress. Point the client hosts/DNS entries at the MicroK8s lab node IP,
+or explicitly configure the external proxy with matching SNI, host rules, and
+the lab certificate. Importing `rootCA.pem` cannot fix traffic sent to the wrong
+endpoint.
+
 A name mismatch is not fixed by importing the CA, and an untrusted issuer is
 not fixed by changing DNS. Never disable certificate verification. See
 [Networking, URLs, and TLS](networking-and-tls.md).

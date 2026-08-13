@@ -70,12 +70,14 @@ class OperationalHelpTests(unittest.TestCase):
         self.assertGreaterEqual(result.stdout.count("[REDACTED]"), 3)
         self.assertIn("[LOCAL_PATH]", result.stdout)
 
-    def test_doctor_hosts_resolution_reports_missing_and_loopback(self) -> None:
+    def test_doctor_hosts_resolution_reports_missing_loopback_and_wrong_ip(self) -> None:
         result = self.run_helper(
             "DOMAIN=example.test; "
+            "operational_node_ip() { printf '10.0.0.5'; }; "
             "getent() { "
             "case \"$2\" in "
             "ssc.example.test) printf '10.0.0.5 STREAM\\n' ;; "
+            "sast.example.test) printf '10.0.0.9 STREAM\\n' ;; "
             "lim.example.test) printf '127.0.0.1 STREAM\\n' ;; "
             "*) return 2 ;; "
             "esac; "
@@ -84,9 +86,24 @@ class OperationalHelpTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("SSC", result.stdout)
+        self.assertIn("expected lab node IP: 10.0.0.5", result.stdout)
         self.assertIn("resolved", result.stdout)
         self.assertIn("loopback", result.stdout)
+        self.assertIn("wrong-ip", result.stdout)
         self.assertIn("missing", result.stdout)
+        self.assertIn("TRAEFIK DEFAULT CERT", result.stdout)
+
+    def test_doctor_tls_identity_reports_traefik_default_cert(self) -> None:
+        result = self.run_helper(
+            "_operational_lab_hosts() { printf 'SSC|ssc.example.test|https://ssc.example.test\\n'; }; "
+            "_operational_tls_certificate_metadata() { "
+            "printf 'subject=CN = TRAEFIK DEFAULT CERT\\nissuer=CN = TRAEFIK DEFAULT CERT\\n'; "
+            "}; "
+            "operational_doctor_tls_identity"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("wrong-ingress-default-cert", result.stdout)
+        self.assertIn("TRAEFIK DEFAULT CERT", result.stdout)
 
     def test_doctor_coredns_drift_does_not_print_configmap_data(self) -> None:
         corefile_marker = "SECRET_CONFIGMAP_DATA_SHOULD_NOT_PRINT"
