@@ -2085,15 +2085,15 @@ restart_with_microk8s_group() {
 # Deployment steps shared by Guided and Express modes
 # ============================================================
 
-GUIDED_STEP_ID=("prereqs" "inputs" "preflight" "certs" "dashboard" "secrets" "mysql" "postgresql" "ssc" "lim" "sast" "dast" "configure")
-GUIDED_STEP_LABEL=("Host prerequisites" "Configuration and license" "Deployment pre-flight" "TLS certificates" "Kubernetes Dashboard" "Kubernetes Secrets" "MySQL" "PostgreSQL" "Software Security Center" "LIM" "ScanCentral SAST" "ScanCentral DAST" "Post-deploy configuration")
-GUIDED_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 1)
-GUIDED_STEP_DURATION=("5-15 min" "2-5 min" "<1 min" "1-2 min" "2-5 min" "<1 min" "3-8 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "5-15 min" "manual")
-GUIDED_STEP_IMPACT=("host packages/add-ons" "local configuration" "read-only" "creates/updates lab TLS" "applies Dashboard" "creates/updates Secrets" "applies MySQL" "applies PostgreSQL" "applies SSC" "applies LIM" "applies SAST" "applies DAST" "manual configuration")
-GUIDED_STEP_TIMEOUT=(900 300 120 180 300 60 600 600 900 600 900 1200 0)
-GUIDED_STEP_MANUAL=(0 1 0 0 0 0 0 0 0 0 0 0 1)
-GUIDED_STEP_PROBE=("prereqs_complete" "inputs_complete" "preflight_inputs_complete" "certs_ready" "dashboard_ready" "secrets_ready" "mysql_ready" "postgresql_ready" "ssc_ready" "lim_ready" "sast_ready" "dast_ready" "configure_ready")
-GUIDED_STEP_HELP=(
+GUIDED_ALL_STEP_ID=("prereqs" "inputs" "preflight" "certs" "dashboard" "secrets" "mysql" "postgresql" "ssc" "lim" "sast_controller" "sast_sensor" "dast_core" "dast_scanner" "configure")
+GUIDED_ALL_STEP_LABEL=("Host prerequisites" "Configuration and license" "Deployment pre-flight" "TLS certificates" "Kubernetes Dashboard" "Kubernetes Secrets" "MySQL" "PostgreSQL" "Software Security Center" "LIM" "ScanCentral SAST Controller" "ScanCentral SAST Sensor" "ScanCentral DAST Core" "ScanCentral DAST Scanner" "Post-deploy configuration")
+GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 1)
+GUIDED_ALL_STEP_DURATION=("5-15 min" "2-5 min" "<1 min" "1-2 min" "2-5 min" "<1 min" "3-8 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "5-15 min" "manual")
+GUIDED_ALL_STEP_IMPACT=("host packages/add-ons" "local configuration" "read-only" "creates/updates lab TLS" "applies Dashboard" "creates/updates Secrets" "applies MySQL" "applies PostgreSQL" "applies SSC" "applies LIM" "applies SAST controller" "applies SAST sensor" "applies DAST Core" "applies DAST scanner" "manual configuration")
+GUIDED_ALL_STEP_TIMEOUT=(900 300 120 180 300 60 600 600 900 600 900 600 1200 900 0)
+GUIDED_ALL_STEP_MANUAL=(0 1 0 0 0 0 0 0 0 0 0 0 0 0 1)
+GUIDED_ALL_STEP_PROBE=("prereqs_complete" "inputs_complete" "preflight_inputs_complete" "certs_ready" "dashboard_ready" "secrets_ready" "mysql_ready" "postgresql_ready" "ssc_ready" "lim_ready" "sast_controller_ready" "sast_sensor_ready" "dast_core_ready" "dast_scanner_ready" "configure_ready")
+GUIDED_ALL_STEP_HELP=(
     "Install the host tools and MicroK8s add-ons used by the lab."
     "Review .env and provide a readable Fortify license before deployment."
     "Validate cluster readiness, storage, registry login, capacity, and required settings without changing the cluster."
@@ -2102,12 +2102,27 @@ GUIDED_STEP_HELP=(
     "Create the Kubernetes credentials and application configuration. Secrets are never saved as wizard state."
     "Deploy MySQL and verify it accepts an authenticated query before SSC."
     "Deploy PostgreSQL and verify it accepts an authenticated query before DAST."
-    "Deploy SSC only after the MySQL dependency gate passes."
+    "Deploy SSC after the MySQL dependency gate passes. SSC does not require ScanCentral SAST."
     "Deploy LIM and wait for its application endpoint."
-    "Deploy ScanCentral SAST only after SSC answers."
-    "Deploy DAST Core and scanner after PostgreSQL, SSC, and LIM answer."
-    "Configure DNS, the SSC ControllerToken, and the LIM pool when you are ready."
+    "Deploy the ScanCentral SAST controller. It can run without SSC unless you choose an integrated SAST profile."
+    "Deploy a ScanCentral SAST sensor only after the SAST controller is present."
+    "Deploy DAST Core after its database and license dependencies are ready."
+    "Deploy a DAST scanner only after DAST Core is ready."
+    "Configure DNS, SSC/SAST integration tokens, and the LIM pool when you are ready."
 )
+
+GUIDED_STEP_ID=()
+GUIDED_STEP_LABEL=()
+GUIDED_STEP_OPTIONAL=()
+GUIDED_STEP_DURATION=()
+GUIDED_STEP_IMPACT=()
+GUIDED_STEP_TIMEOUT=()
+GUIDED_STEP_MANUAL=()
+GUIDED_STEP_PROBE=()
+GUIDED_STEP_HELP=()
+GUIDED_DEPLOYMENT_PROFILE="${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
+GUIDED_DEPLOYMENT_PROFILE_LABEL="Full lab"
+GUIDED_DEPLOYMENT_COMPONENTS="full_lab"
 
 GUIDED_AUTO_ADVANCE="${GUIDED_AUTO_ADVANCE:-0}"
 GUIDED_AUTO_ADVANCE_DELAY="${GUIDED_AUTO_ADVANCE_DELAY:-5}"
@@ -2122,6 +2137,205 @@ GUIDED_PREFLIGHT_MODE_CONTRACT=(
     "resume: read-only preflight; existing managed releases are expected and live state selects the first gap"
     "component: read-only preflight; existing managed releases are allowed for expert start/upgrade repair"
 )
+
+guided_all_step_index() {
+    local wanted="$1" idx
+    for idx in "${!GUIDED_ALL_STEP_ID[@]}"; do
+        [ "${GUIDED_ALL_STEP_ID[$idx]}" = "$wanted" ] && { printf '%s\n' "$idx"; return 0; }
+    done
+    return 1
+}
+
+guided_profile_label() {
+    case "$1" in
+        ssc_only) printf '%s\n' "SSC only" ;;
+        sast_standalone) printf '%s\n' "SAST standalone" ;;
+        sast_full) printf '%s\n' "SAST full with SSC" ;;
+        dast_full) printf '%s\n' "DAST full" ;;
+        full_lab) printf '%s\n' "Full lab" ;;
+        custom) printf '%s\n' "Custom" ;;
+        *) printf '%s\n' "Full lab" ;;
+    esac
+}
+
+guided_profile_components_for() {
+    case "$1" in
+        ssc_only) printf '%s\n' "ssc" ;;
+        sast_standalone) printf '%s\n' "sast_controller" ;;
+        sast_full) printf '%s\n' "ssc sast_controller sast_sensor" ;;
+        dast_full) printf '%s\n' "ssc lim dast_core dast_scanner" ;;
+        full_lab) printf '%s\n' "ssc lim sast_controller sast_sensor dast_core dast_scanner" ;;
+        custom) printf '%s\n' "${GUIDED_DEPLOYMENT_COMPONENTS:-${FORTIFY_DEPLOYMENT_COMPONENTS:-}}" ;;
+        *) printf '%s\n' "ssc lim sast_controller sast_sensor dast_core dast_scanner" ;;
+    esac
+}
+
+guided_component_selected() {
+    local wanted="$1" component
+    for component in $GUIDED_DEPLOYMENT_COMPONENTS; do
+        [ "$component" = "$wanted" ] && return 0
+    done
+    return 1
+}
+
+guided_add_component() {
+    local component="$1"
+    guided_component_selected "$component" || GUIDED_DEPLOYMENT_COMPONENTS="${GUIDED_DEPLOYMENT_COMPONENTS:+$GUIDED_DEPLOYMENT_COMPONENTS }$component"
+}
+
+guided_expand_deployment_components() {
+    local changed=1
+    while [ "$changed" -eq 1 ]; do
+        changed=0
+        if guided_component_selected ssc && ! guided_component_selected mysql; then guided_add_component mysql; changed=1; fi
+        if guided_component_selected sast_sensor && ! guided_component_selected sast_controller; then guided_add_component sast_controller; changed=1; fi
+        if guided_component_selected sast_full; then guided_add_component ssc; guided_add_component sast_controller; guided_add_component sast_sensor; changed=1; fi
+        if guided_component_selected dast_core; then
+            for dep in postgresql lim ssc; do guided_component_selected "$dep" || { guided_add_component "$dep"; changed=1; }; done
+        fi
+        if guided_component_selected dast_scanner && ! guided_component_selected dast_core; then guided_add_component dast_core; changed=1; fi
+        if guided_component_selected full_lab; then
+            for dep in ssc lim sast_controller sast_sensor dast_core dast_scanner; do guided_component_selected "$dep" || { guided_add_component "$dep"; changed=1; }; done
+        fi
+    done
+}
+
+guided_component_step_selected() {
+    case "$1" in
+        prereqs|inputs|preflight|certs|secrets|dashboard) return 0 ;;
+        configure)
+            guided_component_selected ssc || guided_component_selected sast_sensor || guided_component_selected dast_core || guided_component_selected dast_scanner
+            ;;
+        *) guided_component_selected "$1" ;;
+    esac
+}
+
+guided_reset_active_steps() {
+    GUIDED_STEP_ID=()
+    GUIDED_STEP_LABEL=()
+    GUIDED_STEP_OPTIONAL=()
+    GUIDED_STEP_DURATION=()
+    GUIDED_STEP_IMPACT=()
+    GUIDED_STEP_TIMEOUT=()
+    GUIDED_STEP_MANUAL=()
+    GUIDED_STEP_PROBE=()
+    GUIDED_STEP_HELP=()
+}
+
+guided_append_active_step() {
+    local id="$1" idx
+    idx=$(guided_all_step_index "$id") || return 1
+    GUIDED_STEP_ID+=("${GUIDED_ALL_STEP_ID[$idx]}")
+    GUIDED_STEP_LABEL+=("${GUIDED_ALL_STEP_LABEL[$idx]}")
+    GUIDED_STEP_OPTIONAL+=("${GUIDED_ALL_STEP_OPTIONAL[$idx]}")
+    GUIDED_STEP_DURATION+=("${GUIDED_ALL_STEP_DURATION[$idx]}")
+    GUIDED_STEP_IMPACT+=("${GUIDED_ALL_STEP_IMPACT[$idx]}")
+    GUIDED_STEP_TIMEOUT+=("${GUIDED_ALL_STEP_TIMEOUT[$idx]}")
+    GUIDED_STEP_MANUAL+=("${GUIDED_ALL_STEP_MANUAL[$idx]}")
+    GUIDED_STEP_PROBE+=("${GUIDED_ALL_STEP_PROBE[$idx]}")
+    GUIDED_STEP_HELP+=("${GUIDED_ALL_STEP_HELP[$idx]}")
+}
+
+guided_apply_deployment_profile() {
+    local profile="${1:-${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}}" id
+    GUIDED_DEPLOYMENT_PROFILE="$profile"
+    GUIDED_DEPLOYMENT_PROFILE_LABEL=$(guided_profile_label "$profile")
+    GUIDED_DEPLOYMENT_COMPONENTS=$(guided_profile_components_for "$profile")
+    guided_expand_deployment_components
+    guided_reset_active_steps
+    for id in "${GUIDED_ALL_STEP_ID[@]}"; do
+        guided_component_step_selected "$id" && guided_append_active_step "$id"
+    done
+}
+
+guided_print_profile_summary() {
+    local component
+    printf '  Profile: %s\n' "$GUIDED_DEPLOYMENT_PROFILE_LABEL"
+    printf '  Components: '
+    if [ -z "$GUIDED_DEPLOYMENT_COMPONENTS" ]; then
+        printf 'platform only'
+    else
+        for component in $GUIDED_DEPLOYMENT_COMPONENTS; do printf '%s ' "$component"; done
+    fi
+    printf '\n'
+}
+
+guided_profile_save() {
+    local profile="$1" components="${2:-}"
+    if [ "$profile" = custom ]; then
+        env_apply_updates deployment-profile "FORTIFY_DEPLOYMENT_PROFILE=$profile" "FORTIFY_DEPLOYMENT_COMPONENTS=$components"
+    else
+        env_apply_updates deployment-profile "FORTIFY_DEPLOYMENT_PROFILE=$profile" "FORTIFY_DEPLOYMENT_COMPONENTS="
+    fi
+    # shellcheck disable=SC1090
+    [ -f "$ENV_FILE" ] && source "$ENV_FILE"
+    guided_apply_deployment_profile "$profile"
+}
+
+guided_custom_component_prompt() {
+    local components=""
+    printf '\nChoose the capabilities you want. Dependencies are added automatically.\n'
+    confirm "Include SSC?" && components="$components ssc"
+    confirm "Include ScanCentral SAST controller?" && components="$components sast_controller"
+    confirm "Include ScanCentral SAST sensor?" && components="$components sast_sensor"
+    confirm "Include LIM?" && components="$components lim"
+    confirm "Include ScanCentral DAST Core?" && components="$components dast_core"
+    confirm "Include ScanCentral DAST scanner?" && components="$components dast_scanner"
+    components=$(printf '%s\n' "$components" | xargs)
+    [ -n "$components" ] || components=""
+    GUIDED_DEPLOYMENT_COMPONENTS="$components"
+    guided_expand_deployment_components
+    printf '\nExpanded deployment plan:\n'
+    guided_print_profile_summary
+    if confirm "Save this custom profile to .env?"; then
+        guided_profile_save custom "$GUIDED_DEPLOYMENT_COMPONENTS"
+    else
+        GUIDED_DEPLOYMENT_PROFILE=custom
+        GUIDED_DEPLOYMENT_PROFILE_LABEL=$(guided_profile_label custom)
+        guided_reset_active_steps
+        local id
+        for id in "${GUIDED_ALL_STEP_ID[@]}"; do
+            guided_component_step_selected "$id" && guided_append_active_step "$id"
+        done
+        note "Using this custom profile for the current wizard session only."
+    fi
+}
+
+guided_profile_menu() {
+    local choice profile
+    title "Deployment profile"
+    printf '\nSelect the lab capabilities to deploy. The wizard automatically adds required dependencies; profile changes never stop or remove existing resources.\n\n'
+    printf '  1. SSC only\n'
+    printf '  2. SAST standalone (controller only)\n'
+    printf '  3. SAST full with SSC (SSC + controller + sensor)\n'
+    printf '  4. DAST full (SSC + LIM + DAST Core + scanner)\n'
+    printf '  5. Full lab\n'
+    printf '  6. Custom\n\n'
+    guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
+    printf 'Current saved profile:\n'
+    guided_print_profile_summary
+    echo
+    ask choice "Select profile:"
+    case "$choice" in
+        1) profile=ssc_only ;;
+        2) profile=sast_standalone ;;
+        3) profile=sast_full ;;
+        4) profile=dast_full ;;
+        5|"") profile=full_lab ;;
+        6) guided_custom_component_prompt; return $? ;;
+        *) error "Invalid profile selection"; sleep 1; return 1 ;;
+    esac
+    guided_apply_deployment_profile "$profile"
+    printf '\nExpanded deployment plan:\n'
+    guided_print_profile_summary
+    if confirm "Save this profile to .env?"; then
+        guided_profile_save "$profile"
+    else
+        note "Using this profile for the current wizard session only."
+    fi
+}
+
+guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
 
 # Guided lifecycle states: pending -> running -> verifying -> complete/failed/skipped.
 guided_step_index() {
@@ -2222,8 +2436,10 @@ guided_repair_recommendation() {
         postgresql) printf '%s\n' "Repair recommendation: retry PostgreSQL start/upgrade and wait for the StatefulSet plus authenticated query. Retry safety: Helm upgrade preserves PVC data." ;;
         ssc) printf '%s\n' "Repair recommendation: repair MySQL first, then retry SSC and verify service, ingress, and HTTP health. For HTTP 5xx, inspect pod logs locally for migration or database errors." ;;
         lim) printf '%s\n' "Repair recommendation: retry LIM and verify its service, ingress, and HTTP endpoint before DAST. Retry safety: idempotent Kubernetes apply." ;;
-        sast) printf '%s\n' "Repair recommendation: confirm SSC is healthy and the ControllerToken is configured, then retry SAST. Keep tokens out of logs and command output." ;;
-        dast) printf '%s\n' "Repair recommendation: confirm PostgreSQL, SSC, and LIM are healthy, then retry DAST Core and scanner. Preserve database PVCs while troubleshooting." ;;
+        sast_controller) printf '%s\n' "Repair recommendation: verify SAST controller DNS/TLS and chart values, then retry the controller. It does not require SSC unless you are running the integrated SAST profile." ;;
+        sast_sensor|sast) printf '%s\n' "Repair recommendation: confirm the SAST controller is healthy and the worker can resolve its controller URL, then retry the sensor. Keep tokens out of logs and command output." ;;
+        dast_core) printf '%s\n' "Repair recommendation: confirm PostgreSQL, SSC, and LIM are healthy, then retry DAST Core. Preserve database PVCs while troubleshooting." ;;
+        dast_scanner|dast) printf '%s\n' "Repair recommendation: confirm DAST Core is healthy, then retry the DAST scanner. Preserve database PVCs while troubleshooting." ;;
         configure) printf '%s\n' "Repair recommendation: complete DNS, SSC ControllerToken, and LIM pool actions from the Configure menu. Retry safety: manual operator action." ;;
         *) printf '%s\n' "Repair recommendation: inspect the failing probe detail, fix the underlying resource, then retry. Avoid destructive cleanup unless a step explicitly says data will be deleted." ;;
     esac
@@ -2478,15 +2694,29 @@ lim_ready() {
         health_lim_ingress_probe && health_lim_http_probe
 }
 
+sast_controller_ready() {
+    workload_ready "$NAMESPACE" statefulset scancentral-sast-controller
+}
+
+sast_sensor_ready() {
+    sast_controller_ready && workload_ready "$NAMESPACE" statefulset scancentral-sast-worker-linux
+}
+
 sast_ready() {
-    sast_pods_ready
+    sast_sensor_ready
+}
+
+dast_core_ready() {
+    source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+    health_dast_core_workloads_probe && health_dast_http_probe
+}
+
+dast_scanner_ready() {
+    dast_core_ready && workload_ready "$NAMESPACE" statefulset sdast-scanner-scancentral-dast-scanner
 }
 
 dast_ready() {
-    source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
-    health_dast_core_workloads_probe &&
-        workload_ready "$NAMESPACE" statefulset sdast-scanner-scancentral-dast-scanner &&
-        health_dast_http_probe
+    dast_scanner_ready
 }
 
 configure_ready() {
@@ -2506,8 +2736,10 @@ guided_step_live_complete() {
         postgresql) pod_prefix_ready postgresql ;;
         ssc) pod_prefix_ready ssc-webapp ;;
         lim) pod_prefix_ready lim ;;
-        sast) pod_prefix_ready scancentral-sast ;;
-        dast) pod_prefix_ready sdast ;;
+        sast_controller) pod_prefix_ready scancentral-sast-controller ;;
+        sast_sensor|sast) pod_prefix_ready scancentral-sast ;;
+        dast_core) pod_prefix_ready sdast-core ;;
+        dast_scanner|dast) pod_prefix_ready sdast ;;
         *) guided_step_complete "$1" ;;
     esac
 }
@@ -2518,8 +2750,10 @@ guided_step_live_in_progress() {
         postgresql) pod_prefix_in_progress postgresql ;;
         ssc) pod_prefix_in_progress ssc-webapp ;;
         lim) pod_prefix_in_progress lim ;;
-        sast) pod_prefix_in_progress scancentral-sast ;;
-        dast) pod_prefix_in_progress sdast ;;
+        sast_controller) pod_prefix_in_progress scancentral-sast-controller ;;
+        sast_sensor|sast) pod_prefix_in_progress scancentral-sast ;;
+        dast_core) pod_prefix_in_progress sdast-core ;;
+        dast_scanner|dast) pod_prefix_in_progress sdast ;;
         *) guided_step_in_progress "$1" ;;
     esac
 }
@@ -2610,9 +2844,14 @@ guided_step_in_progress() {
         postgresql) statefulset_in_progress "$NAMESPACE" postgresql ;;
         ssc) statefulset_in_progress "$NAMESPACE" ssc-webapp ;;
         lim) statefulset_in_progress "$NAMESPACE" lim ;;
-        sast)
-            sast_pods_in_progress
+        sast_controller) statefulset_in_progress "$NAMESPACE" scancentral-sast-controller ;;
+        sast_sensor|sast) sast_pods_in_progress ;;
+        dast_core)
+            statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-api ||
+                statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-globalservice ||
+                statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-utilityservice
             ;;
+        dast_scanner) statefulset_in_progress "$NAMESPACE" sdast-scanner-scancentral-dast-scanner ;;
         dast)
             statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-api ||
                 statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-globalservice ||
@@ -2659,11 +2898,13 @@ guided_step_progress_message() {
         postgresql) printf '%s\n' "Waiting for the PostgreSQL StatefulSet and an authenticated query." ;;
         ssc) guided_component_endpoint_detail ssc-service ssc-ingress "${SSC:?SSC is required}" "${SSC_URL:?SSC_URL is required}" ;;
         lim) guided_component_endpoint_detail lim lim-ingress "${LIM:?LIM is required}" "${LIM_URL:?LIM_URL is required}" ;;
-        sast) printf '%s\n' "Waiting for the SAST controller and worker StatefulSets." ;;
-        dast)
+        sast_controller) printf '%s\n' "Waiting for the SAST controller StatefulSet." ;;
+        sast_sensor|sast) printf '%s\n' "Waiting for the SAST sensor after the controller is ready." ;;
+        dast_core)
             source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
             FORTIFY_HEALTH_HTTP_MAX_TIME=3 health_http_detail "${SCDAST_URL:?SCDAST_URL is required}"
             ;;
+        dast_scanner|dast) printf '%s\n' "Waiting for the DAST scanner after DAST Core is ready." ;;
         configure) lab_hosts_resolution_detail ;;
         *) printf '%s\n' "Unknown guided step." ;;
     esac
@@ -2686,8 +2927,10 @@ guided_step_pod_prefixes() {
         postgresql) printf '%s\n' postgresql ;;
         ssc) printf '%s\n' ssc-webapp ;;
         lim) printf '%s\n' lim ;;
-        sast) printf '%s\n' scancentral-sast ;;
-        dast) printf '%s\n' sdast ;;
+        sast_controller) printf '%s\n' scancentral-sast-controller ;;
+        sast_sensor|sast) printf '%s\n' scancentral-sast ;;
+        dast_core) printf '%s\n' sdast-core ;;
+        dast_scanner|dast) printf '%s\n' sdast ;;
     esac
 }
 
@@ -2699,8 +2942,8 @@ guided_step_services() {
     case "$1" in
         ssc) printf '%s\n' ssc-service ;;
         lim) printf '%s\n' lim ;;
-        sast) printf '%s\n' scancentral-sast-controller ;;
-        dast) printf '%s\n' sdast-core-scancentral-dast-core-api ;;
+        sast_controller|sast_sensor|sast) printf '%s\n' scancentral-sast-controller ;;
+        dast_core|dast_scanner|dast) printf '%s\n' sdast-core-scancentral-dast-core-api ;;
     esac
 }
 
@@ -2708,8 +2951,8 @@ guided_step_hosts() {
     case "$1" in
         ssc) printf '%s\n' "${SSC:-}" ;;
         lim) printf '%s\n' "${LIM:-}" ;;
-        sast) printf '%s\n' "${SCSAST:-}" ;;
-        dast) printf '%s\n' "${SCDAST:-}" ;;
+        sast_controller|sast_sensor|sast) printf '%s\n' "${SCSAST:-}" ;;
+        dast_core|dast_scanner|dast) printf '%s\n' "${SCDAST:-}" ;;
         dashboard) printf '%s\n' "dashboard.${DOMAIN:-fortifydemo.com}" ;;
     esac
 }
@@ -3027,7 +3270,9 @@ wizard_environment_overview() {
     local id required_total=0 ready_total=0
     operational_environment_overview
     printf '\nDeployment indicators (application-level probes still decide usable health):\n'
-    for id in inputs preflight dashboard secrets mysql postgresql ssc lim sast dast; do
+    guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
+    for id in "${GUIDED_STEP_ID[@]}"; do
+        case "$id" in prereqs|configure) continue ;; esac
         required_total=$((required_total + 1))
         if guided_step_complete "$id"; then
             ready_total=$((ready_total + 1))
@@ -3056,6 +3301,7 @@ wizard_doctor_load_env() {
     SCDAST_URL="${SCDAST_URL:-https://$SCDAST}"
     SCSAST_CTRL_URL="${SCSAST_CTRL_URL:-https://$SCSAST}"
     FORTIFY_OPERATION_NAMESPACE="$NAMESPACE"
+    guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
 }
 
 wizard_config_diagnostics() {
@@ -3076,7 +3322,7 @@ wizard_doctor() {
     operational_doctor_service_endpoints || true
     operational_doctor_http_status || true
     printf '\nGuided readiness:\n'
-    for id in prereqs inputs preflight certs dashboard secrets mysql postgresql ssc lim sast dast configure; do
+    for id in "${GUIDED_STEP_ID[@]}"; do
         if guided_step_complete "$id"; then
             printf '  %-12s complete\n' "$id"
         elif guided_step_in_progress "$id"; then
@@ -3132,7 +3378,11 @@ run_deployment_operation() {
         postgresql) run_app_scripts "apps/postgresql/start.sh" ;;
         ssc) deployment_config_guard && run_app_scripts "apps/ssc/start.sh" ;;
         lim) deployment_config_guard && run_app_scripts "apps/lim/start.sh" ;;
-        sast) deployment_config_guard && run_app_scripts "apps/scsast/start.sh" ;;
+        sast_controller) deployment_config_guard && FORTIFY_SCSAST_REQUIRE_SSC=0 FORTIFY_SCSAST_WORKERS_ENABLED=false FORTIFY_SCSAST_WORKER_REPLICAS=0 run_app_scripts "apps/scsast/start.sh" ;;
+        sast_sensor) deployment_config_guard && sast_controller_ready && FORTIFY_SCSAST_REQUIRE_SSC=0 FORTIFY_SCSAST_WORKERS_ENABLED=true FORTIFY_SCSAST_WORKER_REPLICAS=1 run_app_scripts "apps/scsast/start.sh" ;;
+        sast) deployment_config_guard && FORTIFY_SCSAST_REQUIRE_SSC=0 FORTIFY_SCSAST_WORKERS_ENABLED=true FORTIFY_SCSAST_WORKER_REPLICAS=1 run_app_scripts "apps/scsast/start.sh" ;;
+        dast_core) deployment_config_guard && run_app_scripts "apps/scdast/core/start.sh" ;;
+        dast_scanner) deployment_config_guard && dast_core_ready && run_app_scripts "apps/scdast/scanner/start.sh" ;;
         dast) deployment_config_guard && run_app_scripts "apps/scdast/core/start.sh apps/scdast/scanner/start.sh" ;;
         configure) configure_menu ;;
         *) error "Unknown deployment operation: $operation"; return 1 ;;
@@ -3210,8 +3460,10 @@ guided_deployment_menu() {
         return
     fi
     GUIDED_MODE_CONTEXT=fresh
+    guided_profile_menu || return
     title "Guided deployment mode"
     printf '\n  %s\n' "$(guided_mode_context_text fresh)"
+    guided_print_profile_summary
     cat <<EOF
 
   1. Interactive guided deployment
@@ -3365,12 +3617,14 @@ resume_repair() {
     local idx id start=0 found=0 total="${#GUIDED_STEP_ID[@]}"
     fortify_lab_require_acknowledgement || return 1
     GUIDED_MODE_CONTEXT=resume
+    guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
     title "Resume or repair deployment"
     printf '
   %s
 ' "$(guided_mode_context_text resume)"
     echo
     echo "  State is derived from current files and Kubernetes; no password or token is persisted."
+    guided_print_profile_summary
     echo
     guided_collect_step_statuses
     echo
@@ -3678,5 +3932,6 @@ if [ -z "${WIZARD_NOMAIN:-}" ]; then
     fortify_lab_detect_accept_flag "$@"
     fortify_lab_require_acknowledgement || exit 1
     bootstrap_env
+    guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
     main_menu
 fi

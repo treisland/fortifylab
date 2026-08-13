@@ -72,10 +72,13 @@ acknowledge it. From the main menu choose one deployment mode:
 
 === "Guided (recommended)"
 
-    Choose **1. Guided deployment**. It shows one numbered step at a time,
-    including current status, expected duration, and mutation impact. Required
-    steps cannot be skipped. Enter `?` for contextual help, or quit safely and
-    return later.
+    Choose **1. Guided deployment**. First choose the deployment profile you
+    want: SSC only, SAST controller only, SAST full with SSC, DAST full, Full
+    lab, or Custom. The wizard expands required dependencies and shows the active
+    plan before you choose interactive or auto-advance mode. It then shows one
+    numbered step at a time, including current status, expected duration, and
+    mutation impact. Required steps cannot be skipped. Enter `?` for contextual
+    help, or quit safely and return later.
 
     The guided flow is expected to wait through lifecycle verification after
     each operation. While work is still starting, the wait screen should show
@@ -97,16 +100,21 @@ acknowledge it. From the main menu choose one deployment mode:
     same operations and dependency gates without pausing between successful
     steps. It is not a less-safe or separate installer.
 
-Both paths run in this order:
+The full-lab path runs in this order:
 
 1. host prerequisites and read-only deployment preflight;
 2. lab TLS certificates and Kubernetes Dashboard;
 3. Kubernetes Secrets;
 4. MySQL and PostgreSQL;
 5. SSC and LIM;
-6. ScanCentral SAST;
+6. ScanCentral SAST controller and sensor;
 7. ScanCentral DAST Core and scanner; and
 8. optional post-deployment configuration.
+
+Smaller Guided profiles omit the unselected application branches while keeping
+shared platform setup, TLS, secrets, and required dependencies. Profile changes
+never stop or remove existing resources; use lifecycle controls or component
+Destroy only when that is intended.
 
 The preflight verifies the license, required commands, MicroK8s, the `nfs`
 storage class, registry login, required settings, memory, and free disk. It is
@@ -122,9 +130,11 @@ routes existing labs to **Resume or repair** automatically.
     bounded by `FORTIFY_HEALTH_TIMEOUT` (600 seconds by default). If it fails,
     SSC is not changed: repair MySQL and retry the SSC step.
 
-PostgreSQL has the equivalent authenticated gate for DAST. SAST waits for SSC;
-DAST waits for PostgreSQL, SSC, and LIM. These checks explain why repairing the
-first unhealthy dependency is more useful than restarting every pod.
+PostgreSQL has the equivalent authenticated gate for DAST. The SAST controller
+can run without SSC, SAST sensors require the controller, and the SAST full
+profile adds SSC/MySQL for the integrated workflow. DAST waits for PostgreSQL,
+SSC, and LIM in this lab topology. These checks explain why repairing the first
+unhealthy dependency is more useful than restarting every pod.
 
 ## 3. Resume or repair safely
 

@@ -99,7 +99,7 @@ class GuidedWizardTests(unittest.TestCase):
             'GUIDED_STEP_ID=(done gap later); GUIDED_STEP_LABEL=(Done Gap Later); '
             'GUIDED_STEP_OPTIONAL=(0 0 0); '
             'guided_step_complete() { [ "$1" = done ]; }; '
-            'press_any() { :; }; guided_deployment() { printf "START=%s\\n" "$1"; }; '
+            'press_any() { :; }; guided_apply_deployment_profile() { :; }; guided_deployment() { printf "START=%s\\n" "$1"; }; '
             'resume_repair'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -113,7 +113,7 @@ class GuidedWizardTests(unittest.TestCase):
             'GUIDED_STEP_OPTIONAL=(0 0); GUIDED_STEP_MANUAL=(0 0); '
             'guided_step_live_state() { [ "$1" = one ] && printf complete || printf pending; }; '
             'guided_step_live_complete() { [ "$1" = one ]; }; '
-            'press_any() { :; }; guided_deployment() { :; }; resume_repair'
+            'press_any() { :; }; guided_apply_deployment_profile() { :; }; guided_deployment() { :; }; resume_repair'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Checking deployment state", result.stdout)
@@ -136,7 +136,7 @@ class GuidedWizardTests(unittest.TestCase):
             '"-n fortify get pods --no-headers") printf "scancentral-sast-controller-0 1/1 Running 0 1m\nscancentral-sast-sensor-0 1/1 Running 0 1m\n" ;; '
             '*) return 1 ;; '
             'esac; }; '
-            'press_any() { :; }; guided_deployment() { printf "START=%s\n" "$1"; }; '
+            'press_any() { :; }; guided_apply_deployment_profile() { :; }; guided_deployment() { printf "START=%s\n" "$1"; }; '
             'resume_repair'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -441,8 +441,48 @@ class GuidedWizardTests(unittest.TestCase):
         for expected in ("Windows", "macOS", "Ubuntu/Debian", "Firefox/NSS", "Never import, copy, or share the mkcert private CA key"):
             self.assertIn(expected, result.stdout)
 
+
+    def test_guided_deployment_profiles_expand_dependencies(self) -> None:
+        cases = {
+            "ssc_only": ["prereqs", "inputs", "preflight", "certs", "dashboard", "secrets", "mysql", "ssc", "configure"],
+            "sast_standalone": ["prereqs", "inputs", "preflight", "certs", "dashboard", "secrets", "sast_controller"],
+            "sast_full": ["prereqs", "inputs", "preflight", "certs", "dashboard", "secrets", "mysql", "ssc", "sast_controller", "sast_sensor", "configure"],
+            "dast_full": ["prereqs", "inputs", "preflight", "certs", "dashboard", "secrets", "mysql", "postgresql", "ssc", "lim", "dast_core", "dast_scanner", "configure"],
+        }
+        for profile, expected in cases.items():
+            with self.subTest(profile=profile):
+                result = self.run_wizard_functions(
+                    f'guided_apply_deployment_profile {profile}; printf "%s\n" "${{GUIDED_STEP_ID[*]}}"'
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip().splitlines()[-1].split(), expected)
+
+    def test_guided_custom_profile_adds_sensor_dependencies(self) -> None:
+        result = self.run_wizard_functions(
+            'GUIDED_DEPLOYMENT_COMPONENTS="sast_sensor dast_scanner"; '
+            'guided_apply_deployment_profile custom; '
+            'printf "COMPONENTS=%s\nSTEPS=%s\n" "$GUIDED_DEPLOYMENT_COMPONENTS" "${GUIDED_STEP_ID[*]}"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("sast_sensor", result.stdout)
+        self.assertIn("sast_controller", result.stdout)
+        self.assertIn("dast_core", result.stdout)
+        self.assertIn("postgresql", result.stdout)
+
+    def test_guided_profile_selection_can_continue_without_saving(self) -> None:
+        result = self.run_wizard_functions(
+            'read _ack; confirm() { return 1; }; env_apply_updates() { printf BAD_SAVE; }; guided_profile_menu; '
+            'printf "PROFILE=%s STEPS=%s\n" "$GUIDED_DEPLOYMENT_PROFILE" "${GUIDED_STEP_ID[*]}"',
+            "2\nn\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Using this profile for the current wizard session only", result.stdout)
+        self.assertIn("PROFILE=sast_standalone", result.stdout)
+        self.assertIn("sast_controller", result.stdout)
+        self.assertNotIn("BAD_SAVE", result.stdout)
+
     def test_optional_skip_is_explicit_and_required_skip_is_rejected(self) -> None:
-        self.assertIn("GUIDED_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 1)", WIZARD)
+        self.assertIn("GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 1)", WIZARD)
         self.assertIn("Skip optional step", WIZARD)
         self.assertIn("is required and cannot be skipped", WIZARD)
 
@@ -493,7 +533,7 @@ class GuidedWizardTests(unittest.TestCase):
 
 
     def test_secrets_probe_handles_dotted_keys_and_reports_missing_detail(self) -> None:
-        self.assertIn("GUIDED_STEP_TIMEOUT=(900 300 120 180 300 60", WIZARD)
+        self.assertIn("GUIDED_ALL_STEP_TIMEOUT=(900 300 120 180 300 60", WIZARD)
         self.assertIn("secret_key_exists()", WIZARD)
         self.assertIn('go-template={{ index .data \\\"$key\\\" }}', WIZARD)
         self.assertNotIn('jsonpath={.data.${required_key//./', WIZARD)
