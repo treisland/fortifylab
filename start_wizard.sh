@@ -43,6 +43,8 @@ OK_MARK="${GREEN}✓${RESET}"
 WARN_MARK="${YELLOW}⚠${RESET}"
 FAIL_MARK="${RED}✗${RESET}"
 INFO_MARK="${BLUE}ℹ${RESET}"
+FORTIFY_RECOMMENDED_MEMORY_GIB="${FORTIFY_RECOMMENDED_MEMORY_GIB:-16}"
+FORTIFY_RECOMMENDED_DISK_GIB="${FORTIFY_RECOMMENDED_DISK_GIB:-50}"
 
 hr()       { printf '%s\n' "────────────────────────────────────────────────────────────"; }
 title()    { clear; printf '\n%s%s%s\n' "$BOLD" "$1" "$RESET"; hr; }
@@ -111,6 +113,7 @@ bootstrap_env() {
 APP_LABEL=("MySQL" "PostgreSQL" "SSC" "LIM" "ScanCentral SAST" "ScanCentral DAST")
 APP_PODS=("mysql"  "postgresql" "ssc-webapp" "lim" "scancentral-sast" "sdast")
 APP_URL_VAR=(""    ""           "SSC_URL"    "LIM_URL" "SCSAST_CTRL_URL" "SCDAST_URL")
+APP_GUIDED_STEP=("mysql" "postgresql" "ssc" "lim" "sast" "dast")
 APP_START=(
     "apps/mysql/start.sh"
     "apps/postgresql/start.sh"
@@ -224,6 +227,129 @@ run_app_scripts() {
             return 1
         fi
         bash "$FORTIFY_HOME_K8S/$script" || return $?
+    done
+}
+
+lab_lifecycle_script_list() {
+    local idx field script
+    for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+        case "$1" in
+            destroy) field="${APP_DESTROY[$idx]}" ;;
+            stop) field="${APP_STOP[$idx]}" ;;
+            *) return 1 ;;
+        esac
+        for script in $field; do
+            printf '  - %-20s %s\n' "${APP_LABEL[$idx]}" "$script"
+        done
+    done
+}
+
+lab_shutdown_deployments() {
+    local idx rc=0
+    section "Shutdown lab deployments"
+    note "Stopping workloads in dependency-safe order. Persistent data is preserved."
+    wizard_log_event "action=lab_lifecycle_start operation=shutdown mode=non_destructive"
+    for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+        note "Stopping ${APP_LABEL[$idx]}..."
+        wizard_log_event "action=lab_lifecycle_component operation=shutdown component=${APP_GUIDED_STEP[$idx]}"
+        run_app_scripts "${APP_STOP[$idx]}"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            wizard_log_event "action=lab_lifecycle_finish operation=shutdown state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+            return "$rc"
+        fi
+    done
+    wizard_log_event "action=lab_lifecycle_finish operation=shutdown state=complete"
+    note "Lab workloads stopped. Data volumes and configuration remain in place."
+}
+
+lab_start_deployments() {
+    local idx rc=0 previous_mode="${GUIDED_MODE_CONTEXT:-}"
+    section "Start lab deployments"
+    note "Starting workloads in dependency order and verifying readiness after each component."
+    wizard_log_event "action=lab_lifecycle_start operation=start mode=non_destructive"
+    GUIDED_MODE_CONTEXT=lifecycle
+    for idx in "${!APP_LABEL[@]}"; do
+        guided_run_and_verify "${APP_GUIDED_STEP[$idx]}" "${APP_LABEL[$idx]}"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            GUIDED_MODE_CONTEXT="$previous_mode"
+            wizard_log_event "action=lab_lifecycle_finish operation=start state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+            return "$rc"
+        fi
+    done
+    GUIDED_MODE_CONTEXT="$previous_mode"
+    wizard_log_event "action=lab_lifecycle_finish operation=start state=complete"
+    note "Lab workloads are started and verified."
+}
+
+lab_teardown_preview() {
+    section "Full lab teardown preview"
+    cat <<EOF
+This destructive operation runs the component destroy scripts below in
+dependency-safe order. It deletes application deployments and their data so
+the lab can be started again from a clean slate.
+
+EOF
+    lab_lifecycle_script_list destroy
+}
+
+lab_destroy_deployments() {
+    local idx rc=0 confirmation expected="DESTROY FORTIFY LAB"
+    fortify_lab_show_action_warning destructive
+    lab_teardown_preview
+    printf '\nType %s to continue: ' "$expected"
+    IFS= read -r confirmation
+    if [ "$confirmation" != "$expected" ]; then
+        note "Full teardown cancelled."
+        wizard_log_event "action=lab_lifecycle_finish operation=destroy state=cancelled"
+        return 1
+    fi
+    wizard_log_event "action=lab_lifecycle_start operation=destroy mode=destructive"
+    for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+        note "Destroying ${APP_LABEL[$idx]}..."
+        wizard_log_event "action=lab_lifecycle_component operation=destroy component=${APP_GUIDED_STEP[$idx]}"
+        run_app_scripts "${APP_DESTROY[$idx]}"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            wizard_log_event "action=lab_lifecycle_finish operation=destroy state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+            return "$rc"
+        fi
+    done
+    wizard_log_event "action=lab_lifecycle_finish operation=destroy state=complete"
+    note "Lab deployments and data have been destroyed. You can start from scratch now."
+}
+
+lab_lifecycle_menu() {
+    local choice
+    while true; do
+        title "Lab lifecycle controls"
+        cat <<EOF
+
+  1. Shutdown lab deployments (preserve data)
+  2. Start lab deployments
+  3. Destroy lab deployments and data
+
+  r. Return
+  q. Quit
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1)
+                confirm "Stop all lab workloads while preserving data?" || continue
+                lab_shutdown_deployments
+                press_any ;;
+            2)
+                lab_start_deployments
+                press_any ;;
+            3)
+                lab_destroy_deployments
+                press_any ;;
+            [Rr]) return ;;
+            [Qq]) clear; exit 0 ;;
+            *) error "Invalid"; sleep 1 ;;
+        esac
     done
 }
 
@@ -1545,7 +1671,7 @@ deployment_inputs_menu() {
 }
 
 preflight_inputs_complete() {
-    local variable memory_gib disk_gib
+    local variable
     prereqs_complete && inputs_complete && cluster_reachable || return 1
     microk8s status >/dev/null 2>&1 || return 1
     $KUBECTL get storageclass nfs >/dev/null 2>&1 || return 1
@@ -1554,9 +1680,7 @@ preflight_inputs_complete() {
         FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION; do
         [ -n "${!variable:-}" ] || return 1
     done
-    memory_gib=$(awk '/MemTotal:/ {print int($2/1024/1024)}' /proc/meminfo)
-    disk_gib=$(df -Pk "$FORTIFY_HOME_K8S" | awk 'NR==2 {print int($4/1024/1024)}')
-    [ "$memory_gib" -ge 16 ] && [ "$disk_gib" -ge 50 ]
+    return 0
 }
 
 lab_node_ip() {
@@ -2418,8 +2542,67 @@ EOF
     press_any
 }
 
+preflight_capacity_is_integer() {
+    [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+preflight_memory_gib() {
+    awk '/MemTotal:/ {print int($2/1024/1024)}' /proc/meminfo 2>/dev/null
+}
+
+preflight_disk_gib() {
+    df -Pk "$FORTIFY_HOME_K8S" 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}'
+}
+
+preflight_resource_warnings() {
+    local memory_gib disk_gib
+    memory_gib=$(preflight_memory_gib)
+    disk_gib=$(preflight_disk_gib)
+    if ! preflight_capacity_is_integer "$memory_gib"; then
+        printf '%s\n' "Host memory is unknown; recommended minimum is ${FORTIFY_RECOMMENDED_MEMORY_GIB} GiB."
+    elif [ "$memory_gib" -lt "$FORTIFY_RECOMMENDED_MEMORY_GIB" ]; then
+        printf '%s\n' "Host memory is ${memory_gib} GiB; recommended minimum is ${FORTIFY_RECOMMENDED_MEMORY_GIB} GiB."
+    fi
+    if ! preflight_capacity_is_integer "$disk_gib"; then
+        printf '%s\n' "Free disk is unknown; recommended minimum is ${FORTIFY_RECOMMENDED_DISK_GIB} GiB."
+    elif [ "$disk_gib" -lt "$FORTIFY_RECOMMENDED_DISK_GIB" ]; then
+        printf '%s\n' "Free disk is ${disk_gib} GiB; recommended minimum is ${FORTIFY_RECOMMENDED_DISK_GIB} GiB."
+    fi
+}
+
+
+preflight_can_prompt_for_low_resources() {
+    [ "${GUIDED_AUTO_ADVANCE:-0}" != 1 ] && [ "${FORTIFY_NONINTERACTIVE:-0}" != 1 ] && [ -t 0 ]
+}
+
+preflight_confirm_low_resources() {
+    local warnings
+    warnings=$(preflight_resource_warnings)
+    [ -z "$warnings" ] && return 0
+    wizard_log_event "action=resource_warning state=detected"
+    printf '\n%s\n' "$warnings" >&2
+    if [ "${FORTIFY_ALLOW_LOW_RESOURCES:-0}" = 1 ]; then
+        note "Continuing below the recommended host profile because FORTIFY_ALLOW_LOW_RESOURCES=1 is set."
+        wizard_log_event "action=resource_warning state=allowed mode=env_override"
+        return 0
+    fi
+    if ! preflight_can_prompt_for_low_resources; then
+        error "Resource warnings require FORTIFY_ALLOW_LOW_RESOURCES=1 in auto-advance or non-interactive mode."
+        wizard_log_event "action=resource_warning state=blocked mode=noninteractive"
+        return 1
+    fi
+    printf '%s %s\n' "$WARN_MARK" "Resource warnings do not block lab deployment if you explicitly continue." >&2
+    if confirm "Continue below the recommended RAM/disk profile?"; then
+        wizard_log_event "action=resource_warning state=allowed mode=interactive"
+        return 0
+    fi
+    wizard_log_event "action=resource_warning state=blocked mode=interactive"
+    return 1
+}
+
+
 preflight_check() {
-    local command memory_gib disk_gib variable
+    local command variable
     for command in microk8s docker mkcert java keytool openssl envsubst curl; do
         command -v "$command" >/dev/null 2>&1 || {
             error "Missing prerequisite: $command (use option 3)"
@@ -2448,16 +2631,7 @@ preflight_check() {
             return 1
         }
     done
-    memory_gib=$(awk '/MemTotal:/ {print int($2/1024/1024)}' /proc/meminfo)
-    disk_gib=$(df -Pk "$FORTIFY_HOME_K8S" | awk 'NR==2 {print int($4/1024/1024)}')
-    [ "$memory_gib" -ge 16 ] || {
-        error "At least 16 GiB host memory is required"
-        return 1
-    }
-    [ "$disk_gib" -ge 50 ] || {
-        error "At least 50 GiB free disk is required for a fresh deployment"
-        return 1
-    }
+    preflight_confirm_low_resources || return 1
     return 0
 }
 
@@ -2521,17 +2695,18 @@ main_menu() {
         echo "   7. Advanced setup and configuration"
 
         section "Operations"
-        echo "   8. Stream logs (all pods)"
-        echo "   9. Cluster snapshot"
-        echo "  10. Tail one pod"
-        echo "  11. URLs & credentials"
-        echo "  12. Image versions"
-        echo "  13. Edit .env"
+        echo "   8. Lab lifecycle controls"
+        echo "   9. Stream logs (all pods)"
+        echo "  10. Cluster snapshot"
+        echo "  11. Tail one pod"
+        echo "  12. URLs & credentials"
+        echo "  13. Image versions"
+        echo "  14. Edit .env"
 
         section "Learn"
-        echo "  14. Help Center / Fortify Knowledge Center"
-        echo "  15. Operational guidance and troubleshooting"
-        echo "  16. View wizard log"
+        echo "  15. Help Center / Fortify Knowledge Center"
+        echo "  16. Operational guidance and troubleshooting"
+        echo "  17. View wizard log"
 
         echo
         echo "   q. Quit"
@@ -2546,15 +2721,16 @@ main_menu() {
             5)  dashboard_access_menu ;;
             6)  live_status ;;
             7)  advanced_menu ;;
-            8)  stream_logs ;;
-            9)  cluster_status ;;
-           10)  logs_menu ;;
-           11)  urls_creds ;;
-           12)  versions_menu ;;
-           13)  edit_env ;;
-           14)  help_center ;;
-           15)  operational_guidance_menu ;;
-           16)  wizard_log_viewer ;;
+            8)  lab_lifecycle_menu ;;
+            9)  stream_logs ;;
+           10)  cluster_status ;;
+           11)  logs_menu ;;
+           12)  urls_creds ;;
+           13)  versions_menu ;;
+           14)  edit_env ;;
+           15)  help_center ;;
+           16)  operational_guidance_menu ;;
+           17)  wizard_log_viewer ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;
         esac

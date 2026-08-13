@@ -158,6 +158,8 @@ class OperationalHelpTests(unittest.TestCase):
     def test_doctor_compact_summary_is_secret_safe(self) -> None:
         result = self.run_helper(
             "operational_cluster_available() { return 0; }; "
+            "operational_capacity_memory_gib() { printf 32; }; "
+            "operational_capacity_disk_gib() { printf 100; }; "
             "_operational_endpoint_count() { printf 1; }; "
             "_operational_kubectl() { "
             "case \"$*\" in "
@@ -175,6 +177,27 @@ class OperationalHelpTests(unittest.TestCase):
         self.assertIn("no obvious", result.stdout)
         self.assertNotIn("super-secret", result.stdout)
         self.assertNotIn("hidden", result.stdout)
+
+    def test_doctor_reports_low_capacity_as_action_needed(self) -> None:
+        result = self.run_helper(
+            "operational_cluster_available() { return 0; }; "
+            "operational_capacity_memory_gib() { printf 8; }; "
+            "operational_capacity_disk_gib() { printf 20; }; "
+            "_operational_endpoint_count() { printf 1; }; "
+            "_operational_kubectl() { "
+            "case \"$*\" in "
+            "*statefulsets,deployments*) printf 'KIND NAME DESIRED READY\\nStatefulSet ssc-webapp 1 1\\n' ;; "
+            "*) return 1 ;; "
+            "esac; "
+            "}; "
+            "curl() { printf 200; }; "
+            "operational_doctor_compact_health_summary"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("host capacity", result.stdout)
+        self.assertIn("warning: memory 8 GiB", result.stdout)
+        self.assertIn("warning: free disk 20 GiB", result.stdout)
+        self.assertIn("investigate unavailable", result.stdout)
 
     def test_offline_bundle_has_only_allowlisted_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

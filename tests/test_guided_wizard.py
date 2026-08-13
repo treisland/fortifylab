@@ -47,6 +47,7 @@ class GuidedWizardTests(unittest.TestCase):
             "Kubernetes Dashboard access",
             "Diagnostics / live status",
             "Advanced setup and configuration",
+            "Lab lifecycle controls",
         ):
             self.assertIn(label, WIZARD)
 
@@ -121,6 +122,60 @@ class GuidedWizardTests(unittest.TestCase):
         preflight_body = WIZARD.split("preflight_check()", 1)[1].split("deploy_step()", 1)[0]
         self.assertNotIn("Managed releases already exist", preflight_body)
         self.assertNotIn("helm", preflight_body.lower())
+
+    def test_preflight_resource_warnings_identify_low_ram_and_disk(self) -> None:
+        result = self.run_wizard_functions(
+            'preflight_memory_gib() { printf 8; }; '
+            'preflight_disk_gib() { printf 20; }; '
+            'preflight_resource_warnings',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Host memory is 8 GiB", result.stdout)
+        self.assertIn("Free disk is 20 GiB", result.stdout)
+
+    def test_low_resource_preflight_can_continue_with_interactive_confirmation(self) -> None:
+        result = self.run_wizard_functions(
+            'preflight_memory_gib() { printf 8; }; '
+            'preflight_disk_gib() { printf 20; }; '
+            'preflight_can_prompt_for_low_resources() { return 0; }; '
+            'confirm() { return 0; }; '
+            'preflight_confirm_low_resources',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Resource warnings do not block", result.stderr)
+
+    def test_low_resource_preflight_refuses_noninteractive_without_override(self) -> None:
+        result = self.run_wizard_functions(
+            'GUIDED_AUTO_ADVANCE=1; '
+            'preflight_memory_gib() { printf 8; }; '
+            'preflight_disk_gib() { printf 20; }; '
+            'preflight_confirm_low_resources',
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("FORTIFY_ALLOW_LOW_RESOURCES=1", result.stderr)
+
+    def test_low_resource_preflight_allows_noninteractive_env_override(self) -> None:
+        result = self.run_wizard_functions(
+            'GUIDED_AUTO_ADVANCE=1; FORTIFY_ALLOW_LOW_RESOURCES=1; '
+            'preflight_memory_gib() { printf 8; }; '
+            'preflight_disk_gib() { printf 20; }; '
+            'preflight_confirm_low_resources',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("FORTIFY_ALLOW_LOW_RESOURCES=1", result.stdout)
+
+    def test_preflight_readiness_does_not_block_on_low_ram_or_disk(self) -> None:
+        result = self.run_wizard_functions(
+            'mkdir -p "$HOME/.docker"; printf x > "$HOME/.docker/config.json"; '
+            'prereqs_complete() { return 0; }; inputs_complete() { return 0; }; '
+            'cluster_reachable() { return 0; }; microk8s() { return 0; }; '
+            'KUBECTL=mock_kubectl; mock_kubectl() { return 0; }; DOMAIN=demo.test; NAMESPACE=fortify; DEFAULT_PASS=demo; '
+            'FORTIFY_SSC_CHART_VERSION=1; FORTIFY_SSC_IMAGE_TAG=1; '
+            'FORTIFY_SCSAST_CHART_VERSION=1; '
+            'preflight_memory_gib() { printf 4; }; preflight_disk_gib() { printf 4; }; '
+            'preflight_inputs_complete',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_fresh_deploy_guard_refuses_existing_releases(self) -> None:
         result = self.run_wizard_functions(
@@ -387,6 +442,93 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("operational_cluster_available || unavailable=1", doctor_body)
         self.assertIn("return 2", doctor_body)
         self.assertIn("Step type:", WIZARD)
+
+    def test_lab_lifecycle_controls_use_existing_component_scripts(self) -> None:
+        self.assertIn("lab_lifecycle_menu()", WIZARD)
+        self.assertIn("APP_GUIDED_STEP=", WIZARD)
+        self.assertIn('run_app_scripts "${APP_STOP[$idx]}"', WIZARD)
+        self.assertIn('run_app_scripts "${APP_DESTROY[$idx]}"', WIZARD)
+        self.assertIn('guided_run_and_verify "${APP_GUIDED_STEP[$idx]}"', WIZARD)
+        self.assertIn("DESTROY FORTIFY LAB", WIZARD)
+        self.assertIn("action=lab_lifecycle_start operation=shutdown", WIZARD)
+        self.assertIn("action=lab_lifecycle_start operation=destroy", WIZARD)
+
+    def test_lab_shutdown_stops_workloads_in_reverse_dependency_order(self) -> None:
+        result = self.run_wizard_functions(
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
+            'wizard_log_event() { :; }; '
+            'lab_shutdown_deployments'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runs = [line.removeprefix("RUN:") for line in result.stdout.splitlines() if line.startswith("RUN:")]
+        self.assertEqual(
+            runs,
+            [
+                "apps/scdast/core/stop.sh apps/scdast/scanner/stop.sh",
+                "apps/scsast/stop.sh",
+                "apps/lim/stop.sh",
+                "apps/ssc/stop.sh",
+                "apps/postgresql/stop.sh",
+                "apps/mysql/stop.sh",
+            ],
+        )
+        self.assertIn("Persistent data is preserved", result.stdout)
+
+    def test_lab_start_runs_forward_and_verifies_each_component(self) -> None:
+        result = self.run_wizard_functions(
+            'guided_run_and_verify() { printf "VERIFY:%s:%s:%s\n" "$1" "$2" "$GUIDED_MODE_CONTEXT"; }; '
+            'wizard_log_event() { :; }; '
+            'GUIDED_MODE_CONTEXT=resume; lab_start_deployments; printf "MODE=%s\n" "$GUIDED_MODE_CONTEXT"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        verifies = [line for line in result.stdout.splitlines() if line.startswith("VERIFY:")]
+        self.assertEqual(
+            verifies,
+            [
+                "VERIFY:mysql:MySQL:lifecycle",
+                "VERIFY:postgresql:PostgreSQL:lifecycle",
+                "VERIFY:ssc:SSC:lifecycle",
+                "VERIFY:lim:LIM:lifecycle",
+                "VERIFY:sast:ScanCentral SAST:lifecycle",
+                "VERIFY:dast:ScanCentral DAST:lifecycle",
+            ],
+        )
+        self.assertIn("MODE=resume", result.stdout)
+
+    def test_full_lab_destroy_requires_typed_confirmation_and_uses_reverse_order(self) -> None:
+        cancelled = self.run_wizard_functions(
+            'fortify_lab_show_action_warning() { :; }; '
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
+            'wizard_log_event() { :; }; '
+            'read _lab_ack; lab_destroy_deployments; printf "RC=%s\n" "$?"',
+            "not today\n",
+        )
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertIn("Full teardown cancelled", cancelled.stdout)
+        self.assertNotIn("RUN:", cancelled.stdout)
+        self.assertIn("RC=1", cancelled.stdout)
+
+        confirmed = self.run_wizard_functions(
+            'fortify_lab_show_action_warning() { :; }; '
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
+            'wizard_log_event() { :; }; '
+            'read _lab_ack; lab_destroy_deployments',
+            "DESTROY FORTIFY LAB\n",
+        )
+        self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
+        runs = [line.removeprefix("RUN:") for line in confirmed.stdout.splitlines() if line.startswith("RUN:")]
+        self.assertEqual(
+            runs,
+            [
+                "apps/scdast/core/destroy.sh apps/scdast/scanner/destroy.sh",
+                "apps/scsast/destroy.sh",
+                "apps/lim/destroy.sh",
+                "apps/ssc/destroy.sh",
+                "apps/postgresql/destroy.sh",
+                "apps/mysql/destroy.sh",
+            ],
+        )
+        self.assertIn("Full lab teardown preview", confirmed.stdout)
 
     def test_live_plan_uses_guided_registry_and_labels_impact(self) -> None:
         self.assertIn("wizard_deployment_plan()", WIZARD)

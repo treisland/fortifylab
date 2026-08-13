@@ -9,6 +9,37 @@ FORTIFY_OPERATION_TIMEOUT="${FORTIFY_OPERATION_TIMEOUT:-10}"
 FORTIFY_OPERATION_HTTP_TIMEOUT="${FORTIFY_OPERATION_HTTP_TIMEOUT:-3}"
 FORTIFY_OPERATION_NAMESPACE="${NAMESPACE:-fortify}"
 FORTIFY_OPERATION_KUBECTL="${FORTIFY_OPERATION_KUBECTL:-microk8s kubectl}"
+FORTIFY_RECOMMENDED_MEMORY_GIB="${FORTIFY_RECOMMENDED_MEMORY_GIB:-16}"
+FORTIFY_RECOMMENDED_DISK_GIB="${FORTIFY_RECOMMENDED_DISK_GIB:-50}"
+
+operational_capacity_memory_gib() {
+    awk '/MemTotal:/ {print int($2/1024/1024)}' /proc/meminfo 2>/dev/null
+}
+
+operational_capacity_disk_gib() {
+    df -Pk "${FORTIFY_HOME_K8S:-.}" 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}'
+}
+
+operational_capacity_is_integer() {
+    [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+operational_capacity_warnings() {
+    local memory_gib disk_gib
+    memory_gib=$(operational_capacity_memory_gib)
+    disk_gib=$(operational_capacity_disk_gib)
+    if ! operational_capacity_is_integer "$memory_gib"; then
+        printf '%s\n' "memory unknown; recommended minimum is ${FORTIFY_RECOMMENDED_MEMORY_GIB} GiB"
+    elif [ "$memory_gib" -lt "$FORTIFY_RECOMMENDED_MEMORY_GIB" ]; then
+        printf '%s\n' "memory ${memory_gib} GiB is below recommended ${FORTIFY_RECOMMENDED_MEMORY_GIB} GiB"
+    fi
+    if ! operational_capacity_is_integer "$disk_gib"; then
+        printf '%s\n' "free disk unknown; recommended minimum is ${FORTIFY_RECOMMENDED_DISK_GIB} GiB"
+    elif [ "$disk_gib" -lt "$FORTIFY_RECOMMENDED_DISK_GIB" ]; then
+        printf '%s\n' "free disk ${disk_gib} GiB is below recommended ${FORTIFY_RECOMMENDED_DISK_GIB} GiB"
+    fi
+}
+
 
 operational_render_guide() {
     local topic="${1:-}" file
@@ -200,9 +231,20 @@ EOF
 }
 
 operational_doctor_compact_health_summary() {
-    local label service count url host status any_issue=0
+    local label service count url host status capacity_warnings line any_issue=0
     operational_notice
     printf '\nDoctor summary (read-only, compact, secret-safe):\n'
+    capacity_warnings=$(operational_capacity_warnings)
+    printf '%s\n' '  host capacity:'
+    if [ -n "$capacity_warnings" ]; then
+        any_issue=1
+        while IFS= read -r line; do
+            [ -n "$line" ] && printf '    warning: %s\n' "$line"
+        done <<<"$capacity_warnings"
+    else
+        printf '%s\n' '    meets recommended deployment profile'
+    fi
+
     if operational_cluster_available; then
         printf '%s\n' '  cluster: reachable'
         printf '%s\n' '  workloads:'
@@ -245,13 +287,20 @@ EOF
 }
 
 operational_environment_overview() {
-    local memory_gib disk_gib certificate
+    local memory_gib disk_gib certificate capacity_warnings line
     operational_notice
     printf '\nNamespace: %s\n' "$FORTIFY_OPERATION_NAMESPACE"
     operational_print_urls
-    memory_gib=$(awk '/MemTotal:/ {printf "%.1f", $2/1024/1024}' /proc/meminfo 2>/dev/null || true)
-    disk_gib=$(df -Pk "${FORTIFY_HOME_K8S:-.}" 2>/dev/null | awk 'NR==2 {printf "%.1f", $4/1024/1024}' || true)
+    memory_gib=$(operational_capacity_memory_gib)
+    disk_gib=$(operational_capacity_disk_gib)
     printf '\nHost capacity: %s GiB memory; %s GiB free disk\n' "${memory_gib:-unknown}" "${disk_gib:-unknown}"
+    capacity_warnings=$(operational_capacity_warnings)
+    if [ -n "$capacity_warnings" ]; then
+        printf '%s\n' 'Host capacity warning:'
+        while IFS= read -r line; do
+            [ -n "$line" ] && printf '  %s\n' "$line"
+        done <<<"$capacity_warnings"
+    fi
     certificate="${FORTIFY_HOME_K8S:-.}/certs/tls.crt"
     if command -v openssl >/dev/null 2>&1 && [ -r "$certificate" ]; then
         printf 'Lab TLS certificate: '
