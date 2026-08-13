@@ -182,6 +182,16 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn("Lab hostnames resolve to loopback", wizard)
         self.assertIn("ip=$(lab_node_ip)", wizard)
 
+    def test_create_secrets_configures_microk8s_ingress_default_tls(self) -> None:
+        create_secrets = (ROOT / "scripts" / "create-secrets.sh").read_text(encoding="utf-8")
+        self.assertIn("configure_microk8s_ingress_default_tls()", create_secrets)
+        self.assertIn("--default-ssl-certificate", create_secrets)
+        self.assertIn('cert_ref="$NAMESPACE/tls"', create_secrets)
+        tls_create = create_secrets.index('create secret tls tls')
+        tls_hook = create_secrets.index('configure_microk8s_ingress_default_tls', tls_create)
+        self.assertLess(tls_create, tls_hook)
+        self.assertIn("TRAEFIK DEFAULT CERT", create_secrets)
+
     def test_registry_credentials_refresh_before_image_pull_steps(self) -> None:
         wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
         create_secrets = (ROOT / "scripts" / "create-secrets.sh").read_text(encoding="utf-8")
