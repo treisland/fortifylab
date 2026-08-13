@@ -147,6 +147,19 @@ app_url_for_index() {
     printf '%s\n' "${!variable:-}"
 }
 
+app_url_display_for_index() {
+    local idx="$1" variable="" value=""
+    variable="${APP_URL_VAR[$idx]:-}"
+    [ -n "$variable" ] || return 0
+    value=$(app_url_for_index "$idx")
+    [ -n "$value" ] || return 0
+    if [[ "$value" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+        printf '<invalid: %s=%s>\n' "$variable" "$value"
+    else
+        printf '%s\n' "$value"
+    fi
+}
+
 
 # ============================================================
 # Status checks (cheap; called every menu render)
@@ -403,7 +416,7 @@ app_action_menu() {
     while true; do
         title "${APP_LABEL[$idx]}"
         local url=""
-        url=$(app_url_for_index "$idx")
+        url=$(app_url_display_for_index "$idx")
 
         echo
         printf '  Status: %s\n' "$(app_status "${APP_PODS[$idx]}")"
@@ -428,7 +441,9 @@ app_action_menu() {
 
         case "$choice" in
             1)
-                run_app_scripts "${APP_START[$idx]}"
+                if app_start_config_guard "$idx"; then
+                    run_app_scripts "${APP_START[$idx]}"
+                fi
                 press_any ;;
             2)
                 run_app_scripts "${APP_STOP[$idx]}"
@@ -467,7 +482,7 @@ scale_workers() {
 
 show_app_creds() {
     local idx="$1" url=""
-    url=$(app_url_for_index "$idx")
+    url=$(app_url_display_for_index "$idx")
     section "${APP_LABEL[$idx]}"
     [ -n "$url" ] && printf '  URL: %s\n' "$url"
     case "${APP_LABEL[$idx]}" in
@@ -1489,6 +1504,95 @@ env_valid_domain() {
     [[ "$1" =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)+$ ]]
 }
 
+env_url_host() {
+    local url="$1"
+    printf '%s\n' "$url" | sed -n -E 's#^https://([^/:]+)([:/].*)?$#\1#p'
+}
+
+env_config_issue_lines() {
+    local issue=0 key value url_key host_key host url_host
+    if [ -z "${DOMAIN:-}" ] || ! env_valid_domain "${DOMAIN:-}"; then
+        printf 'DOMAIN must be a lowercase DNS-style domain such as fortifydemo.com.\n'
+        issue=1
+    fi
+    for key in SSC LIM SCDAST SCSAST; do
+        value="${!key:-}"
+        if [ -z "$value" ]; then
+            printf '%s is unset.\n' "$key"
+            issue=1
+        elif [[ "$value" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+            printf '%s is set to placeholder-like value %s; expected a hostname such as %s.%s.\n' "$key" "$value" "${key,,}" "${DOMAIN:-fortifydemo.com}"
+            issue=1
+        elif ! env_valid_domain "$value"; then
+            printf '%s must be a lowercase DNS hostname with at least one dot; current value is %s.\n' "$key" "$value"
+            issue=1
+        fi
+    done
+    for pair in SSC_URL:SSC LIM_URL:LIM SCDAST_URL:SCDAST SCSAST_URL:SCSAST SCSAST_CTRL_URL:SCSAST; do
+        url_key="${pair%%:*}"
+        host_key="${pair#*:}"
+        value="${!url_key:-}"
+        host="${!host_key:-}"
+        if [ -z "$value" ]; then
+            printf '%s is unset.\n' "$url_key"
+            issue=1
+            continue
+        fi
+        if [[ "$value" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+            printf '%s is set to placeholder-like value %s; expected https://%s.\n' "$url_key" "$value" "${host:-<host>}"
+            issue=1
+            continue
+        fi
+        url_host=$(env_url_host "$value")
+        if [ -z "$url_host" ]; then
+            printf '%s must be an https URL; current value is %s.\n' "$url_key" "$value"
+            issue=1
+        elif [ -n "$host" ] && [ "$url_host" != "$host" ]; then
+            printf '%s host %s does not match %s=%s.\n' "$url_key" "$url_host" "$host_key" "$host"
+            issue=1
+        fi
+    done
+    [ "$issue" -eq 0 ]
+}
+
+env_config_valid() {
+    [ -z "$(env_config_issue_lines)" ]
+}
+
+deployment_config_guard() {
+    local issues
+    issues=$(env_config_issue_lines)
+    [ -z "$issues" ] && return 0
+    error "Configuration has invalid host or URL values; deployment is blocked before Kubernetes changes."
+    printf '%s\n' "$issues" | awk '{ printf "  - %s\n", $0 }'
+    printf '%s\n' 'Use Configuration editor -> Repair derived host and URL values from DOMAIN, or edit .env manually, then retry.'
+    return 1
+}
+
+app_start_config_guard() {
+    local idx="$1" step="${APP_GUIDED_STEP[$idx]:-}"
+    case "$step" in
+        ssc|lim|sast|dast) deployment_config_guard ;;
+        *) return 0 ;;
+    esac
+}
+
+env_repair_domain_urls() {
+    local domain updates=()
+    domain="${DOMAIN:-fortifydemo.com}"
+    domain="${domain,,}"
+    env_valid_domain "$domain" || { error "Cannot repair from invalid DOMAIN=${DOMAIN:-<unset>}. Set DOMAIN to a lowercase DNS-style domain first."; return 1; }
+    while IFS= read -r line; do updates+=("$line"); done < <(domain_url_updates "$domain")
+    section "Repair derived host and URL values"
+    env_preview_changes "${updates[@]}"
+    echo
+    if confirm "Apply these repaired values with a backup first?"; then
+        env_apply_updates repair-domain-url "${updates[@]}"
+    else
+        note "Repair cancelled."
+    fi
+}
+
 domain_url_updates() {
     local domain="$1"
     printf '%s\n' \
@@ -1627,10 +1731,11 @@ edit_env() {
   3. Image/chart versions
   4. Credentials and passwords
   5. Domain and URL assistant
-  6. mkcert root CA export and trust help
-  7. Roll back last wizard .env change
-  8. Restore selected .env backup
-  9. Open raw .env in editor (backup first)
+  6. Repair derived host and URL values from DOMAIN
+  7. mkcert root CA export and trust help
+  8. Roll back last wizard .env change
+  9. Restore selected .env backup
+  10. Open raw .env in editor (backup first)
 
   r. Return
 EOF
@@ -1642,10 +1747,11 @@ EOF
             3) env_guided_section_editor "Image/chart versions" versions ;;
             4) env_guided_section_editor "Credentials and passwords" credentials ;;
             5) domain_url_assistant ;;
-            6) mkcert_root_ca_menu ;;
-            7) env_rollback_last; press_any ;;
-            8) env_restore_selected; press_any ;;
-            9) raw_edit_env; press_any ;;
+            6) env_repair_domain_urls; press_any ;;
+            7) mkcert_root_ca_menu ;;
+            8) env_rollback_last; press_any ;;
+            9) env_restore_selected; press_any ;;
+            10) raw_edit_env; press_any ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
         esac
@@ -2073,6 +2179,7 @@ prereqs_complete() {
 
 inputs_complete() {
     [ -s "$ENV_FILE" ] || return 1
+    env_config_valid || return 1
     ( source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh" &&
       fortify_resolve_license_file ) >/dev/null 2>&1
 }
@@ -2727,10 +2834,10 @@ run_deployment_operation() {
         secrets) bash "$FORTIFY_HOME_K8S/scripts/create-secrets.sh" ;;
         mysql) run_app_scripts "apps/mysql/start.sh" ;;
         postgresql) run_app_scripts "apps/postgresql/start.sh" ;;
-        ssc) run_app_scripts "apps/ssc/start.sh" ;;
-        lim) run_app_scripts "apps/lim/start.sh" ;;
-        sast) run_app_scripts "apps/scsast/start.sh" ;;
-        dast) run_app_scripts "apps/scdast/core/start.sh apps/scdast/scanner/start.sh" ;;
+        ssc) deployment_config_guard && run_app_scripts "apps/ssc/start.sh" ;;
+        lim) deployment_config_guard && run_app_scripts "apps/lim/start.sh" ;;
+        sast) deployment_config_guard && run_app_scripts "apps/scsast/start.sh" ;;
+        dast) deployment_config_guard && run_app_scripts "apps/scdast/core/start.sh apps/scdast/scanner/start.sh" ;;
         configure) configure_menu ;;
         *) error "Unknown deployment operation: $operation"; return 1 ;;
     esac

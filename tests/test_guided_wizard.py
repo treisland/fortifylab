@@ -260,6 +260,40 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("LIM=https://lim.example.test", result.stdout)
         self.assertNotIn("SSC=LIM_URL", result.stdout)
 
+    def test_app_url_display_marks_placeholder_url_values_invalid(self) -> None:
+        result = self.run_wizard_functions(
+            'SSC_URL=LIM_URL; printf "%s\n" "$(app_url_display_for_index 2)"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("<invalid: SSC_URL=LIM_URL>", result.stdout)
+
+    def test_config_validation_flags_placeholder_host_and_url_drift(self) -> None:
+        result = self.run_wizard_functions(
+            'DOMAIN=fortifydemo.com; SSC=LIM; LIM=lim.fortifydemo.com; '
+            'SCDAST=dast.fortifydemo.com; SCSAST=sast.fortifydemo.com; '
+            'SSC_URL=LIM_URL; LIM_URL=https://lim.fortifydemo.com; '
+            'SCDAST_URL=https://dast.fortifydemo.com; SCSAST_URL=https://sast.fortifydemo.com; '
+            'SCSAST_CTRL_URL=https://sast.fortifydemo.com/scancentral-ctrl/; '
+            'if deployment_config_guard; then printf BAD; else printf BLOCKED; fi'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("BLOCKED", result.stdout)
+        self.assertIn("SSC is set to placeholder-like value LIM", result.stdout)
+        self.assertIn("SSC_URL is set to placeholder-like value LIM_URL", result.stdout)
+        self.assertIn("Repair derived host and URL values from DOMAIN", result.stdout)
+
+    def test_repair_domain_urls_rewrites_bad_derived_values_with_backup(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=\"fortifydemo.com\"" "export SSC=\"LIM\"" "export SSC_URL=\"LIM_URL\"" >"$ENV_FILE"; '
+            'source "$ENV_FILE"; confirm() { return 0; }; env_repair_domain_urls >/dev/null; '
+            'source "$ENV_FILE"; printf "%s|%s|%s|%s\n" "$SSC" "$SSC_URL" "$LIM" "$LIM_URL"; '
+            'test -f "$FORTIFY_HOME_K8S/.env.rollback" && printf "ROLLBACK"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ssc.fortifydemo.com|https://ssc.fortifydemo.com|lim.fortifydemo.com|https://lim.fortifydemo.com", result.stdout)
+        self.assertIn("ROLLBACK", result.stdout)
+
     def test_lab_hosts_resolution_warns_when_dns_points_at_proxy_endpoint(self) -> None:
         result = self.run_wizard_functions(
             'DOMAIN=example.test; lab_node_ip() { printf "10.0.0.5"; }; '
