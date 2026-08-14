@@ -392,6 +392,26 @@ exit 1
             with self.subTest(expected=expected):
                 self.assertIn(expected, wizard)
 
+
+    def test_wizard_python_bridge_flags_and_audit_are_documented(self) -> None:
+        wizard = read_wizard_source(ROOT)
+        usage = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        for expected in (
+            "wizard_python_bridge_mode()",
+            "wizard_python_bridge_enabled()",
+            "wizard_python_bridge_audit()",
+            "python_diagnostics_bundle_available()",
+            "wizard_create_diagnostics_bundle()",
+            "python_logs_select_prefix()",
+            "FORTIFY_WIZARD_PYTHON_BRIDGE",
+            "FORTIFY_WIZARD_PYTHON_CONFIG",
+            "FORTIFY_WIZARD_PYTHON_DIAGNOSTICS",
+            "FORTIFY_WIZARD_PYTHON_LOGS",
+        ):
+            with self.subTest(expected=expected):
+                self.assertTrue(expected in wizard or expected in usage)
+        self.assertIn("Wizard Python bridge status", wizard)
+
     def test_fcli_tools_menu_is_warning_only_and_version_pinned(self) -> None:
         wizard = read_wizard_source(ROOT)
         environment = (ROOT / ".env.example").read_text(encoding="utf-8")

@@ -1386,6 +1386,33 @@ pod_log_action_menu() {
     done
 }
 
+
+python_diagnostics_bundle_available() {
+    wizard_python_feature_available diagnostics
+}
+
+python_create_diagnostics_bundle() {
+    local output_dir="$1"
+    python_diagnostics_bundle_available || return 1
+    wizard_python_bridge_run diagnostics doctor --bundle-dir "$output_dir" | awk -F': ' '/Diagnostics bundle:/ { print $2 }'
+}
+
+wizard_create_diagnostics_bundle() {
+    local output_dir="$1" bundle
+    if python_diagnostics_bundle_available; then
+        bundle=$(python_create_diagnostics_bundle "$output_dir") && [ -n "$bundle" ] && { printf '%s\n' "$bundle"; return 0; }
+        wizard_python_bridge_required diagnostics && return 1
+    fi
+    operational_create_diagnostics_bundle "$output_dir"
+}
+
+python_logs_select_prefix() {
+    local prefix="$1"; shift
+    local pods_csv decision pod line
+    pods_csv=$(IFS=,; printf '%s' "$*")
+    wizard_python_bridge_run logs logs --select-prefix "$prefix" --pods "$pods_csv" || return 1
+}
+
 logs_menu() {
     title "Pod logs"
     if ! cluster_reachable; then
@@ -1398,8 +1425,20 @@ logs_menu() {
 }
 
 logs_for_prefix() {
-    local prefix="$1" pods=()
+    local prefix="$1" pods=() decision="" pod="" line
     mapfile -t pods < <(k8s_resource_names pod "" "$prefix")
+    if wizard_python_feature_available logs >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            case "$line" in
+                decision=*) decision="${line#decision=}" ;;
+                pod=*) pod="${line#pod=}" ;;
+            esac
+        done < <(python_logs_select_prefix "$prefix" "${pods[@]}" 2>/dev/null || true)
+        if [ "$decision" = single ] && [ -n "$pod" ]; then
+            pod_log_action_menu "$pod"
+            return
+        fi
+    fi
     case "${#pods[@]}" in
         0)
             note "No pods matching '$prefix' have appeared yet."
@@ -1879,25 +1918,98 @@ env_is_secret_key() {
     esac
 }
 
+
+wizard_python_cli() {
+    printf '%s/bin/fortifylab\n' "${FORTIFY_HOME_K8S:-.}"
+}
+
+wizard_python_bridge_mode() {
+    local feature="$1" upper mode
+    upper=$(printf '%s\n' "$feature" | tr '[:lower:]' '[:upper:]')
+    eval "mode=\${FORTIFY_WIZARD_PYTHON_${upper}:-\${FORTIFY_WIZARD_PYTHON_BRIDGE:-auto}}"
+    case "$mode" in
+        auto|off|force) printf '%s\n' "$mode" ;;
+        *) printf '%s\n' auto ;;
+    esac
+}
+
+wizard_python_base_available() {
+    command -v python3 >/dev/null 2>&1 && [ -x "$(wizard_python_cli)" ]
+}
+
+wizard_python_bridge_enabled() {
+    local feature="$1" mode
+    mode=$(wizard_python_bridge_mode "$feature")
+    case "$mode" in
+        off) return 1 ;;
+        force)
+            wizard_python_base_available || { error "Python bridge for $feature is forced but bin/fortifylab is unavailable."; return 1; }
+            return 0 ;;
+        *) wizard_python_base_available ;;
+    esac
+}
+
+wizard_python_bridge_required() {
+    [ "$(wizard_python_bridge_mode "$1")" = force ]
+}
+
+wizard_python_feature_available() {
+    local feature="$1"
+    wizard_python_bridge_enabled "$feature" || return 1
+    case "$feature" in
+        config) [ -s "${ENV_FILE:-}" ] ;;
+        *) return 0 ;;
+    esac
+}
+
+wizard_python_bridge_run() {
+    local feature="$1"; shift
+    wizard_python_feature_available "$feature" || return 1
+    "$(wizard_python_cli)" "$@"
+}
+
+wizard_python_bridge_engine() {
+    local feature="$1"
+    if wizard_python_feature_available "$feature" >/dev/null 2>&1; then
+        printf 'python\n'
+    elif wizard_python_bridge_required "$feature"; then
+        printf 'python-required-missing\n'
+    else
+        printf 'bash\n'
+    fi
+}
+
+wizard_python_bridge_audit() {
+    title "Wizard Python bridge status"
+    printf '\n  Global mode:      %s\n' "${FORTIFY_WIZARD_PYTHON_BRIDGE:-auto}"
+    printf '  Python CLI:       %s\n' "$(wizard_python_cli)"
+    if wizard_python_base_available; then
+        printf '  Python runtime:   available\n'
+    else
+        printf '  Python runtime:   unavailable\n'
+    fi
+    for feature in config diagnostics logs; do
+        printf '  %-16s mode=%-6s engine=%s\n' "$feature" "$(wizard_python_bridge_mode "$feature")" "$(wizard_python_bridge_engine "$feature")"
+    done
+}
+
 python_config_available() {
-    command -v python3 >/dev/null 2>&1 &&
-        [ -x "${FORTIFY_HOME_K8S:-.}/bin/fortifylab" ] &&
-        [ -s "${ENV_FILE:-}" ]
+    wizard_python_feature_available config
 }
 
 python_config_diagnostics() {
     python_config_available || return 1
-    "${FORTIFY_HOME_K8S:-.}/bin/fortifylab" config diagnostics --env "$ENV_FILE"
+    wizard_python_bridge_run config config diagnostics --env "$ENV_FILE"
 }
 
 python_config_validate() {
     python_config_available || return 1
-    "${FORTIFY_HOME_K8S:-.}/bin/fortifylab" config validate --env "$ENV_FILE"
+    wizard_python_bridge_run config config validate --env "$ENV_FILE"
 }
 
 python_config_repair_domain_urls() {
     python_config_available || return 1
-    "${FORTIFY_HOME_K8S:-.}/bin/fortifylab" config repair-derived --env "$ENV_FILE" --apply
+    wizard_python_bridge_run config config repair-derived --env "$ENV_FILE" --apply
 }
 
 env_display_value() {
@@ -2186,6 +2298,9 @@ env_config_valid() {
 
 deployment_config_guard() {
     local issues
+    if ! python_config_available && wizard_python_bridge_required config; then
+        return 1
+    fi
     if python_config_available; then
         python_config_validate && return 0
         printf '%s\n' 'Use Configuration editor -> Repair derived host and URL values from DOMAIN, or edit .env manually, then retry.'
@@ -2213,9 +2328,12 @@ app_start_config_guard() {
 
 env_repair_domain_urls() {
     local assume_yes="${1:-}" domain updates=()
-    if [ "$assume_yes" = "--yes" ] && python_config_available; then
-        python_config_repair_domain_urls
-        return $?
+    if [ "$assume_yes" = "--yes" ]; then
+        if python_config_available; then
+            python_config_repair_domain_urls
+            return $?
+        fi
+        wizard_python_bridge_required config && return 1
     fi
     domain="${DOMAIN:-fortifydemo.com}"
     domain="${domain,,}"
@@ -2237,6 +2355,7 @@ env_diagnostics() {
         python_config_diagnostics
         return $?
     fi
+    wizard_python_bridge_required config && return 1
     title "Configuration diagnostics"
     printf '\n.env file: %s\n' "$ENV_FILE"
     printf 'DOMAIN:   %s\n' "${DOMAIN:-<unset>}"
@@ -2542,6 +2661,7 @@ operational_guidance_menu() {
   9. Backup and recovery guidance
  10. First-scan walkthrough
  11. Create sanitized diagnostics bundle
+ 12. Wizard Python bridge status
 
   r. Return
 EOF
@@ -2564,7 +2684,7 @@ EOF
                     press_any
                     continue
                 fi
-                if bundle=$(operational_create_diagnostics_bundle "$output_dir"); then
+                if bundle=$(wizard_create_diagnostics_bundle "$output_dir"); then
                     note "Sanitized bundle created: $bundle"
                     note "Review it before sharing; no automated sanitizer can prove all context is safe."
                 else
@@ -2572,6 +2692,7 @@ EOF
                 fi
                 press_any
                 ;;
+            12) wizard_python_bridge_audit; press_any ;;
             [Rr]) return ;;
             *) error "Invalid selection"; sleep 1 ;;
         esac

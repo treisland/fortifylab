@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from fortifylab.core.command import CommandResult
-from fortifylab.operations import OperationCatalog, OperationImpact, OperationKind, OperationRunner, matching_pods, should_skip_selection
+from fortifylab.operations import OperationCatalog, OperationImpact, OperationKind, OperationRunner, log_selection_decision, matching_pods, should_skip_selection
 
 
 class PythonOperationsTests(unittest.TestCase):
@@ -63,6 +63,15 @@ class PythonOperationsTests(unittest.TestCase):
         self.assertEqual(matching_pods(pods, "ssc-webapp"), ("ssc-webapp-0",))
         self.assertTrue(should_skip_selection(pods, "ssc-webapp"))
         self.assertFalse(should_skip_selection(("ssc-webapp-0", "ssc-webapp-1"), "ssc-webapp"))
+
+
+    def test_log_selection_decision_reports_single_multiple_and_none(self) -> None:
+        pods = ("ssc-webapp-0", "ssc-webapp-1", "mysql-0")
+
+        self.assertEqual(log_selection_decision(pods, "mysql").decision, "single")
+        self.assertEqual(log_selection_decision(pods, "ssc-webapp").decision, "multiple")
+        self.assertEqual(log_selection_decision(pods, "lim").decision, "none")
+        self.assertIn("decision=single", log_selection_decision(pods, "mysql").shell_lines())
 
     def test_runbook_renderer_blocks_unknown_topics(self) -> None:
         with self.assertRaises(ValueError):
