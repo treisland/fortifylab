@@ -68,6 +68,8 @@ source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/wizard-logging.sh"
 # shellcheck source=scripts/lib/coredns-lab-hosts.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+# shellcheck source=scripts/lib/tls.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/tls.sh"
 
 
 # ============================================================
@@ -1584,13 +1586,14 @@ certificate_trust_handoff() {
     title "Certificate trust"
     cat <<EOF
 
-  mkcert root CA:
+  Lab CA / chain file:
     ${ROOTCA_CERT:-$FORTIFY_CERTS/rootCA.pem}
 
-  Import the mkcert root CA into each client machine or browser trust store
-  that will access the lab URLs. FortifyLab serves workload TLS from the
-  Kubernetes Secret $NAMESPACE/tls and configures MicroK8s ingress to use it
-  as the default certificate when the installed ingress addon supports that.
+  Import the mkcert root CA, private CA, or public CA chain required by your
+  TLS mode into each client machine or browser trust store that will access
+  the lab URLs. Fortify Lab serves workload TLS from the Kubernetes Secret
+  $NAMESPACE/tls and configures MicroK8s ingress to use it as the default
+  certificate when the installed ingress addon supports that.
 
   Lab hostnames:
     ssc.$DOMAIN
@@ -2930,7 +2933,9 @@ certs_ready() {
     [ -s "$SERVER_CERT" ] && [ -s "$SERVER_KEY" ] &&
         [ -s "$JVM_KEYSTORE" ] && [ -s "$TRUSTSTORE" ] || return 1
     openssl x509 -in "$SERVER_CERT" -noout >/dev/null 2>&1 || return 1
-    openssl rsa -in "$SERVER_KEY" -check -noout >/dev/null 2>&1 || return 1
+    openssl pkey -in "$SERVER_KEY" -noout >/dev/null 2>&1 || return 1
+    fortify_tls_cert_key_match "$SERVER_CERT" "$SERVER_KEY" || return 1
+    fortify_tls_validate_cert_hosts "$SERVER_CERT" >/dev/null 2>&1 || return 1
     keytool -list -keystore "$JVM_KEYSTORE" -storepass "$DEFAULT_PASS" >/dev/null 2>&1 || return 1
     keytool -list -keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" >/dev/null 2>&1 || return 1
 }
