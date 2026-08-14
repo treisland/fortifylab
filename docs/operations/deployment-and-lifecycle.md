@@ -153,6 +153,33 @@ Before any destructive action, identify the exact release and claims, create
 the required recovery artifacts, and verify the confirmation names the data to
 be lost. Never use PVC deletion as routine repair.
 
+## Secure lifecycle management in the web console
+
+The companion web console may display **Security posture**, **Lifecycle
+controls**, **Confirmation preview**, job status, and **Action audit** panels.
+Those panels are operator aids, not an execution contract by themselves. Until a
+reviewed backend action endpoint exists, the web console must remain
+**preview-only**: it may render redacted command previews, impact labels,
+dependency-order guidance, typed confirmation requirements, and graceful
+placeholders for jobs or audit entries, but it must not run lifecycle scripts.
+
+Any future web-triggered lifecycle execution must preserve the same boundaries
+as the wizard and operation runner:
+
+- read-only posture and metadata endpoints remain usable without mutating the
+  lab;
+- mutating actions require an explicit execution endpoint and a durable job
+  record;
+- destructive actions require exact typed confirmation that names the affected
+  component or data;
+- command previews and audit displays redact secrets, private keys, licenses,
+  token values, and operator environment values;
+- audit records must identify the requested action, confirmation result, job
+  state, timestamp, and redaction status without storing sensitive output.
+
+Use [web console manual test notes](web-console-manual-tests.md) to validate the
+preview-only lifecycle UX before enabling any action execution path.
+
 ## Upgrade boundary
 
 This lab is not a production upgrade system. Compare configured chart, image,

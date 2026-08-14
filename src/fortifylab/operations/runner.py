@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
-from fortifylab.core.command import CommandResult, run_command
+from fortifylab.core.command import CommandResult, redact_text, run_command
 from fortifylab.runtime import write_runtime_log
 
 from .catalog import OperationImpact, OperationSpec
@@ -31,11 +31,14 @@ class OperationExecution:
     timed_out: bool = False
     log_file: str | None = None
 
+    def summary(self, *, limit: int = 1200) -> str:
+        return summarize_output(self.detail, limit=limit)
+
 
 class OperationRunner:
     def __init__(self, runner: Runner | None = None, *, timeout: float = 600) -> None:
-        self.runner = runner or self._default_runner
         self.timeout = timeout
+        self.runner = runner or (lambda command: self._default_runner(command, timeout=self.timeout))
 
     def run(self, spec: OperationSpec, *, execute: bool = False, confirmation: str | None = None) -> OperationExecution:
         if spec.mutates and not execute:
@@ -50,7 +53,9 @@ class OperationRunner:
         except OSError as exc:
             result = CommandResult(spec.command, 127, "", str(exc), 0)
         ended = datetime.now(timezone.utc).isoformat()
-        detail = result.stdout if result.ok else result.stderr or result.stdout
+        stdout = redact_text(result.stdout)
+        stderr = redact_text(result.stderr)
+        detail = summarize_output(stdout if result.ok else stderr or stdout)
         write_runtime_log(f"operation {spec.operation_id} completed returncode={result.returncode}", event="operation.end")
         return OperationExecution(
             operation_id=spec.operation_id,
@@ -62,12 +67,20 @@ class OperationRunner:
             ended_at=ended,
             duration_seconds=result.duration_seconds,
             returncode=result.returncode,
-            stdout=result.stdout,
-            stderr=result.stderr,
+            stdout=stdout,
+            stderr=stderr,
             timed_out=result.timed_out,
             log_file=str(log_file),
         )
 
     @staticmethod
-    def _default_runner(command: tuple[str, ...]) -> CommandResult:
-        return run_command(command, timeout=600)
+    def _default_runner(command: tuple[str, ...], *, timeout: float = 600) -> CommandResult:
+        return run_command(command, timeout=timeout)
+
+
+def summarize_output(text: str, *, limit: int = 1200) -> str:
+    redacted = redact_text(text).strip()
+    if len(redacted) <= limit:
+        return redacted
+    omitted = len(redacted) - limit
+    return f"{redacted[:limit].rstrip()}\n... <{omitted} characters omitted>"

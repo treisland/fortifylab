@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from fortifylab.diagnostics import route_findings
-from fortifylab.operations import OperationCatalog
+from fortifylab.operations import OperationJobManager, OperationJobRequest
+from fortifylab.operations.previews import ActionPreviewCatalog
 from fortifylab.status import LiveDeploymentSnapshot, LiveState, LiveStatusPoller, LiveStepStatus, build_service_registry, service_health_payload
 from fortifylab.tui.profiles import LOG_SCOPES, build_profile
+from fortifylab.web.security import ActionSecurityMode
 from fortifylab.web.support import SupportInspector
 
 
@@ -21,6 +23,7 @@ class WebConsoleConfig:
     access_token: str | None = None
     allow_lan: bool = False
     env_file: Path | None = None
+    enable_actions: bool = False
 
     def validate(self) -> tuple[str, ...]:
         issues: list[str] = []
@@ -39,12 +42,14 @@ class WebConsoleApp:
         status_poller: Any | None = None,
         url_health_checker: Any | None = None,
         support_inspector: SupportInspector | None = None,
+        operation_jobs: OperationJobManager | None = None,
     ) -> None:
         self.config = config
         self.static_dir = static_dir or Path(__file__).with_name("static")
         self.status_poller = status_poller
         self.url_health_checker = url_health_checker
         self.support_inspector = support_inspector
+        self.operation_jobs = operation_jobs or OperationJobManager()
 
     def is_local_only(self) -> bool:
         return self.config.bind_host in ("127.0.0.1", "localhost")
@@ -59,14 +64,40 @@ class WebConsoleApp:
 
     def api_response(self, path: str) -> tuple[int, dict[str, Any]]:
         if path == "/api/status":
-            operations = OperationCatalog().list()
             return 200, {
                 "mode": "lab",
+                "security": self.action_security_payload(),
                 "operations": [
-                    {"id": spec.operation_id, "kind": spec.kind.value, "impact": spec.impact.value}
-                    for spec in operations
+                    {"id": item["id"], "kind": item["kind"], "impact": item["impact"]}
+                    for item in self.operation_jobs.operation_payloads()
                 ],
             }
+        if path == "/api/security/posture":
+            return 200, self.security_posture_payload()
+        if path == "/api/lifecycle/actions":
+            return 200, self.lifecycle_actions_payload()
+        if path == "/api/lifecycle/audit":
+            return 200, self.lifecycle_audit_payload()
+        if path == "/api/actions":
+            return 200, self.action_catalog_payload()
+        if path.startswith("/api/actions/"):
+            operation_id = path.removeprefix("/api/actions/")
+            preview = self._action_preview_catalog().get(operation_id)
+            if preview is None:
+                return 404, {"error": "action not found"}
+            return 200, {"security": self.action_security_payload(), "action": preview.to_dict()}
+        if path == "/api/operations":
+            return 200, {"operations": self.operation_jobs.operation_payloads()}
+        if path == "/api/operations/jobs":
+            return 200, {"jobs": [job.to_api_dict() for job in self.operation_jobs.list_jobs()]}
+        if path.startswith("/api/operations/jobs/"):
+            job_id = path.rsplit("/", 1)[-1]
+            job = self.operation_jobs.get_job(job_id)
+            if job is None:
+                return 404, {"error": "not found"}
+            return 200, {"job": job.to_api_dict()}
+        if path == "/api/operations/audit":
+            return 200, {"entries": [entry.to_api_dict() for entry in self.operation_jobs.audit_entries()]}
         if path == "/api/deployment/status":
             snapshot = self._snapshot()
             payload = snapshot.to_dict()
@@ -94,6 +125,34 @@ class WebConsoleApp:
             return 200, self._support_inspector(snapshot).certificate_payload(snapshot)
         return 404, {"error": "not found"}
 
+    def api_mutation_response(self, path: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        if path == "/api/operations/jobs":
+            try:
+                request = OperationJobRequest.from_payload(payload)
+                job, created = self.operation_jobs.submit(request)
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
+            return (202 if created else 200), {"job": job.to_api_dict(), "created": created}
+        return 404, {"error": "not found"}
+
+    def action_security_payload(self) -> dict[str, Any]:
+        return ActionSecurityMode(enable_actions=self.config.enable_actions).to_dict()
+
+    def action_catalog_payload(self) -> dict[str, Any]:
+        previews = self._action_preview_catalog().list()
+        return {
+            "security": self.action_security_payload(),
+            "confirmation_contract": {
+                "comparison": "exact",
+                "case_sensitive": True,
+                "field": "confirmation_phrase",
+            },
+            "actions": [preview.to_dict() for preview in previews],
+        }
+
+    def _action_preview_catalog(self) -> ActionPreviewCatalog:
+        return ActionPreviewCatalog(enable_actions=self.config.enable_actions)
+
     def _snapshot(self) -> LiveDeploymentSnapshot:
         poller = self.status_poller or LiveStatusPoller()
         return poller.snapshot()
@@ -112,6 +171,53 @@ class WebConsoleApp:
     def service_health_payload(self) -> dict[str, Any]:
         snapshot = self._snapshot()
         return service_health_payload(self._service_registry(), checker=self.url_health_checker, snapshot=snapshot)
+
+    def security_posture_payload(self) -> dict[str, Any]:
+        return {
+            "console": {
+                "bind_host": self.config.bind_host,
+                "local_only": self.is_local_only(),
+                "lan_access": self.config.allow_lan,
+                "token_required": bool(self.config.access_token),
+            },
+            "actions": self.action_security_payload(),
+            "boundaries": [
+                "Lifecycle execution is disabled unless the console is started with action execution enabled.",
+                "Mutating operations require an explicit backend action endpoint before they can run.",
+                "Destructive operations require exact typed confirmation and recovery review.",
+                "Secrets, private keys, licenses, and token values are never returned by the console APIs.",
+            ],
+        }
+
+    def lifecycle_actions_payload(self) -> dict[str, Any]:
+        action_payload = self.action_catalog_payload()
+        execute_enabled = bool(action_payload["security"].get("enable_actions"))
+        actions = []
+        for action in action_payload["actions"]:
+            command = action.get("command", [])
+            actions.append({
+                **action,
+                "command_preview": command,
+                "job": {
+                    "state": "not_started",
+                    "message": "No lifecycle job has been submitted from the web console.",
+                },
+            })
+        return {
+            "mode": "actions_enabled" if execute_enabled else "preview_only",
+            "execute_endpoint": "/api/operations/jobs" if execute_enabled else None,
+            "security": action_payload["security"],
+            "confirmation_contract": action_payload["confirmation_contract"],
+            "actions": actions,
+        }
+
+    def lifecycle_audit_payload(self) -> dict[str, Any]:
+        entries = [entry.to_api_dict() for entry in self.operation_jobs.audit_entries()]
+        return {
+            "entries": entries,
+            "placeholder": "Lifecycle audit entries will appear here after backend execution wiring records action requests.",
+            "redaction": "Commands and output are redacted before display.",
+        }
 
     def guided_deployment_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
         profile = build_profile(snapshot.profile)
@@ -225,9 +331,17 @@ class WebConsoleApp:
 
     def api_envelope(self, path: str) -> tuple[int, dict[str, Any]]:
         status, body = self.api_response(path)
+        return self._envelope(status, body)
+
+    def api_mutation_envelope(self, path: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        status, body = self.api_mutation_response(path, payload)
+        return self._envelope(status, body)
+
+    def _envelope(self, status: int, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         if status >= 400:
             code = str(body.get("error", "not_found"))
-            return status, self.error_envelope(code, "API endpoint not found.")
+            message = code if code != "not found" else "API endpoint not found."
+            return status, self.error_envelope(code, message)
         return status, {"ok": True, "data": body, "error": None}
 
     def error_envelope(self, code: str, message: str) -> dict[str, Any]:

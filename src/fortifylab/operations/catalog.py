@@ -52,6 +52,12 @@ class OperationCatalog:
             self.runbook("first-scan"),
         )
 
+    def get(self, operation_id: str) -> OperationSpec:
+        for spec in self.list():
+            if spec.operation_id == operation_id:
+                return spec
+        raise ValueError(f"Unsupported operation: {operation_id}")
+
     def certs(self) -> OperationSpec:
         return OperationSpec("certs.generate", "Generate TLS certificates", OperationKind.CERTIFICATE, self._script("scripts/create-certs.sh"))
 

@@ -223,12 +223,12 @@ p { color: var(--muted); line-height: 1.45; }
 
 .summary-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin-top: 16px;
 }
 
-.summary-card, .timeline-column, .workspace-panel, .launchpad-panel, .side-panel {
+.summary-card, .timeline-column, .workspace-panel, .launchpad-panel, .lifecycle-panel, .side-panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -255,11 +255,12 @@ p { color: var(--muted); line-height: 1.45; }
   margin-top: 16px;
 }
 
-.timeline-column, .workspace-panel, .launchpad-panel, .side-panel { padding: 16px; }
+.timeline-column, .workspace-panel, .launchpad-panel, .lifecycle-panel, .side-panel { padding: 16px; }
 .timeline-column { min-height: 620px; position: sticky; top: 16px; }
 .workspace-column { display: grid; gap: 16px; min-width: 0; }
 .workspace-panel { min-height: 390px; }
 .launchpad-panel { min-height: 216px; }
+.lifecycle-panel { min-height: 260px; }
 .evidence-column { display: grid; gap: 16px; min-width: 0; }
 .side-panel { min-height: 160px; }
 
@@ -346,15 +347,15 @@ p { color: var(--muted); line-height: 1.45; }
 .metric span { color: var(--subtle); font-size: 11px; font-weight: 760; text-transform: uppercase; }
 .metric strong { display: block; margin-top: 8px; color: var(--heading); font-size: 24px; line-height: 1; }
 
-.card-list, .service-grid { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 10px; }
-.card-row, .service-card {
+.card-list, .service-grid, .action-list, .compact-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 10px; }
+.card-row, .service-card, .action-card, .confirmation-box, .job-box {
   border: 1px solid var(--line-soft);
   background: var(--panel-3);
   border-radius: 6px;
   padding: 11px;
   min-width: 0;
 }
-.card-row { display: grid; gap: 7px; }
+.card-row, .action-card, .confirmation-box, .job-box { display: grid; gap: 7px; }
 .row-main { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
 .row-main strong, .service-card strong { color: var(--heading); overflow-wrap: anywhere; }
 .row-main span, .mono { color: var(--muted); font-family: ui-monospace, "Cascadia Mono", "SFMono-Regular", monospace; font-size: 12px; overflow-wrap: anywhere; }
@@ -365,6 +366,56 @@ p { color: var(--muted); line-height: 1.45; }
 .service-card a { color: var(--accent-2); font-weight: 650; text-decoration: none; overflow-wrap: anywhere; }
 .service-card a:hover { text-decoration: underline; }
 .service-meta { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.lifecycle-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.action-list { margin-top: 0; }
+.job-box { grid-column: 2; }
+
+.compact-list li {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 9px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--panel-3);
+}
+
+.confirmation-label {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.confirmation-box input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 10px;
+  color: var(--heading);
+  background: var(--surface);
+  font: inherit;
+}
+
+.disabled-action {
+  width: fit-content;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 9px 12px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font: inherit;
+  font-weight: 740;
+  cursor: not-allowed;
+}
 
 .uptime-strip {
   display: grid;
@@ -417,7 +468,8 @@ dd { margin: 6px 0 0; color: var(--heading); overflow-wrap: anywhere; }
   .topbar-actions { align-items: flex-start; width: 100%; }
   .theme-switch { width: 100%; }
   .theme-switch button { flex: 1; }
-  .summary-strip, .console-grid, .evidence-column, .metric-grid, .service-grid { grid-template-columns: 1fr; }
+  .summary-strip, .console-grid, .evidence-column, .metric-grid, .service-grid, .lifecycle-layout { grid-template-columns: 1fr; }
+  .job-box { grid-column: auto; }
   .timeline-column, .workspace-panel { min-height: auto; }
   .focus-header { flex-direction: column; }
 }

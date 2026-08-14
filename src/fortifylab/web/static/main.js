@@ -15,6 +15,9 @@ const store = {
   routes: null,
   services: null,
   serviceHealth: null,
+  securityPosture: null,
+  lifecycleActions: null,
+  lifecycleAudit: null,
 };
 
 function headers() {
@@ -151,6 +154,8 @@ function renderSummary() {
   setText("summary-profile", deployment.profile || guide.profile || "pending");
   setText("summary-namespace", deployment.namespace || "not reported");
   setText("summary-operations", String((statusData.operations || []).length));
+  const posture = store.securityPosture?.actions;
+  setText("summary-security", posture ? pretty(posture.mode) : "preview");
   renderRefreshCadence();
 }
 
@@ -338,6 +343,92 @@ function renderCertificates(data) {
     </dl>`;
 }
 
+function renderSecurityPosture(data) {
+  const actions = data.actions || {};
+  const consolePosture = data.console || {};
+  const boundaries = data.boundaries || [];
+  setText("security-mode", actions.read_only ? "Read only" : pretty(actions.mode || "unknown"));
+  target("security").innerHTML = `
+    <dl class="dl-grid">
+      <div><dt>Bind</dt><dd>${escapeHtml(consolePosture.bind_host || "not reported")}</dd></div>
+      <div><dt>Access</dt><dd>${consolePosture.local_only ? "local only" : consolePosture.lan_access ? "LAN mode" : "not reported"}</dd></div>
+      <div><dt>Token</dt><dd>${consolePosture.token_required ? "required" : "local trust boundary"}</dd></div>
+    </dl>
+    ${boundaries.length ? `<ul class="compact-list">${boundaries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : empty("No security boundaries reported.")}`;
+}
+
+function fallbackLifecycleActions() {
+  const operations = store.status?.operations || [];
+  return {
+    mode: "preview_only",
+    execute_endpoint: null,
+    actions: operations.map((operation) => ({
+      id: operation.id,
+      label: operation.id,
+      kind: operation.kind,
+      impact: operation.impact,
+      mutates: operation.impact !== "read-only",
+      warning: "Backend action preview endpoint is not available yet.",
+      command_preview: [],
+      confirmation: { required: operation.impact === "destructive", phrase: operation.impact === "destructive" ? "shown by backend before execution" : null },
+      job: { state: "not_started", message: "Preview only; no job endpoint is available." },
+    })),
+  };
+}
+
+function renderLifecycleActions(data) {
+  const payload = data || fallbackLifecycleActions();
+  const actions = payload.actions || [];
+  setText("lifecycle-mode", payload.mode ? pretty(payload.mode) : "Preview only");
+  if (!actions.length) {
+    target("lifecycle").innerHTML = empty("No lifecycle actions are available for preview yet.");
+    return;
+  }
+  const featured = actions.find((action) => action.confirmation?.required) || actions.find((action) => action.mutates) || actions[0];
+  target("lifecycle").innerHTML = `
+    <div class="lifecycle-layout">
+      <ul class="action-list">${actions.map((action) => renderActionPreview(action)).join("")}</ul>
+      <div class="confirmation-box">
+        <div class="row-main"><strong>Confirmation preview</strong>${pill(featured.impact || "unknown")}</div>
+        <p>${escapeHtml(featured.warning || "Review the command preview, dependency order, and recovery notes before enabling execution.")}</p>
+        <label class="confirmation-label" for="confirmation-preview">Required phrase</label>
+        <input id="confirmation-preview" type="text" value="${escapeHtml(featured.confirmation?.phrase || "No typed phrase required for preview")}" readonly>
+        <code class="command">${actionCommandPreview(featured).length ? escapeHtml(commandLine(actionCommandPreview(featured))) : "Command preview pending backend support."}</code>
+        <button type="button" class="disabled-action" disabled>Execution disabled</button>
+      </div>
+      <div class="job-box">
+        <div class="row-main"><strong>Job status</strong>${pill(featured.job?.state || "not_started")}</div>
+        <p>${escapeHtml(featured.job?.message || "No lifecycle job has been submitted.")}</p>
+      </div>
+    </div>`;
+}
+
+function actionCommandPreview(action) {
+  return action.command_preview || action.command || [];
+}
+
+function renderActionPreview(action) {
+  const confirmation = action.confirmation || {};
+  const commandPreview = actionCommandPreview(action);
+  return `<li class="action-card">
+    <div class="row-main"><strong>${escapeHtml(action.label || action.id || "Lifecycle action")}</strong>${pill(action.impact || "unknown")}</div>
+    <div class="row-note">${escapeHtml(action.kind || "operation")} · ${action.mutates ? "mutating" : "read-only"} · ${confirmation.required ? "typed confirmation required" : "no typed confirmation"}</div>
+    ${commandPreview.length ? `<code class="command">${escapeHtml(commandLine(commandPreview))}</code>` : `<div class="row-note">Command preview will appear when backend metadata is available.</div>`}
+  </li>`;
+}
+
+function renderLifecycleAudit(data) {
+  const entries = data.entries || [];
+  setText("audit-count", `${entries.length} entries`);
+  target("audit").innerHTML = entries.length
+    ? `<ul class="card-list">${entries.slice(0, 6).map((entry) => `
+        <li class="card-row">
+          <div class="row-main"><strong>${escapeHtml(entry.action || "Lifecycle action")}</strong>${pill(entry.state || "unknown")}</div>
+          <div class="row-note">${escapeHtml(entry.timestamp || "time unavailable")} · ${escapeHtml(entry.operator || "operator unknown")}</div>
+        </li>`).join("")}</ul>`
+    : empty(data.placeholder || "No lifecycle audit entries have been recorded yet.");
+}
+
 async function loadPanel(key, path, render) {
   try {
     const data = await loadJson(path);
@@ -345,7 +436,16 @@ async function loadPanel(key, path, render) {
     render(data);
     return true;
   } catch (error) {
-    const panelMap = { config: "configuration", diagnostics: "health", deploymentStatus: "workspace", guide: "deployment", status: "summary-state", routes: "routes" };
+    if (key === "lifecycleActions") {
+      store.lifecycleActions = fallbackLifecycleActions();
+      renderLifecycleActions(store.lifecycleActions);
+      return true;
+    }
+    if (key === "lifecycleAudit") {
+      renderLifecycleAudit({ entries: [], placeholder: "Lifecycle audit endpoint is not available yet." });
+      return true;
+    }
+    const panelMap = { config: "configuration", diagnostics: "health", deploymentStatus: "workspace", guide: "deployment", status: "summary-state", routes: "routes", securityPosture: "security" };
     fail(panelMap[key] || key, error);
     return false;
   }
@@ -366,6 +466,9 @@ async function refreshConsole() {
       loadPanel("routes", "/api/routes", () => {}),
       loadPanel("services", "/api/services", () => {}),
       loadPanel("serviceHealth", "/api/services/health", () => {}),
+      loadPanel("securityPosture", "/api/security/posture", renderSecurityPosture),
+      loadPanel("lifecycleActions", "/api/lifecycle/actions", renderLifecycleActions),
+      loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit),
     ]);
 
     renderSummary();
