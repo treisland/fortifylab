@@ -59,12 +59,17 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(content_type, "text/html")
         for expected in ('data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"'):
             self.assertIn(expected, html)
+        for expected in ('data-theme-choice="system"', 'data-theme-choice="light"', 'data-theme-choice="dark"'):
+            self.assertIn(expected, html)
 
         _, script = WebConsoleApp(WebConsoleConfig()).static_asset("main.js")
         _, styles = WebConsoleApp(WebConsoleConfig()).static_asset("styles.css")
         self.assertIn("/api/services/health", script)
         self.assertIn("refreshIntervalMs = 5000", script)
         self.assertIn("window.setInterval(refreshConsole, refreshIntervalMs)", script)
+        self.assertIn("fortifylab.theme", script)
+        self.assertIn(":root[data-theme=\"dark\"]", styles)
+        self.assertIn("prefers-color-scheme: dark", styles)
         self.assertIn("uptime-strip", styles)
 
     def test_serve_once_returns_static_index(self) -> None:
