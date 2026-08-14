@@ -49,6 +49,21 @@ cp .env.example .env
 ./start_wizard.sh
 ```
 
+### Python CLI preview
+
+Phase 3 introduces a dependency-free Python CLI foundation while the Bash wizard
+remains the supported guided experience. From a cloned repository, preview the
+new command shell with:
+
+```bash
+./bin/fortifylab --help
+./bin/fortifylab --version
+```
+
+The initial Python commands are intentionally lightweight placeholders for
+`doctor`, `config`, `deploy`, `logs`, `runbook`, and `tui`; migration work will
+replace Bash logic in controlled slices while preserving clone-and-run setup.
+
 The first launch displays a Fortify Lab banner with the current version and a
 mandatory **LAB / DEMO USE ONLY** notice. Type `LAB` to acknowledge that this
 repository's architecture and automation are for lab, evaluation, demo, and
