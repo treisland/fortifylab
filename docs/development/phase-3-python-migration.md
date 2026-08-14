@@ -72,6 +72,13 @@ validation, derived host/URL repair, backup metadata, diff preview, and rollback
 The Bash wizard can call the Python config bridge when available and keeps its
 existing Bash implementation as the production fallback during migration.
 
+## Diagnostics engine
+
+Phase 3.5 adds Python diagnostics collectors, route findings, image-pull
+interpretation, and sanitized bundle generation. Collectors are injectable and
+read-only so tests do not need a live Kubernetes cluster; production Bash
+diagnostics remain available while Python diagnostics mature.
+
 ## Entry points
 
 `./start_wizard.sh` remains the friendly command for existing users. As Python
