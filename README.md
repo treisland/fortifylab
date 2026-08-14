@@ -70,7 +70,7 @@ Inside the wizard, the main menu is organized by task:
   prerequisites, license files, certificates/secrets, DNS, SSC token, LIM,
   Dashboard access, and `.env` editing.
 - **Operations:** lab lifecycle controls, logs, cluster snapshot, one-pod logs,
-  URLs and credentials, image versions, Configuration editor, and wizard log.
+  URLs and credentials, Tools and FCLI readiness, image versions, Configuration editor, and wizard log.
 - **Learn:** the Help Center / Fortify Knowledge Center and operational
   guidance.
 
@@ -125,6 +125,14 @@ to **URLs & credentials**. That credential screen lists where lab-generated
 credentials live, can print retrieval commands, and can reveal a single selected
 credential after explicit confirmation. It does not disclose stored passwords or
 tokens by default.
+
+Use **Tools and FCLI readiness** after infrastructure is running to install or
+update Fortify CLI (`fcli`), compare the installed version with
+`FORTIFY_RECOMMENDED_FCLI_VERSION`, and print SSC-first command templates. The
+templates use configured SSC and ScanCentral URLs, include FoD as an optional
+path, and keep every token or client secret as a placeholder. FCLI readiness is
+warning-only for deployment: missing or mismatched FCLI does not block SSC,
+SAST, DAST, or Dashboard profiles.
 
 If a guided operation fails, its screen remains incomplete and offers Retry.
 Fix the reported dependency, retry the same operation, or quit safely and use

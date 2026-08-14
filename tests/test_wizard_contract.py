@@ -356,5 +356,45 @@ exit 1
             self.assertLess(text.index("fortify_require_k8s_hostname"), text.index("microk8s helm"))
 
 
+
+    def test_fcli_tools_menu_is_warning_only_and_version_pinned(self) -> None:
+        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        environment = (ROOT / ".env.example").read_text(encoding="utf-8")
+        self.assertIn('FORTIFY_RECOMMENDED_FCLI_VERSION="3.23.3"', environment)
+        self.assertIn('FORTIFY_FCLI_INSTALL_DIR="$HOME/fortify/tools/bin"', environment)
+        self.assertIn("Tools and FCLI readiness", wizard)
+        self.assertIn("fcli_tools_menu()", wizard)
+        self.assertIn("fcli_install_or_update()", wizard)
+        self.assertIn("FCLI missing; recommended", wizard)
+        self.assertIn("does not block infrastructure deployment", wizard)
+        preflight = wizard.split("preflight_check()", 1)[1].split("deploy_step()", 1)[0]
+        self.assertNotIn("fcli", preflight.lower())
+
+    def test_fcli_command_templates_are_secret_safe(self) -> None:
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            source "$1"
+            DOMAIN=fortifydemo.test
+            SSC_URL=https://ssc.fortifydemo.test
+            SCSAST_CTRL_URL=https://sast.fortifydemo.test/scancentral-ctrl/
+            FORTIFY_SECRET_TOKEN=super-secret-token
+            SCANCENTRAL_CLIENT_AUTH_TOKEN=actual-client-token
+            FOD_CLIENT_SECRET=actual-fod-secret
+            fcli_print_command_templates
+        """
+        output = subprocess.check_output(
+            ["bash", "-c", command, "fcli-template-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+        )
+        self.assertIn("fcli ssc session login", output)
+        self.assertIn("https://ssc.fortifydemo.test", output)
+        self.assertIn("<SSC_TOKEN_OR_PROMPT>", output)
+        self.assertIn("<SCANCENTRAL_CLIENT_AUTH_TOKEN>", output)
+        self.assertIn("FoD optional templates", output)
+        self.assertNotIn("super-secret-token", output)
+        self.assertNotIn("actual-client-token", output)
+        self.assertNotIn("actual-fod-secret", output)
+
 if __name__ == "__main__":
     unittest.main()

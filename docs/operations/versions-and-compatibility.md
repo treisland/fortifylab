@@ -12,3 +12,18 @@ mismatch without explicit data-destruction approval.
 
 “Tested profile” means tested for this lab topology only. It is not a production
 support or compatibility certification.
+
+
+## Fortify CLI
+
+`FORTIFY_RECOMMENDED_FCLI_VERSION` pins the Fortify CLI version used by the
+wizard's **Tools and FCLI readiness** screen. The default follows the current
+Fortify Lab product-version profile, but FCLI remains a client-side tool: it is
+not installed into Kubernetes and is not required for infrastructure deployment
+profiles that only create or operate lab services.
+
+A missing or different `fcli` version is reported as a readiness warning. Update
+the pin when changing Fortify product versions, then use the Tools screen to
+install or update the user-local binary and re-check `fcli --version`. Review
+Fortify's fcli release notes before crossing major versions because command
+options and session behavior can change.
