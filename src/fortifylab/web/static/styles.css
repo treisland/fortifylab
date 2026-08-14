@@ -52,7 +52,7 @@ p, dd, li { color: var(--muted); }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 12px;
   margin-top: 16px;
 }
@@ -111,3 +111,6 @@ li { margin-bottom: 10px; }
   .topbar { align-items: start; flex-direction: column; }
   .grid { grid-template-columns: 1fr; }
 }
+
+.steps { list-style: none; padding-left: 0; }
+.list-row strong { color: var(--text); font-size: 12px; font-weight: 650; }

@@ -25,8 +25,28 @@ function rows(items) {
 }
 
 function renderDeployment(data) {
-  const operations = data.operations || [];
-  target("deployment").innerHTML = rows(operations.map((op) => `${op.id} <span>${op.impact}</span>`));
+  const steps = data.steps || [];
+  target("deployment").innerHTML = steps.length
+    ? `<ol class="steps">${steps.map((step) => `<li class="list-row"><span>${step.index}. ${step.label}</span><strong>${step.state}</strong></li>`).join("")}</ol>`
+    : '<p class="empty">No guided deployment steps reported.</p>';
+}
+
+function renderLogs(data) {
+  const resources = data.resources || [];
+  const commands = [];
+  for (const resource of resources) {
+    for (const pod of resource.pods || []) {
+      commands.push(`${pod.number}. ${pod.name} <span>${pod.recent_command.join(" ")}</span>`);
+    }
+  }
+  target("logs").innerHTML = commands.length ? rows(commands) : '<p class="empty">No pod log options reported yet.</p>';
+}
+
+function renderDiagnostics(data) {
+  const findings = data.findings || [];
+  target("routes").innerHTML = findings.length
+    ? rows(findings.map((finding) => `${finding.step_label}: ${finding.message} <span>${finding.severity}</span>`))
+    : '<p class="empty">No deployment diagnostics reported.</p>';
 }
 
 function renderConfiguration(data) {
@@ -58,22 +78,24 @@ function fail(panel, error) {
 
 async function boot() {
   try {
-    const [status, config, routes, certs] = await Promise.all([
-      loadJson("/api/status"),
+    const [guide, config, diagnostics, logs, certs] = await Promise.all([
+      loadJson("/api/deployment/guide"),
       loadJson("/api/config"),
-      loadJson("/api/routes"),
+      loadJson("/api/deployment/diagnostics"),
+      loadJson("/api/deployment/logs"),
       loadJson("/api/certificates"),
     ]);
-    renderDeployment(status);
+    renderDeployment(guide);
     renderConfiguration(config);
-    renderRoutes(routes);
+    renderDiagnostics(diagnostics);
+    renderLogs(logs);
     renderCertificates(certs);
     state.textContent = "Connected";
     state.dataset.state = "ok";
   } catch (error) {
     state.textContent = "Needs attention";
     state.dataset.state = "error";
-    for (const panel of ["deployment", "configuration", "routes", "certificates"]) {
+    for (const panel of ["deployment", "configuration", "routes", "logs", "certificates"]) {
       fail(panel, error);
     }
   }
