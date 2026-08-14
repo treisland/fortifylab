@@ -134,5 +134,23 @@ class OperationsDocumentationTests(unittest.TestCase):
         self.assertIn("FORTIFY_RECOMMENDED_FCLI_VERSION", versions)
 
 
+    def test_coordinated_multi_node_profile_model_is_documented(self) -> None:
+        guide = (ROOT / "docs" / "operations" / "coordinated-multi-node.md").read_text(encoding="utf-8")
+        nav = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+        for phrase in (
+            "single-machine first",
+            "FORTIFY_CLUSTER_PROFILE",
+            "FORTIFY_CLUSTER_PROFILE_NAMES",
+            "KUBE_CONTEXT",
+            "SSH_HOST",
+            "read-only",
+            "does not copy secrets",
+            "does not create a multi-node Kubernetes cluster",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, guide)
+        self.assertIn("Coordinated multi-node lab: operations/coordinated-multi-node.md", nav)
+
+
 if __name__ == "__main__":
     unittest.main()
