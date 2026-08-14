@@ -47,6 +47,17 @@ Helper functions should return `0` for success and nonzero for failure. Prefer
 `error` for user-facing failures and `wizard_log_event` for operational detail.
 Avoid `exit` inside helpers unless the current process cannot continue.
 
+## Python Migration Bridge
+
+Phase 3 keeps this modular Bash layout as the compatibility surface while new
+application behavior moves into Python. `start_wizard.sh` should stay small and
+continue loading Bash modules until it can launch the Python guided experience
+without breaking existing clone-and-run workflows.
+
+New application logic should prefer `src/fortifylab/`. Bash modules may call
+Python commands only when the Python behavior has tests and preserves the
+operator-facing exit behavior, messages, and safety boundaries.
+
 ## Validation
 
 Before opening a PR for wizard changes, run:
