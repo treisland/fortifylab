@@ -51,6 +51,35 @@ class GuidedWizardTests(unittest.TestCase):
         ):
             self.assertIn(label, WIZARD)
 
+    def test_first_time_welcome_content_orients_beginners_without_secrets(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'mkdir -p "$tmp/scripts/lib" "$tmp/certs"; printf "DOMAIN=lab.example\n" > "$ENV_FILE"; '
+            'printf "%s\n" "fortify_resolve_license_file() { return 1; }" > "$tmp/scripts/lib/fortify-license.sh"; '
+            'DOMAIN=lab.example; GUIDED_DEPLOYMENT_PROFILE_LABEL="SAST full with SSC"; FORTIFYLAB_VERSION=vtest; '
+            'fortifylab_first_time_welcome_content'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for expected in (
+            "FortifyLab vtest",
+            "ready-to-scan Fortify training lab",
+            "Recommended path",
+            "Choose the deployment profile",
+            "Run this wizard as your normal user, not with sudo",
+            "not a production architecture",
+            "Sample applications, when installed, are intentionally vulnerable",
+            "DAST workflows require ScanCentral DAST and WebInspect licenses in LIM",
+            "Helpful locations",
+            ".env.backups",
+            "Wizard log",
+            "Quick environment snapshot",
+            "Domain:          lab.example",
+            "Profile:         SAST full with SSC",
+        ):
+            self.assertIn(expected, result.stdout)
+        self.assertNotIn("DEFAULT_PASS", result.stdout)
+        self.assertNotIn("ControllerToken", result.stdout)
+
     def test_guided_and_express_share_one_operation_dispatcher(self) -> None:
         self.assertIn("run_deployment_operation()", WIZARD)
         self.assertIn('run_deployment_operation "$id"', WIZARD)
