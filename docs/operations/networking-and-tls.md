@@ -59,6 +59,19 @@ openssl s_client -connect LAB_NODE_IP:443 -servername ssc.DOMAIN </dev/null 2>/d
 
 The issuer should be the mkcert development CA, not `TRAEFIK DEFAULT CERT`.
 
+## Web console assistant data
+
+The web console certificate and route APIs expose read-only support evidence for
+operator troubleshooting. They can summarize ingress route hosts, suggested
+client DNS or hosts-file lines, Kubernetes TLS Secret inventory, and whether the
+ingress controller advertises `fortify/tls` as its default certificate. These
+payloads never export private key material and do not edit client hosts files,
+CoreDNS, Secrets, or Traefik settings.
+
+When the console cannot read cluster evidence, the API returns warnings or an
+`unknown` status instead of guessing. Treat host-entry hints as copyable guidance
+for the client machine that opens the lab URLs.
+
 ## Troubleshooting order
 
 Check one layer at a time:

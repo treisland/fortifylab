@@ -9,8 +9,9 @@ from typing import Any
 
 from fortifylab.diagnostics import route_findings
 from fortifylab.operations import OperationCatalog
-from fortifylab.status import LiveDeploymentSnapshot, LiveStatusPoller
-from fortifylab.tui.profiles import build_profile
+from fortifylab.status import LiveDeploymentSnapshot, LiveStatusPoller, build_service_registry, service_health_payload
+from fortifylab.tui.profiles import LOG_SCOPES, build_profile
+from fortifylab.web.support import SupportInspector
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class WebConsoleConfig:
     port: int = 8765
     access_token: str | None = None
     allow_lan: bool = False
+    env_file: Path | None = None
 
     def validate(self) -> tuple[str, ...]:
         issues: list[str] = []
@@ -30,10 +32,19 @@ class WebConsoleConfig:
 
 
 class WebConsoleApp:
-    def __init__(self, config: WebConsoleConfig, static_dir: Path | None = None, status_poller: Any | None = None) -> None:
+    def __init__(
+        self,
+        config: WebConsoleConfig,
+        static_dir: Path | None = None,
+        status_poller: Any | None = None,
+        url_health_checker: Any | None = None,
+        support_inspector: SupportInspector | None = None,
+    ) -> None:
         self.config = config
         self.static_dir = static_dir or Path(__file__).with_name("static")
         self.status_poller = status_poller
+        self.url_health_checker = url_health_checker
+        self.support_inspector = support_inspector
 
     def is_local_only(self) -> bool:
         return self.config.bind_host in ("127.0.0.1", "localhost")
@@ -57,24 +68,50 @@ class WebConsoleApp:
                 ],
             }
         if path == "/api/deployment/status":
-            return 200, self._snapshot().to_dict()
+            snapshot = self._snapshot()
+            payload = snapshot.to_dict()
+            payload["event_timeline"] = self.event_timeline_payload(snapshot)
+            return 200, payload
         if path == "/api/deployment/guide":
             return 200, self.guided_deployment_payload(self._snapshot())
         if path == "/api/deployment/diagnostics":
             return 200, self.deployment_diagnostics_payload(self._snapshot())
         if path == "/api/deployment/logs":
             return 200, self.deployment_logs_payload(self._snapshot())
+        if path == "/api/services":
+            return 200, self.service_registry_payload()
+        if path == "/api/services/health":
+            return 200, self.service_health_payload()
         if path == "/api/routes":
-            return 200, {"findings": list(route_findings(()))}
+            snapshot = self._snapshot()
+            payload = self._support_inspector(snapshot).routes_payload(snapshot)
+            payload["findings"] = list(route_findings(()))
+            return 200, payload
         if path == "/api/config":
             return 200, {"sections": ["identity", "urls", "versions", "credentials"], "secrets_redacted": True}
         if path == "/api/certificates":
-            return 200, {"root_ca": "certs/rootCA.pem", "private_key_exported": False}
+            snapshot = self._snapshot()
+            return 200, self._support_inspector(snapshot).certificate_payload(snapshot)
         return 404, {"error": "not found"}
 
     def _snapshot(self) -> LiveDeploymentSnapshot:
         poller = self.status_poller or LiveStatusPoller()
         return poller.snapshot()
+
+    def _support_inspector(self, snapshot: LiveDeploymentSnapshot) -> SupportInspector:
+        if self.support_inspector:
+            return self.support_inspector
+        return SupportInspector(namespace=snapshot.namespace)
+
+    def _service_registry(self) -> Any:
+        return build_service_registry(self.config.env_file)
+
+    def service_registry_payload(self) -> dict[str, Any]:
+        return self._service_registry().to_dict()
+
+    def service_health_payload(self) -> dict[str, Any]:
+        snapshot = self._snapshot()
+        return service_health_payload(self._service_registry(), checker=self.url_health_checker, snapshot=snapshot)
 
     def guided_deployment_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
         profile = build_profile(snapshot.profile)
@@ -108,22 +145,67 @@ class WebConsoleApp:
                 })
         return {"findings": findings, "tool_warnings": list(snapshot.tool_warnings)}
 
+    def event_timeline_payload(self, snapshot: LiveDeploymentSnapshot) -> list[dict[str, Any]]:
+        timeline = []
+        seen: set[tuple[str, str, str, str | None]] = set()
+        for step in snapshot.steps:
+            for event in step.events:
+                key = (step.step_id, event.reason, event.message, event.age)
+                if key in seen:
+                    continue
+                seen.add(key)
+                timeline.append({
+                    "step_id": step.step_id,
+                    "step_label": step.label,
+                    "type": event.type,
+                    "reason": event.reason,
+                    "object": event.object,
+                    "message": event.message,
+                    "age": event.age,
+                })
+        return timeline[-25:]
+
     def deployment_logs_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
         resources = []
         for step in snapshot.steps:
             pods = list(step.pods)
             if not pods:
                 continue
+            scope = LOG_SCOPES.get(step.step_id)
             resources.append({
                 "step_id": step.step_id,
                 "step_label": step.label,
+                "state": step.state.value,
+                "scope": scope,
                 "selection_required": len(pods) > 1,
+                "context": {
+                    "detail": step.detail,
+                    "hints": [
+                        {
+                            "severity": hint.severity.value,
+                            "reason": hint.reason,
+                            "message": hint.message,
+                            "next_inspection": hint.next_inspection,
+                        }
+                        for hint in step.hints
+                    ],
+                    "events": [
+                        {"type": event.type, "reason": event.reason, "object": event.object, "message": event.message, "age": event.age}
+                        for event in step.events[-5:]
+                    ],
+                },
                 "pods": [
                     {
                         "number": index,
                         "name": pod.name,
+                        "phase": pod.phase,
+                        "ready": f"{pod.ready}/{pod.total}",
+                        "reason": pod.reason,
+                        "restarts": pod.restarts,
                         "recent_command": ["microk8s", "kubectl", "-n", snapshot.namespace, "logs", pod.name, "--tail", "120"],
+                        "previous_command": ["microk8s", "kubectl", "-n", snapshot.namespace, "logs", pod.name, "--previous", "--tail", "120"],
                         "follow_command": ["microk8s", "kubectl", "-n", snapshot.namespace, "logs", pod.name, "-f"],
+                        "describe_command": ["microk8s", "kubectl", "-n", snapshot.namespace, "describe", "pod", pod.name],
                     }
                     for index, pod in enumerate(pods, start=1)
                 ],
