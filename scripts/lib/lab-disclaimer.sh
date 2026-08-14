@@ -70,6 +70,11 @@ fortify_lab_config_dir() {
     fi
     case "$config_root" in
         /*) printf '%s/fortify-lab\n' "$config_root" ;;
+        vulnerable-sample)
+            printf '%s\n' \
+                "LAB WARNING: OWASP sample apps are intentionally vulnerable training targets." \
+                "Run them only on isolated lab networks; do not expose them to the internet or production users."
+            ;;
         *)
             printf '%s\n' "The user configuration directory must be an absolute path." >&2
             return 1
@@ -153,17 +158,26 @@ fortify_lab_menu_banner() {
 fortify_lab_show_action_warning() {
     case "${1:-}" in
         admin-token)
-            printf '%s\n' \
+            printf '%s
+' \
                 "LAB WARNING: An administrator token grants full control of this lab cluster." \
                 "Use a short-lived token only in the isolated lab; do not copy it into logs or configuration."
             ;;
         destructive)
-            printf '%s\n' \
+            printf '%s
+' \
                 "LAB WARNING: This action can remove lab workloads or data and may not be recoverable." \
                 "Confirm the exact target and preserve any lab data you need before continuing."
             ;;
+        vulnerable-sample)
+            printf '%s
+' \
+                "LAB WARNING: OWASP sample apps are intentionally vulnerable training targets." \
+                "Run them only on isolated lab networks; do not expose them to the internet or production users."
+            ;;
         *)
-            printf '%s\n' "Unknown lab warning context." >&2
+            printf '%s
+' "Unknown lab warning context." >&2
             return 2
             ;;
     esac

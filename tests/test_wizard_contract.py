@@ -396,5 +396,26 @@ exit 1
         self.assertNotIn("actual-client-token", output)
         self.assertNotIn("actual-fod-secret", output)
 
+    def test_sample_apps_have_isolated_lifecycle_contracts(self) -> None:
+        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        environment = (ROOT / ".env.example").read_text(encoding="utf-8")
+        hosts = (ROOT / "scripts" / "lib" / "coredns-lab-hosts.sh").read_text(encoding="utf-8")
+        for expected in (
+            "Juice Shop",
+            "WebGoat",
+            "DVWA",
+            "sample_juice_shop",
+            "sample_apps",
+            "vulnerable-sample",
+            "apps/samples/juice-shop/start.sh",
+        ):
+            self.assertIn(expected, wizard)
+        for expected in ("JUICE_SHOP", "WEBGOAT", "DVWA", "FORTIFY_SAMPLE_WEBGOAT_IMAGE"):
+            self.assertIn(expected, environment)
+        for expected in ("juice-shop.$domain", "webgoat.$domain", "dvwa.$domain"):
+            self.assertIn(expected, hosts)
+        self.assertIn('app_index_in_full_lifecycle "$idx" || continue', wizard)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -115,10 +115,11 @@ bootstrap_env() {
 # App registry — single source of truth for the apps menu
 # ============================================================
 
-APP_LABEL=("MySQL" "PostgreSQL" "SSC" "LIM" "ScanCentral SAST" "ScanCentral DAST")
-APP_PODS=("mysql"  "postgresql" "ssc-webapp" "lim" "scancentral-sast" "sdast")
-APP_URL_VAR=(""    ""           "SSC_URL"    "LIM_URL" "SCSAST_CTRL_URL" "SCDAST_URL")
-APP_GUIDED_STEP=("mysql" "postgresql" "ssc" "lim" "sast" "dast")
+APP_LABEL=("MySQL" "PostgreSQL" "SSC" "LIM" "ScanCentral SAST" "ScanCentral DAST" "Juice Shop" "WebGoat" "DVWA")
+APP_PODS=("mysql"  "postgresql" "ssc-webapp" "lim" "scancentral-sast" "sdast" "sample-juice-shop" "sample-webgoat" "sample-dvwa")
+APP_URL_VAR=(""    ""           "SSC_URL"    "LIM_URL" "SCSAST_CTRL_URL" "SCDAST_URL" "JUICE_SHOP_URL" "WEBGOAT_URL" "DVWA_URL")
+APP_GUIDED_STEP=("mysql" "postgresql" "ssc" "lim" "sast" "dast" "sample_juice_shop" "sample_webgoat" "sample_dvwa")
+APP_SAMPLE=(0 0 0 0 0 0 1 1 1)
 APP_START=(
     "apps/mysql/start.sh"
     "apps/postgresql/start.sh"
@@ -126,6 +127,9 @@ APP_START=(
     "apps/lim/start.sh"
     "apps/scsast/start.sh"
     "apps/scdast/core/start.sh apps/scdast/scanner/start.sh"
+    "apps/samples/juice-shop/start.sh"
+    "apps/samples/webgoat/start.sh"
+    "apps/samples/dvwa/start.sh"
 )
 APP_STOP=(
     "apps/mysql/stop.sh"
@@ -134,6 +138,9 @@ APP_STOP=(
     "apps/lim/stop.sh"
     "apps/scsast/stop.sh"
     "apps/scdast/core/stop.sh apps/scdast/scanner/stop.sh"
+    "apps/samples/juice-shop/stop.sh"
+    "apps/samples/webgoat/stop.sh"
+    "apps/samples/dvwa/stop.sh"
 )
 APP_DESTROY=(
     "apps/mysql/destroy.sh"
@@ -142,7 +149,18 @@ APP_DESTROY=(
     "apps/lim/destroy.sh"
     "apps/scsast/destroy.sh"
     "apps/scdast/core/destroy.sh apps/scdast/scanner/destroy.sh"
+    "apps/samples/juice-shop/destroy.sh"
+    "apps/samples/webgoat/destroy.sh"
+    "apps/samples/dvwa/destroy.sh"
 )
+
+app_index_is_sample() {
+    [ "${APP_SAMPLE[$1]:-0}" -eq 1 ]
+}
+
+app_index_in_full_lifecycle() {
+    ! app_index_is_sample "$1"
+}
 
 app_url_for_index() {
     local idx="$1" variable=""
@@ -290,7 +308,7 @@ lab_lifecycle_current_profile() {
 
 lab_lifecycle_step_is_workload() {
     case "$1" in
-        mysql|postgresql|ssc|lim|sast_controller|sast_sensor|dast_core|dast_scanner) return 0 ;;
+        mysql|postgresql|ssc|lim|sast_controller|sast_sensor|dast_core|dast_scanner|sample_juice_shop|sample_webgoat|sample_dvwa) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -301,6 +319,7 @@ lab_lifecycle_app_index_selected() {
         mysql|postgresql|ssc|lim) guided_component_selected "$step" ;;
         sast) guided_component_selected sast_controller || guided_component_selected sast_sensor ;;
         dast) guided_component_selected dast_core || guided_component_selected dast_scanner ;;
+        sample_juice_shop|sample_webgoat|sample_dvwa) guided_component_selected "$step" ;;
         *) return 1 ;;
     esac
 }
@@ -353,6 +372,7 @@ lab_lifecycle_script_list() {
     local operation="$1" scope="${2:-selected}" idx field script seen="" step
     if [ "$scope" = "all" ]; then
         for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+            app_index_in_full_lifecycle "$idx" || continue
             case "$operation" in
                 destroy) field="${APP_DESTROY[$idx]}" ;;
                 stop) field="${APP_STOP[$idx]}" ;;
@@ -383,6 +403,7 @@ lab_shutdown_deployments() {
         note "Stopping all lab workloads in dependency-safe order. Persistent data is preserved."
         wizard_log_event "action=lab_lifecycle_start operation=shutdown scope=all mode=non_destructive"
         for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+            app_index_in_full_lifecycle "$idx" || continue
             note "Stopping ${APP_LABEL[$idx]}..."
             wizard_log_event "action=lab_lifecycle_component operation=shutdown scope=all component=${APP_GUIDED_STEP[$idx]}"
             run_app_scripts "${APP_STOP[$idx]}"
@@ -426,6 +447,7 @@ lab_start_deployments() {
         wizard_log_event "action=lab_lifecycle_start operation=start scope=all mode=non_destructive"
         GUIDED_MODE_CONTEXT=lifecycle
         for idx in "${!APP_LABEL[@]}"; do
+            app_index_in_full_lifecycle "$idx" || continue
             guided_run_and_verify "${APP_GUIDED_STEP[$idx]}" "${APP_LABEL[$idx]}"
             rc=$?
             if [ "$rc" -ne 0 ]; then
@@ -499,6 +521,7 @@ lab_destroy_deployments() {
     wizard_log_event "action=lab_lifecycle_start operation=destroy scope=$scope mode=destructive"
     if [ "$scope" = "all" ]; then
         for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+            app_index_in_full_lifecycle "$idx" || continue
             note "Destroying ${APP_LABEL[$idx]}..."
             wizard_log_event "action=lab_lifecycle_component operation=destroy scope=all component=${APP_GUIDED_STEP[$idx]}"
             run_app_scripts "${APP_DESTROY[$idx]}"
@@ -2616,14 +2639,14 @@ restart_with_microk8s_group() {
 # Deployment steps shared by Guided and Express modes
 # ============================================================
 
-GUIDED_ALL_STEP_ID=("prereqs" "inputs" "preflight" "certs" "dashboard" "secrets" "mysql" "postgresql" "ssc" "lim" "sast_controller" "sast_sensor" "dast_core" "dast_scanner" "configure")
-GUIDED_ALL_STEP_LABEL=("Host prerequisites" "Configuration and license" "Deployment pre-flight" "TLS certificates" "Kubernetes Dashboard" "Kubernetes Secrets" "MySQL" "PostgreSQL" "Software Security Center" "LIM" "ScanCentral SAST Controller" "ScanCentral SAST Sensor" "ScanCentral DAST Core" "ScanCentral DAST Scanner" "Post-deploy configuration")
-GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 1)
-GUIDED_ALL_STEP_DURATION=("5-15 min" "2-5 min" "<1 min" "1-2 min" "2-5 min" "<1 min" "3-8 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "5-15 min" "manual")
-GUIDED_ALL_STEP_IMPACT=("host packages/add-ons" "local configuration" "read-only" "creates/updates lab TLS" "applies Dashboard" "creates/updates Secrets" "applies MySQL" "applies PostgreSQL" "applies SSC" "applies LIM" "applies SAST controller" "applies SAST sensor" "applies DAST Core" "applies DAST scanner" "manual configuration")
-GUIDED_ALL_STEP_TIMEOUT=(900 300 120 180 300 60 600 600 900 600 900 600 1200 900 0)
-GUIDED_ALL_STEP_MANUAL=(0 1 0 0 0 0 0 0 0 0 0 0 0 0 1)
-GUIDED_ALL_STEP_PROBE=("prereqs_complete" "inputs_complete" "preflight_inputs_complete" "certs_ready" "dashboard_ready" "secrets_ready" "mysql_ready" "postgresql_ready" "ssc_ready" "lim_ready" "sast_controller_ready" "sast_sensor_ready" "dast_core_ready" "dast_scanner_ready" "configure_ready")
+GUIDED_ALL_STEP_ID=("prereqs" "inputs" "preflight" "certs" "dashboard" "secrets" "mysql" "postgresql" "ssc" "lim" "sast_controller" "sast_sensor" "dast_core" "dast_scanner" "sample_juice_shop" "sample_webgoat" "sample_dvwa" "configure")
+GUIDED_ALL_STEP_LABEL=("Host prerequisites" "Configuration and license" "Deployment pre-flight" "TLS certificates" "Kubernetes Dashboard" "Kubernetes Secrets" "MySQL" "PostgreSQL" "Software Security Center" "LIM" "ScanCentral SAST Controller" "ScanCentral SAST Sensor" "ScanCentral DAST Core" "ScanCentral DAST Scanner" "Juice Shop" "WebGoat" "DVWA" "Post-deploy configuration")
+GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1)
+GUIDED_ALL_STEP_DURATION=("5-15 min" "2-5 min" "<1 min" "1-2 min" "2-5 min" "<1 min" "3-8 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "5-15 min" "1-3 min" "1-3 min" "1-3 min" "manual")
+GUIDED_ALL_STEP_IMPACT=("host packages/add-ons" "local configuration" "read-only" "creates/updates lab TLS" "applies Dashboard" "creates/updates Secrets" "applies MySQL" "applies PostgreSQL" "applies SSC" "applies LIM" "applies SAST controller" "applies SAST sensor" "applies DAST Core" "applies DAST scanner" "applies intentionally vulnerable sample app" "applies intentionally vulnerable sample app" "applies intentionally vulnerable sample app" "manual configuration")
+GUIDED_ALL_STEP_TIMEOUT=(900 300 120 180 300 60 600 600 900 600 900 600 1200 900 300 300 300 0)
+GUIDED_ALL_STEP_MANUAL=(0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1)
+GUIDED_ALL_STEP_PROBE=("prereqs_complete" "inputs_complete" "preflight_inputs_complete" "certs_ready" "dashboard_ready" "secrets_ready" "mysql_ready" "postgresql_ready" "ssc_ready" "lim_ready" "sast_controller_ready" "sast_sensor_ready" "dast_core_ready" "dast_scanner_ready" "sample_juice_shop_ready" "sample_webgoat_ready" "sample_dvwa_ready" "configure_ready")
 GUIDED_ALL_STEP_HELP=(
     "Install the host tools and MicroK8s add-ons used by the lab."
     "Review .env and provide a readable Fortify license before deployment."
@@ -2639,6 +2662,9 @@ GUIDED_ALL_STEP_HELP=(
     "Deploy a ScanCentral SAST sensor only after the SAST controller is present."
     "Deploy DAST Core after its database and license dependencies are ready."
     "Deploy a DAST scanner only after DAST Core is ready."
+    "Deploy OWASP Juice Shop as an intentionally vulnerable lab target. Do not expose it outside an isolated lab."
+    "Deploy OWASP WebGoat as an intentionally vulnerable lab target. Do not expose it outside an isolated lab."
+    "Deploy DVWA as an intentionally vulnerable lab target. Do not expose it outside an isolated lab."
     "Configure DNS, SSC/SAST integration tokens, and the LIM pool when you are ready."
 )
 
@@ -2727,6 +2753,9 @@ guided_expand_deployment_components() {
         if guided_component_selected dast_scanner && ! guided_component_selected dast_core; then guided_add_component dast_core; changed=1; fi
         if guided_component_selected full_lab; then
             for dep in ssc lim sast_controller sast_sensor dast_core dast_scanner; do guided_component_selected "$dep" || { guided_add_component "$dep"; changed=1; }; done
+        fi
+        if guided_component_selected sample_apps; then
+            for dep in sample_juice_shop sample_webgoat sample_dvwa; do guided_component_selected "$dep" || { guided_add_component "$dep"; changed=1; }; done
         fi
     done
 }
@@ -2853,7 +2882,8 @@ guided_profile_menu() {
         3) profile=sast_full ;;
         4) profile=dast_full ;;
         5|"") profile=full_lab ;;
-        6) guided_custom_component_prompt; return $? ;;
+        6) fortify_lab_show_action_warning vulnerable-sample; profile=sample_apps ;;
+        7) guided_custom_component_prompt; return $? ;;
         *) error "Invalid profile selection"; sleep 1; return 1 ;;
     esac
     guided_apply_deployment_profile "$profile"
@@ -3248,6 +3278,18 @@ dast_scanner_ready() {
 
 dast_ready() {
     dast_scanner_ready
+}
+
+sample_juice_shop_ready() {
+    workload_ready "$NAMESPACE" deployment sample-juice-shop && resource_exists "$NAMESPACE" service sample-juice-shop && resource_exists "$NAMESPACE" ingress sample-juice-shop
+}
+
+sample_webgoat_ready() {
+    workload_ready "$NAMESPACE" deployment sample-webgoat && resource_exists "$NAMESPACE" service sample-webgoat && resource_exists "$NAMESPACE" ingress sample-webgoat
+}
+
+sample_dvwa_ready() {
+    workload_ready "$NAMESPACE" deployment sample-dvwa && resource_exists "$NAMESPACE" service sample-dvwa && resource_exists "$NAMESPACE" ingress sample-dvwa
 }
 
 configure_ready() {
@@ -3955,6 +3997,9 @@ run_deployment_operation() {
         dast_core) deployment_config_guard && run_app_scripts "apps/scdast/core/start.sh" ;;
         dast_scanner) deployment_config_guard && dast_core_ready && run_app_scripts "apps/scdast/scanner/start.sh" ;;
         dast) deployment_config_guard && run_app_scripts "apps/scdast/core/start.sh apps/scdast/scanner/start.sh" ;;
+        sample_juice_shop) fortify_lab_show_action_warning vulnerable-sample && run_app_scripts "apps/samples/juice-shop/start.sh" ;;
+        sample_webgoat) fortify_lab_show_action_warning vulnerable-sample && run_app_scripts "apps/samples/webgoat/start.sh" ;;
+        sample_dvwa) fortify_lab_show_action_warning vulnerable-sample && run_app_scripts "apps/samples/dvwa/start.sh" ;;
         configure) configure_menu ;;
         *) error "Unknown deployment operation: $operation"; return 1 ;;
     esac

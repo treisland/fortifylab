@@ -560,7 +560,7 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertNotIn("BAD_SAVE", result.stdout)
 
     def test_optional_skip_is_explicit_and_required_skip_is_rejected(self) -> None:
-        self.assertIn("GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 1)", WIZARD)
+        self.assertIn("GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1)", WIZARD)
         self.assertIn("Skip optional step", WIZARD)
         self.assertIn("is required and cannot be skipped", WIZARD)
 
