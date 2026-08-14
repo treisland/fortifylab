@@ -610,15 +610,35 @@ EOF
 # ============================================================
 
 apps_menu() {
+    apps_menu_for_scope "all"
+}
+
+sample_apps_menu() {
+    fortify_lab_show_action_warning vulnerable-sample
+    apps_menu_for_scope "samples"
+}
+
+apps_menu_for_scope() {
+    local scope="${1:-all}" heading="Apps"
+    [ "$scope" = "samples" ] && heading="Sample applications"
     while true; do
-        title "Apps"
+        title "$heading"
+        if [ "$scope" = "samples" ]; then
+            printf '\n  Intentionally vulnerable lab targets for SAST and DAST practice.\n'
+            printf '  Keep these applications isolated to your lab network.\n'
+        fi
         printf '\n  %-3s %-20s %s\n' "#" "Name" "Status"
         printf '  %s\n' "─────────────────────────────────────"
-        local i
+        local i visible=0
         for i in "${!APP_LABEL[@]}"; do
+            if [ "$scope" = "samples" ]; then
+                app_index_is_sample "$i" || continue
+            fi
+            visible=$((visible + 1))
             printf '  %-3d %-20s %s\n' \
                 $((i + 1)) "${APP_LABEL[$i]}" "$(app_status "${APP_PODS[$i]}")"
         done
+        [ "$visible" -eq 0 ] && printf '  %s\n' "No sample applications are registered."
         echo
         echo "  r. Return to main menu"
         echo "  q. Quit"
@@ -631,6 +651,11 @@ apps_menu() {
             ''|*[!0-9]*) error "Invalid selection"; sleep 1 ;;
             *)
                 if [ "$choice" -ge 1 ] && [ "$choice" -le "${#APP_LABEL[@]}" ]; then
+                    if [ "$scope" = "samples" ] && ! app_index_is_sample $((choice - 1)); then
+                        error "Select one of the sample application numbers shown above."
+                        sleep 1
+                        continue
+                    fi
                     app_action_menu $((choice - 1))
                 else
                     error "Out of range"
@@ -4715,26 +4740,27 @@ main_menu() {
         echo "   2. Express deployment"
         echo "   3. Resume or repair deployment"
         echo "   4. Manage individual components (expert)"
-        echo "   5. Kubernetes Dashboard access"
+        echo "   5. Sample applications"
+        echo "   6. Kubernetes Dashboard access"
 
         section "Diagnostics and advanced"
-        echo "   6. Diagnostics / live status"
-        echo "   7. Advanced setup and configuration"
+        echo "   7. Diagnostics / live status"
+        echo "   8. Advanced setup and configuration"
 
         section "Operations"
-        echo "   8. Lab lifecycle controls"
-        echo "   9. Stream logs (all pods)"
-        echo "  10. Cluster snapshot"
-        echo "  11. Tail one pod"
-        echo "  12. URLs & credentials"
-        echo "  13. Tools and FCLI readiness"
-        echo "  14. Image versions"
-        echo "  15. Configuration editor"
+        echo "   9. Lab lifecycle controls"
+        echo "  10. Stream logs (all pods)"
+        echo "  11. Cluster snapshot"
+        echo "  12. Tail one pod"
+        echo "  13. URLs & credentials"
+        echo "  14. Tools and FCLI readiness"
+        echo "  15. Image versions"
+        echo "  16. Configuration editor"
 
         section "Learn"
-        echo "  16. Help Center / Fortify Knowledge Center"
-        echo "  17. Operational guidance and troubleshooting"
-        echo "  18. View wizard log"
+        echo "  17. Help Center / Fortify Knowledge Center"
+        echo "  18. Operational guidance and troubleshooting"
+        echo "  19. View wizard log"
 
         echo
         echo "   q. Quit"
@@ -4746,20 +4772,21 @@ main_menu() {
             2)  deploy_from_scratch ;;
             3)  resume_repair ;;
             4)  apps_menu ;;
-            5)  dashboard_access_menu ;;
-            6)  live_status ;;
-            7)  advanced_menu ;;
-            8)  lab_lifecycle_menu ;;
-            9)  stream_logs ;;
-           10)  cluster_status ;;
-           11)  logs_menu ;;
-           12)  urls_creds ;;
-           13)  fcli_tools_menu ;;
-           14)  versions_menu ;;
-           15)  edit_env ;;
-           16)  help_center ;;
-           17)  operational_guidance_menu ;;
-           18)  wizard_log_viewer ;;
+            5)  sample_apps_menu ;;
+            6)  dashboard_access_menu ;;
+            7)  live_status ;;
+            8)  advanced_menu ;;
+            9)  lab_lifecycle_menu ;;
+           10)  stream_logs ;;
+           11)  cluster_status ;;
+           12)  logs_menu ;;
+           13)  urls_creds ;;
+           14)  fcli_tools_menu ;;
+           15)  versions_menu ;;
+           16)  edit_env ;;
+           17)  help_center ;;
+           18)  operational_guidance_menu ;;
+           19)  wizard_log_viewer ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;
         esac

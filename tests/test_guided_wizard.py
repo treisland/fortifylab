@@ -44,6 +44,7 @@ class GuidedWizardTests(unittest.TestCase):
             "Express deployment",
             "Resume or repair deployment",
             "Manage individual components (expert)",
+            "Sample applications",
             "Kubernetes Dashboard access",
             "Diagnostics / live status",
             "Advanced setup and configuration",
@@ -80,6 +81,14 @@ class GuidedWizardTests(unittest.TestCase):
             self.assertIn(expected, result.stdout)
         self.assertNotIn("DEFAULT_PASS", result.stdout)
         self.assertNotIn("ControllerToken", result.stdout)
+
+    def test_sample_apps_have_visible_top_level_menu(self) -> None:
+        self.assertIn('5)  sample_apps_menu ;;', WIZARD)
+        self.assertIn('sample_apps_menu()', WIZARD)
+        self.assertIn('apps_menu_for_scope "samples"', WIZARD)
+        self.assertIn('title "$heading"', WIZARD)
+        self.assertIn('Intentionally vulnerable lab targets', WIZARD)
+        self.assertIn('Select one of the sample application numbers shown above.', WIZARD)
 
     def test_guided_and_express_share_one_operation_dispatcher(self) -> None:
         self.assertIn("run_deployment_operation()", WIZARD)

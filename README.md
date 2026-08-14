@@ -65,7 +65,8 @@ to suppress the banner or `NO_COLOR=1` for plain terminal output.
 Inside the wizard, the main menu is organized by task:
 
 - **Deploy:** Guided deployment, Express deployment, Resume or repair,
-  individual component management, and Kubernetes Dashboard access.
+  individual component management, vulnerable sample applications, and
+  Kubernetes Dashboard access.
 - **Diagnostics and advanced:** live status plus the advanced setup menu for
   prerequisites, license files, certificates/secrets, DNS, SSC token, LIM,
   Dashboard access, and `.env` editing.
@@ -76,8 +77,9 @@ Inside the wizard, the main menu is organized by task:
 
 Choose **Guided deployment (recommended)** for a numbered, explanatory
 walkthrough. Guided deployment first asks for a deployment profile: SSC only,
-SAST controller only, SAST full with SSC, DAST full, Full lab, or Custom. The
-wizard expands required dependencies before it shows the final plan. Each screen
+SAST controller only, SAST full with SSC, DAST full, Full lab, Sample vulnerable
+apps, or Custom. The wizard expands required dependencies before it shows the
+final plan. Each screen
 shows status derived from current files and live Kubernetes resources. Required
 steps cannot be skipped; optional host setup and post-deploy configuration can
 be deferred. Guided wait screens poll through readiness and application checks,
