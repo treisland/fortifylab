@@ -79,11 +79,16 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("refreshIntervalMs = 5000", script)
         self.assertIn("window.setInterval(refreshConsole, refreshIntervalMs)", script)
         self.assertIn("fortifylab.theme", script)
+        self.assertIn("setupPanelFocus", script)
+        self.assertIn("openFocusedPanel", script)
+        self.assertIn("panel-focus-overlay", script)
         self.assertIn(":root[data-theme=\"dark\"]", styles)
         self.assertIn("prefers-color-scheme: dark", styles)
         self.assertIn("uptime-strip", styles)
         self.assertIn("lifecycle-layout", styles)
         self.assertIn("confirmation-box", styles)
+        self.assertIn("panel-focus-button", styles)
+        self.assertIn("is-focused-panel.lifecycle-panel", styles)
 
     def test_serve_once_returns_static_index(self) -> None:
         status, headers, body = self.request_once(WebConsoleConfig(port=0), "/")

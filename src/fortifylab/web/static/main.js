@@ -2,6 +2,8 @@ const token = new URLSearchParams(window.location.search).get("token");
 const refreshIntervalMs = 5000;
 const themeStorageKey = "fortifylab.theme";
 let refreshInFlight = false;
+let focusedPanel = null;
+let focusedPlaceholder = null;
 const state = document.querySelector("#connection-state");
 const lastUpdated = document.querySelector("#last-updated");
 const store = {
@@ -19,6 +21,64 @@ const store = {
   lifecycleActions: null,
   lifecycleAudit: null,
 };
+
+function panelTitle(panel) {
+  return panel.querySelector(".panel-heading span")?.textContent?.trim() || panel.dataset.panel || "Panel";
+}
+
+function closeFocusedPanel() {
+  const overlay = document.querySelector("#panel-focus-overlay");
+  if (focusedPanel && focusedPlaceholder) {
+    focusedPanel.classList.remove("is-focused-panel");
+    focusedPlaceholder.replaceWith(focusedPanel);
+  }
+  focusedPanel = null;
+  focusedPlaceholder = null;
+  document.body.classList.remove("panel-focus-open");
+  if (overlay) overlay.remove();
+}
+
+function openFocusedPanel(panel) {
+  if (focusedPanel === panel) return;
+  closeFocusedPanel();
+  focusedPanel = panel;
+  focusedPlaceholder = document.createElement("div");
+  focusedPlaceholder.className = "panel-focus-placeholder";
+  panel.before(focusedPlaceholder);
+
+  const overlay = document.createElement("div");
+  overlay.id = "panel-focus-overlay";
+  overlay.className = "panel-focus-overlay";
+  const title = panelTitle(panel);
+  overlay.innerHTML = `<div class="panel-focus-shell" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)} fullscreen panel"><div class="panel-focus-bar"><div><span>Focused panel</span><strong>${escapeHtml(title)}</strong></div><button type="button" class="panel-focus-close" aria-label="Close fullscreen panel">x</button></div><div class="panel-focus-stage"></div></div>`;
+  document.body.appendChild(overlay);
+  panel.classList.add("is-focused-panel");
+  overlay.querySelector(".panel-focus-stage").appendChild(panel);
+  overlay.querySelector(".panel-focus-close").focus();
+  document.body.classList.add("panel-focus-open");
+}
+
+function setupPanelFocus() {
+  for (const panel of document.querySelectorAll("[data-panel]")) {
+    const heading = panel.querySelector(".panel-heading");
+    if (!heading || heading.querySelector(".panel-focus-button")) continue;
+    const meta = heading.querySelector("strong");
+    const actions = document.createElement("div");
+    actions.className = "panel-heading-actions";
+    if (meta) actions.appendChild(meta);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "panel-focus-button";
+    button.title = `Open ${panelTitle(panel)} fullscreen`;
+    button.setAttribute("aria-label", `Open ${panelTitle(panel)} fullscreen`);
+    button.addEventListener("click", () => openFocusedPanel(panel));
+    actions.appendChild(button);
+    heading.appendChild(actions);
+  }
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeFocusedPanel();
+  });
+}
 
 function headers() {
   return token ? { "X-FortifyLab-Token": token } : {};
@@ -497,4 +557,5 @@ function scheduleRefresh() {
 }
 
 setupThemeSwitch();
+setupPanelFocus();
 scheduleRefresh();
