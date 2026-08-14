@@ -1020,7 +1020,7 @@ guided_diagnostics_bundle() {
         error "Could not create the private diagnostics output directory."
         return 1
     fi
-    if bundle=$(operational_create_diagnostics_bundle "$output_dir"); then
+    if bundle=$(wizard_create_diagnostics_bundle "$output_dir"); then
         note "Sanitized bundle created: $bundle"
         note "Review it before sharing; no automated sanitizer can prove all context is safe."
     else

@@ -127,6 +127,10 @@ Environment overrides:
   NO_COLOR            Disable color output if set to any value.
   WIZARD_NOMAIN       Set to 1 to source this file without entering the menu
                       (for tests / scripting).
+  FORTIFY_WIZARD_PYTHON_BRIDGE       auto|off|force for Python wizard bridges.
+  FORTIFY_WIZARD_PYTHON_CONFIG       auto|off|force for config repair/validation.
+  FORTIFY_WIZARD_PYTHON_DIAGNOSTICS  auto|off|force for diagnostics bundle export.
+  FORTIFY_WIZARD_PYTHON_LOGS         auto|off|force for pod log selection.
 
 Run as your normal user — the wizard sudo's only the commands that genuinely
 need root (apt, snap). Avoid 'sudo ./start_wizard.sh': it would create an

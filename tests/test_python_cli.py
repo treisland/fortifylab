@@ -183,6 +183,14 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("REFRESH SECRETS", result.stdout)
 
 
+    def test_logs_select_prefix_outputs_shell_decision(self) -> None:
+        result = self.run_module("logs", "--select-prefix", "mysql", "--pods", "mysql-0,ssc-webapp-0")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("decision=single", result.stdout)
+        self.assertIn("pod=mysql-0", result.stdout)
+
+
 
 if __name__ == "__main__":
     unittest.main()

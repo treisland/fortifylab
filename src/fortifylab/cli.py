@@ -10,7 +10,7 @@ import time
 from .bootstrap import run_bootstrap_checks
 from .config.cli import configure_parser as configure_config_parser, run as run_config_command
 from .diagnostics import ClusterCollector, write_bundle
-from .operations import OperationCatalog, OperationRunner
+from .operations import OperationCatalog, OperationRunner, log_selection_decision
 from .orchestration import BashOperationAdapter
 from .runtime import compatibility_report, render_compatibility_report, runtime_paths, write_runtime_log
 from .status import LiveStatusPoller, render_snapshot
@@ -71,6 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "logs":
             sub.add_argument("--pod", help="print the kubectl logs command for a pod, or execute it")
             sub.add_argument("--follow", action="store_true", help="follow pod logs")
+            sub.add_argument("--select-prefix", help="decide whether pod selection can be skipped for this prefix")
+            sub.add_argument("--pods", help="comma-separated pod names for selection decisions")
         if name == "runbook":
             sub.add_argument("--preview", help="preview a runbook path with the safe runner")
         if name == "web":
@@ -187,6 +189,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Log: {execution.log_file}")
         print(execution.detail)
         return 0 if execution.ok else 1
+    if args.command == "logs" and args.select_prefix:
+        pods = tuple(pod for pod in (args.pods or "").split(",") if pod)
+        decision = log_selection_decision(pods, args.select_prefix)
+        for line in decision.shell_lines():
+            print(line)
+        return 0
     if args.command == "logs" and args.pod:
         execution = OperationRunner().run(OperationCatalog().logs(args.pod, follow=args.follow))
         print(f"Command: {' '.join(execution.command)}")
