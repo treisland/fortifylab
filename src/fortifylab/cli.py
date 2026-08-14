@@ -81,12 +81,14 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--port", type=int, default=8765, help="web console port")
             sub.add_argument("--allow-lan", action="store_true", help="allow LAN binding when an access token is configured")
             sub.add_argument("--token", help="web console access token")
+            sub.add_argument("--enable-actions", action="store_true", help="enable web action execution previews")
             web_subparsers = sub.add_subparsers(dest="web_command", metavar="WEB_COMMAND")
             serve = web_subparsers.add_parser("serve", help="serve the companion web console", description="serve the companion web console")
             serve.add_argument("--bind", default="127.0.0.1", help="web console bind host")
             serve.add_argument("--port", type=int, default=8765, help="web console port")
             serve.add_argument("--allow-lan", action="store_true", help="allow LAN binding when an access token is configured")
             serve.add_argument("--token", help="web console access token")
+            serve.add_argument("--enable-actions", action="store_true", help="enable web action execution previews")
             serve.add_argument("--once", action="store_true", help="serve one request for smoke tests")
         if name == "tui":
             sub.add_argument(
@@ -219,10 +221,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{index}. {step.step_id}: {' '.join(step.command)} (depends on: {deps})")
         return 0
     if args.command == "web" and getattr(args, "web_command", None) == "serve":
-        config = WebConsoleConfig(bind_host=args.bind, port=args.port, allow_lan=args.allow_lan, access_token=args.token)
+        config = WebConsoleConfig(bind_host=args.bind, port=args.port, allow_lan=args.allow_lan, access_token=args.token, enable_actions=args.enable_actions)
         return serve_web_console(config, once=args.once)
     if args.command == "web" and args.check:
-        config = WebConsoleConfig(bind_host=args.bind, port=args.port, allow_lan=args.allow_lan, access_token=args.token)
+        config = WebConsoleConfig(bind_host=args.bind, port=args.port, allow_lan=args.allow_lan, access_token=args.token, enable_actions=args.enable_actions)
         issues = config.validate()
         if issues:
             for issue in issues:

@@ -100,6 +100,20 @@ class OperationsDocumentationTests(unittest.TestCase):
             with self.subTest(hook=hook):
                 self.assertIn(hook, self.lifecycle)
 
+    def test_secure_lifecycle_console_contract_is_documented(self) -> None:
+        manual = (OPERATIONS / "web-console-manual-tests.md").read_text(encoding="utf-8")
+        for phrase in (
+            "Secure lifecycle management",
+            "Security posture",
+            "Lifecycle controls",
+            "Confirmation preview",
+            "Action audit",
+            "preview-only",
+            "typed confirmation",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.lifecycle + manual)
+
     def test_diagnostics_contract_matches_implementation_allow_list(self) -> None:
         for filename in (
             "README.txt", "deployment-plan.txt", "doctor-summary.txt",

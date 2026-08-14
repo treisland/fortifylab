@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import threading
+import time
 import unittest
 
 from fortifylab.core.command import CommandResult
-from fortifylab.operations import OperationCatalog, OperationImpact, OperationKind, OperationRunner, log_selection_decision, matching_pods, should_skip_selection
+from fortifylab.operations import OperationCatalog, OperationImpact, OperationJobManager, OperationJobRequest, OperationJobStatus, OperationKind, OperationRunner, log_selection_decision, matching_pods, should_skip_selection
 
 
 class PythonOperationsTests(unittest.TestCase):
@@ -103,6 +105,62 @@ class PythonOperationsTests(unittest.TestCase):
         self.assertIsNotNone(result.ended_at)
         self.assertIsNotNone(result.log_file)
 
+
+    def test_job_manager_tracks_dry_run_mutation_without_calling_adapter(self) -> None:
+        def fail_if_called(command: tuple[str, ...]) -> CommandResult:
+            raise AssertionError(f"unexpected execution: {command}")
+
+        manager = OperationJobManager(runner=OperationRunner(fail_if_called))
+        job, created = manager.submit(OperationJobRequest("app.ssc.stop"))
+        job = wait_for_job(manager, job.job_id)
+
+        self.assertTrue(created)
+        self.assertEqual(job.status, OperationJobStatus.COMPLETE)
+        self.assertFalse(job.execution.executed if job.execution else True)
+        self.assertIn("Dry run", job.message)
+        self.assertEqual([entry.action for entry in job.audit], ["job.queued", "job.started", "job.finished"])
+
+    def test_job_manager_prevents_duplicate_active_operation(self) -> None:
+        release = threading.Event()
+
+        def slow_runner(command: tuple[str, ...]) -> CommandResult:
+            release.wait(timeout=2)
+            return CommandResult(command, 0, "logs", "", 0.01)
+
+        manager = OperationJobManager(runner=OperationRunner(slow_runner))
+        first, first_created = manager.submit(OperationJobRequest("logs.ssc-webapp-0"))
+        duplicate, duplicate_created = manager.submit(OperationJobRequest("logs.ssc-webapp-0"))
+        release.set()
+        final = wait_for_job(manager, first.job_id)
+
+        self.assertTrue(first_created)
+        self.assertFalse(duplicate_created)
+        self.assertEqual(duplicate.job_id, first.job_id)
+        self.assertEqual(duplicate.duplicate_of, first.job_id)
+        self.assertEqual(final.status, OperationJobStatus.COMPLETE)
+
+    def test_job_payload_redacts_and_bounds_output_summary(self) -> None:
+        secret_output = "password=supersecret " + ("x" * 1400)
+        manager = OperationJobManager(runner=OperationRunner(lambda command: CommandResult(command, 0, secret_output, "", 0.01)))
+
+        job, _ = manager.submit(OperationJobRequest("logs.ssc-webapp-0"))
+        payload = wait_for_job(manager, job.job_id).to_api_dict()
+
+        rendered = str(payload)
+        self.assertNotIn("supersecret", rendered)
+        self.assertIn("<redacted>", rendered)
+        self.assertIn("omitted", payload["message"])
+        self.assertLess(len(payload["execution"]["stdout_summary"]), 1300)
+
+    def test_operation_runner_redacts_injected_runner_output(self) -> None:
+        runner = OperationRunner(lambda command: CommandResult(command, 1, "", "token=abc123", 0.01))
+
+        result = runner.run(OperationCatalog().logs("ssc-webapp-0", follow=False))
+
+        self.assertFalse(result.ok)
+        self.assertNotIn("abc123", result.detail)
+        self.assertIn("<redacted>", result.detail)
+
     def test_timeout_result_shape_is_preserved(self) -> None:
         runner = OperationRunner(lambda command: CommandResult(command, 124, "", "timed out", 5.0, timed_out=True))
 
@@ -112,6 +170,16 @@ class PythonOperationsTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertTrue(result.timed_out)
         self.assertEqual(result.returncode, 124)
+
+
+def wait_for_job(manager: OperationJobManager, job_id: str, *, timeout: float = 2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        job = manager.get_job(job_id)
+        if job and not job.active:
+            return job
+        time.sleep(0.01)
+    raise AssertionError(f"job did not finish: {job_id}")
 
 
 if __name__ == "__main__":

@@ -42,6 +42,10 @@
         <span>Operations</span>
         <strong data-content="summary-operations">0</strong>
       </article>
+      <article class="summary-card">
+        <span>Security</span>
+        <strong data-content="summary-security">Checking</strong>
+      </article>
     </section>
 
     <section class="console-grid">
@@ -68,6 +72,14 @@
             <strong data-content="launchpad-count">0 services</strong>
           </div>
           <div data-content="routes" class="loading">Loading route checks...</div>
+        </article>
+
+        <article class="lifecycle-panel" data-panel="lifecycle">
+          <div class="panel-heading">
+            <span>Lifecycle controls</span>
+            <strong data-content="lifecycle-mode">Preview only</strong>
+          </div>
+          <div data-content="lifecycle" class="loading">Loading lifecycle action previews...</div>
         </article>
       </section>
 
@@ -102,6 +114,22 @@
             <strong data-content="health-count">0</strong>
           </div>
           <div data-content="health" class="loading">Loading diagnostics...</div>
+        </article>
+
+        <article class="side-panel" data-panel="security">
+          <div class="panel-heading">
+            <span>Security posture</span>
+            <strong data-content="security-mode">Checking</strong>
+          </div>
+          <div data-content="security" class="loading">Loading access posture...</div>
+        </article>
+
+        <article class="side-panel" data-panel="audit">
+          <div class="panel-heading">
+            <span>Action audit</span>
+            <strong data-content="audit-count">0 entries</strong>
+          </div>
+          <div data-content="audit" class="loading">Loading lifecycle audit...</div>
         </article>
       </aside>
     </section>

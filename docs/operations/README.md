@@ -38,3 +38,4 @@ and summaries remain usable when MicroK8s is unavailable.
 - [Versions and compatibility](versions-and-compatibility.md)
 - [Sanitized diagnostics](diagnostics.md)
 - [First scan walkthrough](first-scan.md)
+- [Web console manual test notes](web-console-manual-tests.md)

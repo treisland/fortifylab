@@ -70,6 +70,27 @@ def make_handler(app: WebConsoleApp) -> type[BaseHTTPRequestHandler]:
                 return
             write_text(self, 200, content_type, body, set_cookie=set_cookie, token=token)
 
+        def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+            parsed = urlparse(self.path)
+            token = extract_request_token(self)
+            if not app.authorize_request(token):
+                write_json(self, 401, app.error_envelope("unauthorized", "A valid web console token is required."))
+                return
+            if not parsed.path.startswith("/api/"):
+                write_text(self, 404, "text/plain; charset=utf-8", "not found\n")
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise ValueError("JSON body must be an object.")
+            except (json.JSONDecodeError, ValueError) as exc:
+                write_json(self, 400, app.error_envelope("bad_request", str(exc)))
+                return
+            status, body = app.api_mutation_envelope(parsed.path, payload)
+            write_json(self, status, body)
+
         def log_message(self, format: str, *args: Any) -> None:
             return
 
