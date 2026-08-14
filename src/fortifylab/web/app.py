@@ -9,7 +9,7 @@ from typing import Any
 
 from fortifylab.diagnostics import route_findings
 from fortifylab.operations import OperationCatalog
-from fortifylab.status import LiveDeploymentSnapshot, LiveStatusPoller, build_service_registry, service_health_payload
+from fortifylab.status import LiveDeploymentSnapshot, LiveState, LiveStatusPoller, LiveStepStatus, build_service_registry, service_health_payload
 from fortifylab.tui.profiles import LOG_SCOPES, build_profile
 from fortifylab.web.support import SupportInspector
 
@@ -116,16 +116,27 @@ class WebConsoleApp:
     def guided_deployment_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
         profile = build_profile(snapshot.profile)
         by_id = {step.step_id: step for step in snapshot.steps}
+        live_indexes = [
+            index
+            for index, profile_step in enumerate(profile.steps, start=1)
+            if _step_has_live_evidence(by_id.get(profile_step.step_id))
+        ]
+        active_index = min(live_indexes) if live_indexes else None
         steps = []
         for index, profile_step in enumerate(profile.steps, start=1):
             live_step = by_id.get(profile_step.step_id)
+            state = live_step.state.value if live_step else "pending"
+            detail = live_step.detail if live_step else "Waiting for this step to start."
+            if active_index is not None and index < active_index and state == "pending":
+                state = "complete"
+                detail = "Completed before the current live deployment step."
             steps.append({
                 "index": index,
                 "total": len(profile.steps),
                 "step_id": profile_step.step_id,
                 "label": profile_step.label,
-                "state": live_step.state.value if live_step else "pending",
-                "detail": live_step.detail if live_step else "Waiting for this step to start.",
+                "state": state,
+                "detail": detail,
                 "pods": [pod.name for pod in live_step.pods] if live_step else [],
                 "hint_count": len(live_step.hints) if live_step else 0,
             })
@@ -235,3 +246,11 @@ class WebConsoleApp:
     def json_response(self, path: str) -> str:
         status, body = self.api_response(path)
         return json.dumps({"status": status, "body": body}, indent=2)
+
+
+def _step_has_live_evidence(step: LiveStepStatus | None) -> bool:
+    if step is None:
+        return False
+    if step.state is not LiveState.PENDING:
+        return True
+    return bool(step.pods or step.events or step.routes or step.hints)
