@@ -7,6 +7,7 @@ import sys
 
 from .config.cli import configure_parser as configure_config_parser, run as run_config_command
 from .diagnostics import ClusterCollector, write_bundle
+from .operations import OperationCatalog, OperationRunner
 from .orchestration import BashOperationAdapter
 from .tui import build_demo_snapshot, build_profile, render_guided_step
 from .version import __version__
@@ -49,6 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
                 metavar="PROFILE",
                 help="print the Python orchestration plan for a deployment profile without running it",
             )
+            sub.add_argument("--operation", choices=("certs", "secrets", "ssc-start", "ssc-stop", "ssc-destroy"), help="preview or run a Bash-backed operation")
+            sub.add_argument("--execute", action="store_true", help="execute a mutating operation instead of dry-running it")
+        if name == "logs":
+            sub.add_argument("--pod", help="print the kubectl logs command for a pod, or execute it")
+            sub.add_argument("--follow", action="store_true", help="follow pod logs")
+        if name == "runbook":
+            sub.add_argument("--preview", help="preview a runbook path with the safe runner")
         if name == "tui":
             sub.add_argument(
                 "--demo-screen",
@@ -98,6 +106,31 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "config":
         return run_config_command(args)
+    if args.command == "deploy" and args.operation:
+        catalog = OperationCatalog()
+        operations = {
+            "certs": catalog.certs(),
+            "secrets": catalog.secrets(),
+            "ssc-start": catalog.app("ssc", "start"),
+            "ssc-stop": catalog.app("ssc", "stop"),
+            "ssc-destroy": catalog.app("ssc", "destroy"),
+        }
+        execution = OperationRunner().run(operations[args.operation], execute=args.execute)
+        print(f"Operation: {execution.operation_id}")
+        print(f"Command: {' '.join(execution.command)}")
+        print(f"Executed: {str(execution.executed).lower()}")
+        print(execution.detail)
+        return 0 if execution.ok else 1
+    if args.command == "logs" and args.pod:
+        execution = OperationRunner().run(OperationCatalog().logs(args.pod, follow=args.follow))
+        print(f"Command: {' '.join(execution.command)}")
+        print(execution.detail)
+        return 0 if execution.ok else 1
+    if args.command == "runbook" and args.preview:
+        execution = OperationRunner().run(OperationCatalog().runbook(args.preview))
+        print(f"Command: {' '.join(execution.command)}")
+        print(execution.detail)
+        return 0 if execution.ok else 1
     if args.command == "deploy" and args.plan:
         profile = build_profile(args.plan)
         adapter = BashOperationAdapter()
