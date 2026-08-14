@@ -35,6 +35,8 @@ are separate products with different users and security boundaries.
 - A Fortify license (`fortify.license`), stored outside the repository when
   desired — see [`secrets/input/README.md`](secrets/input/README.md)
 - A Docker Hub login that can pull from `fortifydocker/*` and `bitnamilegacy/*`
+- For DAST: ScanCentral DAST and WebInspect licenses loaded into LIM before
+  DAST scans can run successfully
 
 ## Quick start
 
@@ -47,12 +49,18 @@ cp .env.example .env
 ./start_wizard.sh
 ```
 
-The first launch displays a mandatory **LAB / DEMO USE ONLY** notice. Type
-`LAB` to acknowledge that this repository's single-node architecture and
-automation are not production supported. This limitation applies to this
-deployment toolkit, not to the production capabilities of Fortify products.
-See [`docs/lab-use.md`](docs/lab-use.md). A concise lab-mode banner remains
-visible in the wizard after acknowledgement.
+The first launch displays a Fortify Lab banner with the current version and a
+mandatory **LAB / DEMO USE ONLY** notice. Type `LAB` to acknowledge that this
+repository's architecture and automation are for lab, evaluation, demo, and
+training use only. This limitation applies to this deployment toolkit, not to
+the production capabilities of Fortify products. See [`docs/lab-use.md`](docs/lab-use.md).
+
+After acknowledgement, the first-run welcome screen explains the recommended
+path for beginners, summarizes the core components, shows a read-only snapshot
+of `.env`, license, Docker, MicroK8s, domain, and selected deployment profile,
+and lists useful local paths such as `.env`, `.env.backups/`, `certs/`, the
+license input, diagnostics directory, and wizard log. Set `FORTIFY_NO_BANNER=1`
+to suppress the banner or `NO_COLOR=1` for plain terminal output.
 
 Inside the wizard, the main menu is organized by task:
 
