@@ -8,10 +8,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.wizard_source import read_wizard_source
+
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "scripts/lib/lab-disclaimer.sh"
-WIZARD = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+WIZARD = read_wizard_source(ROOT)
 HELP = (ROOT / "scripts/lib/help.sh").read_text(encoding="utf-8")
 
 
