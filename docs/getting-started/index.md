@@ -67,8 +67,16 @@ does not print the path or contents. See [Secrets and licenses](../operations/se
 ./start_wizard.sh
 ```
 
-On first use, read the **LAB / DEMO USE ONLY** notice and type `LAB` to
-acknowledge it. From the main menu choose one deployment mode:
+On first use, the wizard shows a Fortify Lab welcome banner with the current version,
+then asks you to read the **LAB / DEMO USE ONLY** notice and type `LAB` to
+acknowledge it. The next screen is a beginner-oriented welcome page with the
+recommended path, a short component map, warnings, important local file
+locations, and a read-only snapshot of `.env`, license, Docker, MicroK8s,
+domain, and deployment profile. Use it to confirm where generated files and
+logs live before you deploy. From there, start Guided deployment or continue to
+the main menu.
+
+From the main menu choose one deployment mode:
 
 === "Guided (recommended)"
 
@@ -228,10 +236,10 @@ Two application tasks still require a person:
    updates the protected Secret without putting the token in files, command
    arguments, or Helm values.
 2. Open LIM as `lim_admin`, retrieve the password from **URLs & credentials**
-   if needed, upload the entitled DAST license, and create the
-   pool named by `LIM_POOL_NAME` (default `Default`). Then run **Manage
-   individual components → ScanCentral DAST → Start / Upgrade** so the scanner
-   can authenticate to LIM.
+   if needed, upload the entitled ScanCentral DAST and WebInspect licenses, and
+   create the pool named by `LIM_POOL_NAME` (default `Default`). Then run
+   **Manage individual components → ScanCentral DAST → Start / Upgrade** so the
+   scanner can authenticate to LIM.
 
 Confirm that MySQL, SSC, and the SAST controller and worker are healthy before
 following the [first successful scan](../operations/first-scan.md) walkthrough.

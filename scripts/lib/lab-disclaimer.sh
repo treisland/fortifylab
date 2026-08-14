@@ -6,6 +6,61 @@
 
 FORTIFY_LAB_ACK_VERSION="1"
 
+fortify_lab_version() {
+    if [ -n "${FORTIFYLAB_VERSION:-}" ]; then
+        printf '%s
+' "$FORTIFYLAB_VERSION"
+        return 0
+    fi
+    if command -v git >/dev/null 2>&1 && [ -n "${FORTIFY_HOME_K8S:-}" ]; then
+        git -C "$FORTIFY_HOME_K8S" describe --tags --always --dirty 2>/dev/null && return 0
+    fi
+    printf '%s
+' "unknown"
+}
+
+fortify_lab_terminal_columns() {
+    if [ -n "${COLUMNS:-}" ] && [[ "$COLUMNS" =~ ^[0-9]+$ ]]; then
+        printf '%s
+' "$COLUMNS"
+        return 0
+    fi
+    tput cols 2>/dev/null || printf '%s
+' 80
+}
+
+fortify_lab_welcome_banner() {
+    [ -n "${FORTIFY_NO_BANNER:-}" ] && return 0
+
+    local version columns width title subtitle plain border_color reset_color title_color
+    version="$(fortify_lab_version)"
+    columns="$(fortify_lab_terminal_columns)"
+    title="FortifyLab"
+    subtitle="Ready-to-scan Fortify training lab"
+
+    if [ -n "${NO_COLOR:-}" ] || [ "${columns:-80}" -lt 64 ]; then
+        printf '%s %s
+' "$title" "$version"
+        printf '%s
+' "$subtitle"
+        return 0
+    fi
+
+    width=60
+    border_color="${BLUE:-}"
+    title_color="${BOLD:-}"
+    reset_color="${RESET:-}"
+    plain=$(printf '%*s' "$width" '')
+    printf '%s╭%s╮%s
+' "$border_color" "${plain// /─}" "$reset_color"
+    printf '%s│%s %s%-32s%18s %s│%s
+' "$border_color" "$reset_color" "$title_color" "$title" "$version" "$border_color" "$reset_color"
+    printf '%s│%s %-58s %s│%s
+' "$border_color" "$reset_color" "$subtitle" "$border_color" "$reset_color"
+    printf '%s╰%s╯%s
+' "$border_color" "${plain// /─}" "$reset_color"
+}
+
 fortify_lab_config_dir() {
     local config_root
     if [ -n "${XDG_CONFIG_HOME:-}" ]; then
@@ -70,6 +125,8 @@ fortify_lab_reset_acknowledgement() {
 }
 
 fortify_lab_show_notice() {
+    fortify_lab_welcome_banner
+    printf '\n'
     cat <<'NOTICE'
 LAB / DEMO USE ONLY
 

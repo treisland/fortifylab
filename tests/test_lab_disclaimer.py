@@ -105,6 +105,35 @@ class LabDisclaimerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertNotIn(str(Path(directory)), result.stderr)
 
+    def test_welcome_banner_supports_version_no_color_and_disable_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config"
+            result = self.run_helper(
+                "NO_COLOR=1 FORTIFYLAB_VERSION=vtest fortify_lab_welcome_banner",
+                config=config,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("FortifyLab vtest", result.stdout)
+            self.assertIn("Ready-to-scan Fortify training lab", result.stdout)
+            self.assertNotIn("\x1b[", result.stdout)
+
+            disabled = self.run_helper(
+                "FORTIFYLAB_VERSION=vtest FORTIFY_NO_BANNER=1 fortify_lab_welcome_banner",
+                config=config,
+            )
+            self.assertEqual(disabled.returncode, 0, disabled.stderr)
+            self.assertEqual(disabled.stdout, "")
+
+    def test_welcome_banner_uses_quiet_narrow_terminal_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.run_helper(
+                "COLUMNS=40 FORTIFYLAB_VERSION=vtest fortify_lab_welcome_banner",
+                config=Path(directory) / "config",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("FortifyLab vtest", result.stdout)
+            self.assertNotIn("╭", result.stdout)
+
     def test_relative_xdg_path_cannot_create_repository_state(self) -> None:
         environment = os.environ.copy()
         environment["XDG_CONFIG_HOME"] = "relative-config"
