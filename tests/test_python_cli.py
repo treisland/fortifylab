@@ -97,6 +97,19 @@ class PythonCliTests(unittest.TestCase):
         self.assertEqual(diagnostics.returncode, 0, diagnostics.stderr)
         self.assertIn('"issues"', diagnostics.stdout)
 
+    def test_doctor_bundle_writes_sanitized_archive(self) -> None:
+        bundle_dir = ROOT / ".tmp-python-diagnostics"
+        try:
+            result = self.run_module("doctor", "--bundle-dir", str(bundle_dir))
+        finally:
+            bundle = bundle_dir / "fortifylab-diagnostics.tar.gz"
+            if bundle.exists():
+                bundle.unlink()
+            bundle_dir.rmdir()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Diagnostics bundle:", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
