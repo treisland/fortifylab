@@ -1,5 +1,6 @@
 const token = new URLSearchParams(window.location.search).get("token");
 const refreshIntervalMs = 5000;
+const themeStorageKey = "fortifylab.theme";
 let refreshInFlight = false;
 const state = document.querySelector("#connection-state");
 const lastUpdated = document.querySelector("#last-updated");
@@ -18,6 +19,39 @@ const store = {
 
 function headers() {
   return token ? { "X-FortifyLab-Token": token } : {};
+}
+
+function applyTheme(choice) {
+  const normalized = ["system", "light", "dark"].includes(choice) ? choice : "system";
+  if (normalized === "system") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.dataset.theme = normalized;
+  }
+  for (const button of document.querySelectorAll("[data-theme-choice]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === normalized));
+  }
+}
+
+function setupThemeSwitch() {
+  let saved = "system";
+  try {
+    saved = window.localStorage.getItem(themeStorageKey) || "system";
+  } catch (error) {
+    saved = "system";
+  }
+  applyTheme(saved);
+  for (const button of document.querySelectorAll("[data-theme-choice]")) {
+    button.addEventListener("click", () => {
+      const choice = button.dataset.themeChoice || "system";
+      try {
+        window.localStorage.setItem(themeStorageKey, choice);
+      } catch (error) {
+        // Theme preference is optional; continue if browser storage is unavailable.
+      }
+      applyTheme(choice);
+    });
+  }
 }
 
 async function loadJson(path) {
@@ -359,4 +393,5 @@ function scheduleRefresh() {
   window.setInterval(refreshConsole, refreshIntervalMs);
 }
 
+setupThemeSwitch();
 scheduleRefresh();
