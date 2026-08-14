@@ -1879,6 +1879,27 @@ env_is_secret_key() {
     esac
 }
 
+python_config_available() {
+    command -v python3 >/dev/null 2>&1 &&
+        [ -x "${FORTIFY_HOME_K8S:-.}/bin/fortifylab" ] &&
+        [ -s "${ENV_FILE:-}" ]
+}
+
+python_config_diagnostics() {
+    python_config_available || return 1
+    "${FORTIFY_HOME_K8S:-.}/bin/fortifylab" config diagnostics --env "$ENV_FILE"
+}
+
+python_config_validate() {
+    python_config_available || return 1
+    "${FORTIFY_HOME_K8S:-.}/bin/fortifylab" config validate --env "$ENV_FILE"
+}
+
+python_config_repair_domain_urls() {
+    python_config_available || return 1
+    "${FORTIFY_HOME_K8S:-.}/bin/fortifylab" config repair-derived --env "$ENV_FILE" --apply
+}
+
 env_display_value() {
     local key="$1" value="${2:-}"
     if env_is_secret_key "$key"; then
@@ -2165,6 +2186,11 @@ env_config_valid() {
 
 deployment_config_guard() {
     local issues
+    if python_config_available; then
+        python_config_validate && return 0
+        printf '%s\n' 'Use Configuration editor -> Repair derived host and URL values from DOMAIN, or edit .env manually, then retry.'
+        return 1
+    fi
     issues=$(env_config_issue_lines)
     [ -z "$issues" ] && return 0
     error "Configuration has invalid host or URL values; deployment is blocked before Kubernetes changes."
@@ -2187,6 +2213,10 @@ app_start_config_guard() {
 
 env_repair_domain_urls() {
     local assume_yes="${1:-}" domain updates=()
+    if [ "$assume_yes" = "--yes" ] && python_config_available; then
+        python_config_repair_domain_urls
+        return $?
+    fi
     domain="${DOMAIN:-fortifydemo.com}"
     domain="${domain,,}"
     env_valid_domain "$domain" || { error "Cannot repair from invalid DOMAIN=${DOMAIN:-<unset>}. Set DOMAIN to a lowercase DNS-style domain first."; return 1; }
@@ -2203,6 +2233,10 @@ env_repair_domain_urls() {
 
 env_diagnostics() {
     local key raw effective expected issues
+    if python_config_available; then
+        python_config_diagnostics
+        return $?
+    fi
     title "Configuration diagnostics"
     printf '\n.env file: %s\n' "$ENV_FILE"
     printf 'DOMAIN:   %s\n' "${DOMAIN:-<unset>}"

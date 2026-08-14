@@ -376,6 +376,22 @@ exit 1
 
 
 
+    def test_wizard_has_python_config_bridge_with_bash_fallbacks(self) -> None:
+        wizard = read_wizard_source(ROOT)
+        for expected in (
+            "python_config_available()",
+            "python_config_diagnostics()",
+            "python_config_validate()",
+            "python_config_repair_domain_urls()",
+            "config diagnostics --env",
+            "config validate --env",
+            "config repair-derived --env",
+            "env_config_issue_lines()",
+            "env_repair_domain_urls()",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, wizard)
+
     def test_fcli_tools_menu_is_warning_only_and_version_pinned(self) -> None:
         wizard = read_wizard_source(ROOT)
         environment = (ROOT / ".env.example").read_text(encoding="utf-8")
