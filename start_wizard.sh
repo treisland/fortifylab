@@ -46,6 +46,8 @@ FAIL_MARK="${RED}✗${RESET}"
 INFO_MARK="${BLUE}ℹ${RESET}"
 FORTIFY_RECOMMENDED_MEMORY_GIB="${FORTIFY_RECOMMENDED_MEMORY_GIB:-16}"
 FORTIFY_RECOMMENDED_DISK_GIB="${FORTIFY_RECOMMENDED_DISK_GIB:-50}"
+FORTIFY_RECOMMENDED_FCLI_VERSION="${FORTIFY_RECOMMENDED_FCLI_VERSION:-3.23.3}"
+FORTIFY_FCLI_INSTALL_DIR="${FORTIFY_FCLI_INSTALL_DIR:-$HOME/fortify/tools/bin}"
 
 hr()       { printf '%s\n' "────────────────────────────────────────────────────────────"; }
 title()    { clear; printf '\n%s%s%s\n' "$BOLD" "$1" "$RESET"; hr; }
@@ -1696,6 +1698,139 @@ versions_menu() {
     fi
     press_any
 }
+
+fcli_path() {
+    command -v fcli 2>/dev/null
+}
+
+fcli_installed_version() {
+    command -v fcli >/dev/null 2>&1 || return 1
+    fcli --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1
+}
+
+fcli_status_line() {
+    local path version
+    path=$(fcli_path || true)
+    if [ -z "$path" ]; then
+        printf '%s FCLI missing; recommended %s\n' "$WARN_MARK" "$FORTIFY_RECOMMENDED_FCLI_VERSION"
+        return 0
+    fi
+    version=$(fcli_installed_version || true)
+    if [ "$version" = "$FORTIFY_RECOMMENDED_FCLI_VERSION" ]; then
+        printf '%s FCLI %s at %s\n' "$OK_MARK" "$version" "$path"
+    elif [ -n "$version" ]; then
+        printf '%s FCLI %s at %s; recommended %s\n' "$WARN_MARK" "$version" "$path" "$FORTIFY_RECOMMENDED_FCLI_VERSION"
+    else
+        printf '%s FCLI found at %s; version unknown; recommended %s\n' "$WARN_MARK" "$path" "$FORTIFY_RECOMMENDED_FCLI_VERSION"
+    fi
+}
+
+fcli_print_status() {
+    section "FCLI status"
+    printf '  Recommended version: %s\n' "$FORTIFY_RECOMMENDED_FCLI_VERSION"
+    printf '  Install directory:    %s\n' "$FORTIFY_FCLI_INSTALL_DIR"
+    printf '  %s\n' "$(fcli_status_line)"
+    cat <<EOF
+
+  FCLI is needed only for local Fortify command-line workflows after the lab is
+  running. Missing or mismatched FCLI does not block infrastructure deployment.
+EOF
+}
+
+fcli_install_or_update() {
+    local version="${FORTIFY_RECOMMENDED_FCLI_VERSION}" target="$FORTIFY_FCLI_INSTALL_DIR"
+    local archive checksum temp_dir url checksum_url expected actual
+    if [ -z "$version" ]; then
+        error "FORTIFY_RECOMMENDED_FCLI_VERSION is empty."
+        return 1
+    fi
+    command -v curl >/dev/null 2>&1 || { error "curl is required to download FCLI."; return 1; }
+    command -v tar >/dev/null 2>&1 || { error "tar is required to extract FCLI."; return 1; }
+    command -v sha256sum >/dev/null 2>&1 || { error "sha256sum is required to verify FCLI."; return 1; }
+    temp_dir=$(mktemp -d) || return 1
+    archive="$temp_dir/fcli-linux.tgz"
+    checksum="$temp_dir/fcli-linux.tgz.sha256"
+    url="https://github.com/fortify/fcli/releases/download/v${version}/fcli-linux.tgz"
+    checksum_url="${url}.sha256"
+    note "Downloading FCLI $version from the Fortify GitHub release assets."
+    if ! curl -fsSL "$url" -o "$archive" || ! curl -fsSL "$checksum_url" -o "$checksum"; then
+        rm -rf "$temp_dir"
+        error "Could not download FCLI $version. Check network access and FORTIFY_RECOMMENDED_FCLI_VERSION."
+        return 1
+    fi
+    expected=$(awk '{print $1; exit}' "$checksum")
+    actual=$(sha256sum "$archive" | awk '{print $1; exit}')
+    if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+        rm -rf "$temp_dir"
+        error "FCLI checksum verification failed."
+        return 1
+    fi
+    mkdir -p "$target" || { rm -rf "$temp_dir"; return 1; }
+    tar -xzf "$archive" -C "$target" fcli fcli_completion || {
+        rm -rf "$temp_dir"
+        error "Could not extract FCLI into $target."
+        return 1
+    }
+    chmod 755 "$target/fcli" 2>/dev/null || true
+    rm -rf "$temp_dir"
+    note "Installed FCLI $version into $target."
+    note "Add this directory to PATH if fcli is not found: export PATH=\"$target:\$PATH\""
+}
+
+fcli_print_command_templates() {
+    local ssc_url="${SSC_URL:-https://ssc.${DOMAIN:-fortifydemo.com}}"
+    local sast_url="${SCSAST_CTRL_URL:-https://sast.${DOMAIN:-fortifydemo.com}/scancentral-ctrl/}"
+    cat <<EOF
+
+SSC-first FCLI templates
+
+  # Create a temporary SSC/FCLI session. Paste token values only when fcli asks,
+  # or replace placeholders in a private shell. Do not save filled commands.
+  fcli ssc session login --url "$ssc_url" --sc-sast-url "$sast_url" --token='<SSC_TOKEN_OR_PROMPT>' --client-auth-token='<SCANCENTRAL_CLIENT_AUTH_TOKEN>' --ssc-session=fortifylab
+
+  # Inspect the intended SSC application version before any scan submission.
+  fcli ssc appversion get '<APP_VERSION_NAME_OR_ID>' --ssc-session=fortifylab
+
+  # Later scan submission starts from a prebuilt package or MBS file; this
+  # readiness menu intentionally does not build sample apps or submit scans.
+  fcli sc-sast scan start --file='<PACKAGE_OR_MBS_FILE>' --publish-to='<APP_VERSION_NAME_OR_ID>' --ssc-session=fortifylab
+
+  fcli ssc session logout --ssc-session=fortifylab
+
+FoD optional templates
+
+  fcli fod session login --url='<FOD_URL>' --tenant='<FOD_TENANT>' --client-id='<FOD_CLIENT_ID>' --client-secret='<FOD_CLIENT_SECRET>' --fod-session=fortifylab-fod
+  fcli fod release get '<FOD_RELEASE_ID_OR_NAME>' --fod-session=fortifylab-fod
+  fcli fod session logout --fod-session=fortifylab-fod
+
+EOF
+}
+
+fcli_tools_menu() {
+    local choice
+    while true; do
+        title "Tools and FCLI readiness"
+        fcli_print_status
+        cat <<EOF
+
+  1. Install or update FCLI to the recommended version
+  2. Show FCLI status
+  3. Show secret-safe command templates
+
+  r. Return
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) fcli_install_or_update; press_any ;;
+            2) fcli_print_status; press_any ;;
+            3) fcli_print_command_templates; press_any ;;
+            [Rr]) return ;;
+            *) error "Invalid"; sleep 1 ;;
+        esac
+    done
+}
+
 
 env_is_secret_key() {
     case "$1" in
@@ -3986,9 +4121,10 @@ EOF
         cat <<EOF
 
   1. Access & credentials
-  2. Certificate trust instructions
-  3. View deployment plan summary
-  4. View wizard log
+  2. Tools and FCLI readiness
+  3. Certificate trust instructions
+  4. View deployment plan summary
+  5. View wizard log
 
   r. Return to main menu
   q. Quit
@@ -3997,9 +4133,10 @@ EOF
         ask choice "Select:"
         case "$choice" in
             1) urls_creds ;;
-            2) certificate_trust_handoff ;;
-            3) wizard_deployment_plan; press_any ;;
-            4) wizard_log_viewer ;;
+            2) fcli_tools_menu ;;
+            3) certificate_trust_handoff ;;
+            4) wizard_deployment_plan; press_any ;;
+            5) wizard_log_viewer ;;
             [Rr]|"") return ;;
             [Qq]) clear; exit 0 ;;
             *) error "Invalid selection"; sleep 1 ;;
@@ -4400,13 +4537,14 @@ main_menu() {
         echo "  10. Cluster snapshot"
         echo "  11. Tail one pod"
         echo "  12. URLs & credentials"
-        echo "  13. Image versions"
-        echo "  14. Configuration editor"
+        echo "  13. Tools and FCLI readiness"
+        echo "  14. Image versions"
+        echo "  15. Configuration editor"
 
         section "Learn"
-        echo "  15. Help Center / Fortify Knowledge Center"
-        echo "  16. Operational guidance and troubleshooting"
-        echo "  17. View wizard log"
+        echo "  16. Help Center / Fortify Knowledge Center"
+        echo "  17. Operational guidance and troubleshooting"
+        echo "  18. View wizard log"
 
         echo
         echo "   q. Quit"
@@ -4426,11 +4564,12 @@ main_menu() {
            10)  cluster_status ;;
            11)  logs_menu ;;
            12)  urls_creds ;;
-           13)  versions_menu ;;
-           14)  edit_env ;;
-           15)  help_center ;;
-           16)  operational_guidance_menu ;;
-           17)  wizard_log_viewer ;;
+           13)  fcli_tools_menu ;;
+           14)  versions_menu ;;
+           15)  edit_env ;;
+           16)  help_center ;;
+           17)  operational_guidance_menu ;;
+           18)  wizard_log_viewer ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;
         esac

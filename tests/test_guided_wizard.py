@@ -48,6 +48,7 @@ class GuidedWizardTests(unittest.TestCase):
             "Diagnostics / live status",
             "Advanced setup and configuration",
             "Lab lifecycle controls",
+            "Tools and FCLI readiness",
         ):
             self.assertIn(label, WIZARD)
 
@@ -102,6 +103,13 @@ class GuidedWizardTests(unittest.TestCase):
             self.assertIn(expected, WIZARD)
         self.assertNotIn("see initial admin password in SSC startup logs", WIZARD)
         self.assertNotIn("search the log for 'admin'", WIZARD)
+
+
+    def test_completion_screen_links_fcli_readiness_handoff(self) -> None:
+        self.assertIn("Tools and FCLI readiness", WIZARD)
+        completion_menu = WIZARD.split("guided_completion_screen()", 1)[1].split("guided_deployment_menu()", 1)[0]
+        self.assertIn("2. Tools and FCLI readiness", completion_menu)
+        self.assertIn("2) fcli_tools_menu", completion_menu)
 
     def test_completion_screen_lists_profile_status_and_next_actions(self) -> None:
         result = self.run_wizard_functions(
