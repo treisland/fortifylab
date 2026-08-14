@@ -60,11 +60,13 @@ new command shell with:
 ./bin/fortifylab --version
 ```
 
-The initial Python commands are intentionally lightweight placeholders for
+The initial Python commands are intentionally lightweight previews for
 `doctor`, `config`, `deploy`, `logs`, `runbook`, and `tui`; migration work will
 replace Bash logic in controlled slices while preserving clone-and-run setup. The
 `./bin/fortifylab tui --demo-screen` command renders the Phase 3.2 guided
-deployment prototype while Bash remains the production guided wizard.
+deployment prototype, and `./bin/fortifylab config diagnostics --env .env`
+previews the Phase 3.4 configuration engine while Bash remains the production
+guided wizard.
 
 The first launch displays a Fortify Lab banner with the current version and a
 mandatory **LAB / DEMO USE ONLY** notice. Type `LAB` to acknowledge that this

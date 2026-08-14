@@ -65,6 +65,13 @@ and dry-run mapping to the existing Bash deployment scripts. The model is
 inspectable with `./bin/fortifylab deploy --plan <profile>` and does not mutate
 the cluster unless later Phase 3 work explicitly wires live execution.
 
+## Configuration engine
+
+Phase 3.4 adds Python APIs and CLI commands for `.env` parsing, preservation,
+validation, derived host/URL repair, backup metadata, diff preview, and rollback.
+The Bash wizard can call the Python config bridge when available and keeps its
+existing Bash implementation as the production fallback during migration.
+
 ## Entry points
 
 `./start_wizard.sh` remains the friendly command for existing users. As Python

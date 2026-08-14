@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .config.cli import configure_parser as configure_config_parser, run as run_config_command
 from .orchestration import BashOperationAdapter
 from .tui import build_demo_snapshot, build_profile, render_guided_step
 from .version import __version__
@@ -29,6 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name, message in _COMMAND_MESSAGES.items():
         sub = subparsers.add_parser(name, help=message)
         sub.set_defaults(message=message)
+        if name == "config":
+            configure_config_parser(sub)
         if name == "deploy":
             sub.add_argument(
                 "--plan",
@@ -66,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.command:
         parser.print_help()
         return 0
+    if args.command == "config":
+        return run_config_command(args)
     if args.command == "deploy" and args.plan:
         profile = build_profile(args.plan)
         adapter = BashOperationAdapter()
