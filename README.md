@@ -68,7 +68,9 @@ deployment prototype, and `./bin/fortifylab config diagnostics --env .env`
 previews the Phase 3.4 configuration engine. `./bin/fortifylab doctor
 --bundle-dir ./diagnostics-out` writes a sanitized Phase 3.5 diagnostics bundle.
 `./bin/fortifylab deploy --operation secrets` previews the Phase 3.6 operation
-command layer as a dry run. Bash remains the production guided wizard.
+command layer as a dry run. `./bin/fortifylab web --check` previews the Phase
+3.7 companion web console access-control and API posture. Bash remains the
+production guided wizard.
 
 The first launch displays a Fortify Lab banner with the current version and a
 mandatory **LAB / DEMO USE ONLY** notice. Type `LAB` to acknowledge that this

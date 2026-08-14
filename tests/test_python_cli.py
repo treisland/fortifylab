@@ -29,7 +29,7 @@ class PythonCliTests(unittest.TestCase):
     def test_module_help_discovers_initial_commands(self) -> None:
         result = self.run_module("--help")
         self.assertEqual(result.returncode, 0, result.stderr)
-        for command in ("doctor", "config", "deploy", "logs", "runbook", "tui"):
+        for command in ("doctor", "config", "deploy", "logs", "runbook", "tui", "web"):
             with self.subTest(command=command):
                 self.assertIn(command, result.stdout)
 
@@ -45,7 +45,7 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("fortifylab 3.1.0-preview", result.stdout)
 
     def test_placeholder_commands_are_clear(self) -> None:
-        for command in ("doctor", "config", "deploy", "logs", "runbook", "tui"):
+        for command in ("doctor", "config", "deploy", "logs", "runbook", "tui", "web"):
             with self.subTest(command=command):
                 result = self.run_module(command)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -117,6 +117,19 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("Operation: secrets.create", result.stdout)
         self.assertIn("Executed: false", result.stdout)
         self.assertIn("Dry run", result.stdout)
+
+    def test_web_check_blocks_lan_without_token(self) -> None:
+        result = self.run_module("web", "--check", "--bind", "0.0.0.0", "--allow-lan")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("LAN access requires an access token", result.stdout)
+
+    def test_web_check_reports_local_api_summary(self) -> None:
+        result = self.run_module("web", "--check")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("web console check: 200", result.stdout)
+        self.assertIn("operations:", result.stdout)
 
 
 if __name__ == "__main__":

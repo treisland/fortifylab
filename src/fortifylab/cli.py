@@ -11,6 +11,7 @@ from .operations import OperationCatalog, OperationRunner
 from .orchestration import BashOperationAdapter
 from .tui import build_demo_snapshot, build_profile, render_guided_step
 from .version import __version__
+from .web import WebConsoleApp, WebConsoleConfig
 
 _COMMAND_MESSAGES = {
     "doctor": "Python doctor command shell is available; Bash adapter is not wired yet.",
@@ -19,6 +20,7 @@ _COMMAND_MESSAGES = {
     "logs": "Python logs command shell is available; log replacement lands in Phase 3.6.",
     "runbook": "Python runbook command shell is available; safe runner lands in Phase 3.6.",
     "tui": "Python guided TUI command shell is available; prototype lands in Phase 3.2.",
+    "web": "Python companion web console preview is available; server hardening lands in Phase 3.8.",
 }
 
 
@@ -57,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--follow", action="store_true", help="follow pod logs")
         if name == "runbook":
             sub.add_argument("--preview", help="preview a runbook path with the safe runner")
+        if name == "web":
+            sub.add_argument("--check", action="store_true", help="validate web console access-control settings")
+            sub.add_argument("--bind", default="127.0.0.1", help="web console bind host")
+            sub.add_argument("--allow-lan", action="store_true", help="allow LAN binding when an access token is configured")
+            sub.add_argument("--token", help="web console access token")
         if name == "tui":
             sub.add_argument(
                 "--demo-screen",
@@ -143,6 +150,17 @@ def main(argv: list[str] | None = None) -> int:
         for index, step in enumerate(plan.steps, start=1):
             deps = ", ".join(step.dependencies) if step.dependencies else "none"
             print(f"{index}. {step.step_id}: {' '.join(step.command)} (depends on: {deps})")
+        return 0
+    if args.command == "web" and args.check:
+        config = WebConsoleConfig(bind_host=args.bind, allow_lan=args.allow_lan, access_token=args.token)
+        issues = config.validate()
+        if issues:
+            for issue in issues:
+                print(issue)
+            return 1
+        status, body = WebConsoleApp(config).api_response("/api/status")
+        print(f"web console check: {status}")
+        print(f"operations: {len(body['operations'])}")
         return 0
     if args.command == "tui" and args.demo_screen:
         print(render_guided_step(build_demo_snapshot()), end="")

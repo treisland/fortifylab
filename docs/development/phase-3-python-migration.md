@@ -86,6 +86,13 @@ lifecycle scripts, pod logs, and safe runbook previews. Mutating operations are
 dry-run by default and require explicit execution, which lets later work replace
 Bash operation internals incrementally without surprising operators.
 
+## Companion web console
+
+Phase 3.7 adds a local/LAN companion web console scaffold over the Python core.
+LAN access requires explicit enablement and an access token; the initial console
+serves status, route, config, certificate, and operation summaries without
+revealing secrets.
+
 ## Entry points
 
 `./start_wizard.sh` remains the friendly command for existing users. As Python
