@@ -8,9 +8,11 @@ import unittest
 import subprocess
 from pathlib import Path
 
+from tests.wizard_source import read_wizard_source
+
 
 ROOT = Path(__file__).resolve().parents[1]
-WIZARD = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+WIZARD = read_wizard_source(ROOT)
 
 
 class GuidedWizardTests(unittest.TestCase):

@@ -102,6 +102,7 @@ nav:
       - Lab use boundary: lab-use.md
   - Contributing:
       - Overview: contributing/index.md
+      - Modular Bash architecture: development/modular-bash-architecture.md
       - Publishing: contributing/publishing.md
   - Architecture decisions:
       - Overview: adr/README.md
