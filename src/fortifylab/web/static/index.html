@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fortify Lab Console</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>Fortify Lab Console</h1>
+        <p>Remote LAN operator view</p>
+      </div>
+      <span class="status">Token required for LAN</span>
+    </header>
+    <section class="grid">
+      <article>
+        <h2>Deployment</h2>
+        <dl>
+          <div><dt>SSC</dt><dd>pending telemetry</dd></div>
+          <div><dt>LIM</dt><dd>pending telemetry</dd></div>
+          <div><dt>SAST</dt><dd>pending telemetry</dd></div>
+          <div><dt>DAST</dt><dd>pending telemetry</dd></div>
+        </dl>
+      </article>
+      <article>
+        <h2>Logs</h2>
+        <ol>
+          <li>ssc-webapp-0</li>
+          <li>lim-0</li>
+          <li>scancentral-sast-controller-0</li>
+        </ol>
+      </article>
+      <article>
+        <h2>Configuration</h2>
+        <dl>
+          <div><dt>Domain</dt><dd>fortifydemo.local</dd></div>
+          <div><dt>Secrets</dt><dd>redacted</dd></div>
+        </dl>
+      </article>
+      <article>
+        <h2>Certificates</h2>
+        <dl>
+          <div><dt>Root CA</dt><dd>certs/rootCA.pem</dd></div>
+          <div><dt>Private CA key</dt><dd>never exported</dd></div>
+        </dl>
+      </article>
+    </section>
+  </main>
+  <script src="main.js"></script>
+</body>
+</html>
