@@ -129,6 +129,9 @@ class WebConsoleApp:
         if path == "/api/operations/jobs":
             try:
                 request = OperationJobRequest.from_payload(payload)
+                spec = self.operation_jobs.catalog.get(request.operation_id)
+                if request.execute and spec.mutates and not self.config.enable_actions:
+                    return 403, {"error": "Action execution is disabled; restart the web console with --enable-actions."}
                 job, created = self.operation_jobs.submit(request)
             except ValueError as exc:
                 return 400, {"error": str(exc)}

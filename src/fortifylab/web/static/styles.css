@@ -410,6 +410,38 @@ p { color: var(--muted); line-height: 1.45; }
   min-width: 0;
 }
 .card-row, .action-card, .confirmation-box, .job-box { display: grid; gap: 7px; }
+.action-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+
+.action-select {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: start;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.action-select span {
+  color: var(--heading);
+  font-weight: 780;
+  overflow-wrap: anywhere;
+}
+
+.action-select:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
+
 .row-main { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
 .row-main strong, .service-card strong { color: var(--heading); overflow-wrap: anywhere; }
 .row-main span, .mono { color: var(--muted); font-family: ui-monospace, "Cascadia Mono", "SFMono-Regular", monospace; font-size: 12px; overflow-wrap: anywhere; }
@@ -585,15 +617,45 @@ p { color: var(--muted); line-height: 1.45; }
   font: inherit;
 }
 
-.disabled-action {
+.confirmation-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.primary-action, .disabled-action {
   width: fit-content;
-  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 9px 12px;
-  color: var(--muted);
-  background: var(--surface-soft);
   font: inherit;
   font-weight: 740;
+}
+
+.primary-action {
+  border: 1px solid var(--accent);
+  color: #ffffff;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.primary-action:hover {
+  background: var(--accent-2);
+}
+
+.primary-action:disabled {
+  opacity: 0.62;
+  cursor: progress;
+}
+
+.primary-action:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.disabled-action {
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--surface-soft);
   cursor: not-allowed;
 }
 

@@ -75,13 +75,16 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("/api/lifecycle/actions", script)
         self.assertIn("/api/lifecycle/audit", script)
         self.assertIn("fallbackLifecycleActions", script)
-        self.assertIn("Execution disabled", script)
+        self.assertIn("Preview only", script)
         self.assertIn("refreshIntervalMs = 5000", script)
         self.assertIn("window.setInterval(refreshConsole, refreshIntervalMs)", script)
         self.assertIn("fortifylab.theme", script)
         self.assertIn("setupPanelFocus", script)
         self.assertIn("openFocusedPanel", script)
         self.assertIn("panel-focus-overlay", script)
+        self.assertIn("postJson", script)
+        self.assertIn("data-run-lifecycle-action", script)
+        self.assertIn("View logs", script)
         self.assertIn(":root[data-theme=\"dark\"]", styles)
         self.assertIn("prefers-color-scheme: dark", styles)
         self.assertIn("uptime-strip", styles)
@@ -89,6 +92,8 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("confirmation-box", styles)
         self.assertIn("panel-focus-button", styles)
         self.assertIn("is-focused-panel.lifecycle-panel", styles)
+        self.assertIn("primary-action", styles)
+        self.assertIn("action-card.is-selected", styles)
 
     def test_serve_once_returns_static_index(self) -> None:
         status, headers, body = self.request_once(WebConsoleConfig(port=0), "/")
@@ -177,6 +182,27 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("application/json", headers["Content-Type"])
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["data"]["job"]["execute"])
+
+    def test_mutating_web_execution_requires_enable_actions(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig())
+
+        status, payload = app.api_mutation_envelope("/api/operations/jobs", {"operation_id": "app.ssc.stop", "execute": True})
+
+        self.assertEqual(status, 403)
+        self.assertFalse(payload["ok"])
+        self.assertIn("execution is disabled", payload["error"]["message"].lower())
+
+    def test_read_only_log_action_can_create_job_without_enable_actions(self) -> None:
+        manager = OperationJobManager(runner=OperationRunner(lambda command: CommandResult(command, 0, "recent logs", "", 0.01)))
+        app = WebConsoleApp(WebConsoleConfig(), operation_jobs=manager)
+
+        status, payload = app.api_mutation_envelope("/api/operations/jobs", {"operation_id": "logs.ssc-webapp-0"})
+        job = wait_for_web_job(manager, payload["data"]["job"]["job_id"])
+
+        self.assertEqual(status, 202)
+        self.assertEqual(job.status.value, "complete")
+        self.assertTrue(job.execution.executed)
+        self.assertIn("recent logs", job.execution.stdout)
 
     def test_api_endpoints_cover_status_config_routes_certificates(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller(), url_health_checker=FakeURLHealthChecker())

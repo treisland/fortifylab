@@ -4,6 +4,8 @@ const themeStorageKey = "fortifylab.theme";
 let refreshInFlight = false;
 let focusedPanel = null;
 let focusedPlaceholder = null;
+let selectedLifecycleActionId = null;
+let lifecycleSubmitting = false;
 const state = document.querySelector("#connection-state");
 const lastUpdated = document.querySelector("#last-updated");
 const store = {
@@ -20,6 +22,7 @@ const store = {
   securityPosture: null,
   lifecycleActions: null,
   lifecycleAudit: null,
+  operationJobs: null,
 };
 
 function panelTitle(panel) {
@@ -119,6 +122,20 @@ function setupThemeSwitch() {
 
 async function loadJson(path) {
   const response = await fetch(path, { headers: headers() });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    const message = payload.error?.message || `Request failed: ${response.status}`;
+    throw new Error(message);
+  }
+  return payload.data || {};
+}
+
+async function postJson(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
     const message = payload.error?.message || `Request failed: ${response.status}`;
@@ -444,39 +461,111 @@ function renderLifecycleActions(data) {
     target("lifecycle").innerHTML = empty("No lifecycle actions are available for preview yet.");
     return;
   }
-  const featured = actions.find((action) => action.confirmation?.required) || actions.find((action) => action.mutates) || actions[0];
+  if (!selectedLifecycleActionId || !actions.some((action) => action.id === selectedLifecycleActionId)) {
+    const firstRunnable = actions.find((action) => actionCanRun(action)) || actions[0];
+    selectedLifecycleActionId = firstRunnable.id;
+  }
+  const selected = actions.find((action) => action.id === selectedLifecycleActionId) || actions[0];
+  const latestJob = latestJobForAction(selected.id);
   target("lifecycle").innerHTML = `
     <div class="lifecycle-layout">
-      <ul class="action-list">${actions.map((action) => renderActionPreview(action)).join("")}</ul>
+      <ul class="action-list">${actions.map((action) => renderActionPreview(action, action.id === selected.id)).join("")}</ul>
       <div class="confirmation-box">
-        <div class="row-main"><strong>Confirmation preview</strong>${pill(featured.impact || "unknown")}</div>
-        <p>${escapeHtml(featured.warning || "Review the command preview, dependency order, and recovery notes before enabling execution.")}</p>
-        <label class="confirmation-label" for="confirmation-preview">Required phrase</label>
-        <input id="confirmation-preview" type="text" value="${escapeHtml(featured.confirmation?.phrase || "No typed phrase required for preview")}" readonly>
-        <code class="command">${actionCommandPreview(featured).length ? escapeHtml(commandLine(actionCommandPreview(featured))) : "Command preview pending backend support."}</code>
-        <button type="button" class="disabled-action" disabled>Execution disabled</button>
+        <div class="row-main"><strong>${escapeHtml(selected.label || "Lifecycle action")}</strong>${pill(selected.impact || "unknown")}</div>
+        <p>${escapeHtml(selected.warning || actionHelpText(selected))}</p>
+        ${renderConfirmationControl(selected)}
+        <code class="command">${actionCommandPreview(selected).length ? escapeHtml(commandLine(actionCommandPreview(selected))) : "Command preview pending backend support."}</code>
+        ${renderActionButton(selected, payload)}
       </div>
       <div class="job-box">
-        <div class="row-main"><strong>Job status</strong>${pill(featured.job?.state || "not_started")}</div>
-        <p>${escapeHtml(featured.job?.message || "No lifecycle job has been submitted.")}</p>
+        <div class="row-main"><strong>Job status</strong>${pill(latestJob?.status || selected.job?.state || "not_started")}</div>
+        <p>${escapeHtml(latestJob?.message || selected.job?.message || "No lifecycle job has been submitted from the web console.")}</p>
+        ${latestJob?.execution?.detail ? `<code class="command">${escapeHtml(latestJob.execution.detail)}</code>` : ""}
       </div>
     </div>`;
+  bindLifecycleControls(payload);
+}
+
+function latestJobForAction(actionId) {
+  const jobs = store.operationJobs?.jobs || [];
+  return jobs.find((job) => job.operation_id === actionId) || null;
+}
+
+function actionHelpText(action) {
+  if (!action.mutates) return "Read-only operation. Useful for evidence collection without changing the lab.";
+  if (action.execution_enabled) return "Execution is enabled. Review the command and confirmation requirements before running.";
+  return "Execution is disabled until the web console is started with action execution enabled.";
+}
+
+function renderConfirmationControl(action) {
+  const confirmation = action.confirmation || {};
+  if (!confirmation.required) {
+    return `<div class="confirmation-note">No typed confirmation required.</div>`;
+  }
+  return `<label class="confirmation-label" for="lifecycle-confirmation">Required phrase</label><input id="lifecycle-confirmation" type="text" placeholder="${escapeHtml(confirmation.phrase || "Enter confirmation phrase")}" autocomplete="off">`;
+}
+
+function actionCanRun(action) {
+  return Boolean(action.execution_enabled || !action.mutates);
+}
+
+function renderActionButton(action, payload) {
+  if (!actionCanRun(action)) {
+    return `<button type="button" class="disabled-action" disabled>${payload.execute_endpoint ? "Execution unavailable" : "Preview only"}</button>`;
+  }
+  const label = action.mutates ? `Run ${action.label || "action"}` : action.kind === "logs" ? "View logs" : `Run ${action.label || "read-only action"}`;
+  return `<button type="button" class="primary-action" data-run-lifecycle-action="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>${escapeHtml(label)}</button>`;
+}
+
+async function submitLifecycleAction(action, payload) {
+  const confirmation = document.querySelector("#lifecycle-confirmation")?.value || null;
+  lifecycleSubmitting = true;
+  renderLifecycleActions(store.lifecycleActions);
+  try {
+    const jobPayload = await postJson(payload.execute_endpoint || "/api/operations/jobs", {
+      operation_id: action.id,
+      execute: Boolean(action.mutates && action.execution_enabled),
+      confirmation,
+    });
+    const existingJobs = store.operationJobs?.jobs || [];
+    store.operationJobs = { jobs: [jobPayload.job, ...existingJobs.filter((job) => job.job_id !== jobPayload.job.job_id)] };
+    await loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit);
+  } catch (error) {
+    store.operationJobs = { jobs: [{ operation_id: action.id, status: "failed", message: error.message }] };
+  } finally {
+    lifecycleSubmitting = false;
+    renderLifecycleActions(store.lifecycleActions);
+  }
+}
+
+function bindLifecycleControls(payload) {
+  for (const button of document.querySelectorAll("[data-lifecycle-action]")) {
+    button.addEventListener("click", () => {
+      selectedLifecycleActionId = button.dataset.lifecycleAction;
+      renderLifecycleActions(store.lifecycleActions);
+    });
+  }
+  const runButton = document.querySelector("[data-run-lifecycle-action]");
+  if (!runButton) return;
+  runButton.addEventListener("click", () => {
+    const action = (payload.actions || []).find((item) => item.id === runButton.dataset.runLifecycleAction);
+    if (action && actionCanRun(action)) submitLifecycleAction(action, payload);
+  });
 }
 
 function actionCommandPreview(action) {
   return action.command_preview || action.command || [];
 }
 
-function renderActionPreview(action) {
+function renderActionPreview(action, selected = false) {
   const confirmation = action.confirmation || {};
   const commandPreview = actionCommandPreview(action);
-  return `<li class="action-card">
-    <div class="row-main"><strong>${escapeHtml(action.label || action.id || "Lifecycle action")}</strong>${pill(action.impact || "unknown")}</div>
+  return `<li class="action-card ${selected ? "is-selected" : ""}">
+    <button type="button" class="action-select" data-lifecycle-action="${escapeHtml(action.id)}"><span>${escapeHtml(action.label || action.id || "Lifecycle action")}</span>${pill(action.impact || "unknown")}</button>
     <div class="row-note">${escapeHtml(action.kind || "operation")} · ${action.mutates ? "mutating" : "read-only"} · ${confirmation.required ? "typed confirmation required" : "no typed confirmation"}</div>
     ${commandPreview.length ? `<code class="command">${escapeHtml(commandLine(commandPreview))}</code>` : `<div class="row-note">Command preview will appear when backend metadata is available.</div>`}
   </li>`;
 }
-
 function renderLifecycleAudit(data) {
   const entries = data.entries || [];
   setText("audit-count", `${entries.length} entries`);
@@ -529,6 +618,7 @@ async function refreshConsole() {
       loadPanel("securityPosture", "/api/security/posture", renderSecurityPosture),
       loadPanel("lifecycleActions", "/api/lifecycle/actions", renderLifecycleActions),
       loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit),
+      loadPanel("operationJobs", "/api/operations/jobs", () => {}),
     ]);
 
     renderSummary();
