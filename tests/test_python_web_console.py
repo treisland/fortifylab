@@ -8,6 +8,7 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from fortifylab.status import EventSummary, HintSeverity, LiveDeploymentSnapshot, LiveState, LiveStepStatus, PodSummary, ProgressHint
 from fortifylab.web import WebConsoleApp, WebConsoleConfig, build_http_server
 
 
@@ -117,7 +118,7 @@ class PythonWebConsoleTests(unittest.TestCase):
     def test_api_endpoints_cover_status_config_routes_certificates(self) -> None:
         app = WebConsoleApp(WebConsoleConfig())
 
-        for path in ("/api/status", "/api/config", "/api/routes", "/api/certificates", "/api/deployment/status"):
+        for path in ("/api/status", "/api/config", "/api/routes", "/api/certificates", "/api/deployment/status", "/api/deployment/guide", "/api/deployment/diagnostics", "/api/deployment/logs"):
             with self.subTest(path=path):
                 status, payload = app.api_envelope(path)
                 self.assertEqual(status, 200)
@@ -130,6 +131,64 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
         self.assertIn("steps", payload["data"])
+
+    def test_guided_deployment_api_returns_ordered_steps(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller())
+        status, payload = app.api_envelope("/api/deployment/guide")
+
+        self.assertEqual(status, 200)
+        steps = payload["data"]["steps"]
+        self.assertEqual(steps[0]["index"], 1)
+        self.assertEqual(steps[0]["total"], len(steps))
+        self.assertTrue(any(step["step_id"] == "ssc" and step["state"] == "blocked" for step in steps))
+
+    def test_deployment_diagnostics_are_contextual_and_redacted(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller())
+        _, payload = app.api_envelope("/api/deployment/diagnostics")
+
+        findings = payload["data"]["findings"]
+        self.assertEqual(findings[0]["step_id"], "ssc")
+        self.assertIn("registry", findings[0]["next_inspection"].lower())
+        self.assertNotIn("password", str(payload).lower())
+
+    def test_deployment_logs_api_numbers_resources_and_skips_selection_for_single_match(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller())
+        _, payload = app.api_envelope("/api/deployment/logs")
+
+        resources = payload["data"]["resources"]
+        ssc = next(resource for resource in resources if resource["step_id"] == "ssc")
+        self.assertFalse(ssc["selection_required"])
+        self.assertEqual(ssc["pods"][0]["number"], 1)
+        self.assertIn("logs", ssc["pods"][0]["recent_command"])
+
+
+
+class FakeStatusPoller:
+    def snapshot(self) -> LiveDeploymentSnapshot:
+        return LiveDeploymentSnapshot(
+            namespace="fortify",
+            profile="ssc_only",
+            generated_at="2026-08-14T00:00:00+00:00",
+            overall_state=LiveState.BLOCKED,
+            steps=(
+                LiveStepStatus(
+                    step_id="mysql",
+                    label="MySQL",
+                    state=LiveState.COMPLETE,
+                    detail="ready",
+                    pods=(PodSummary("mysql-0", 1, 1, "Running"),),
+                ),
+                LiveStepStatus(
+                    step_id="ssc",
+                    label="Software Security Center",
+                    state=LiveState.BLOCKED,
+                    detail="image pull blocked",
+                    pods=(PodSummary("ssc-webapp-0", 0, 1, "Running", reason="ImagePullBackOff"),),
+                    events=(EventSummary("Warning", "ImagePullBackOff", "pod/ssc-webapp-0", "Back-off pulling image"),),
+                    hints=(ProgressHint("ssc", HintSeverity.BLOCKED, "image", "Image pull blocked.", "Check registry credentials."),),
+                ),
+            ),
+        )
 
 
 if __name__ == "__main__":

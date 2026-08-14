@@ -9,7 +9,8 @@ from typing import Any
 
 from fortifylab.diagnostics import route_findings
 from fortifylab.operations import OperationCatalog
-from fortifylab.status import LiveStatusPoller
+from fortifylab.status import LiveDeploymentSnapshot, LiveStatusPoller
+from fortifylab.tui.profiles import build_profile
 
 
 @dataclass(frozen=True)
@@ -29,9 +30,10 @@ class WebConsoleConfig:
 
 
 class WebConsoleApp:
-    def __init__(self, config: WebConsoleConfig, static_dir: Path | None = None) -> None:
+    def __init__(self, config: WebConsoleConfig, static_dir: Path | None = None, status_poller: Any | None = None) -> None:
         self.config = config
         self.static_dir = static_dir or Path(__file__).with_name("static")
+        self.status_poller = status_poller
 
     def is_local_only(self) -> bool:
         return self.config.bind_host in ("127.0.0.1", "localhost")
@@ -55,7 +57,13 @@ class WebConsoleApp:
                 ],
             }
         if path == "/api/deployment/status":
-            return 200, LiveStatusPoller().snapshot().to_dict()
+            return 200, self._snapshot().to_dict()
+        if path == "/api/deployment/guide":
+            return 200, self.guided_deployment_payload(self._snapshot())
+        if path == "/api/deployment/diagnostics":
+            return 200, self.deployment_diagnostics_payload(self._snapshot())
+        if path == "/api/deployment/logs":
+            return 200, self.deployment_logs_payload(self._snapshot())
         if path == "/api/routes":
             return 200, {"findings": list(route_findings(()))}
         if path == "/api/config":
@@ -63,6 +71,64 @@ class WebConsoleApp:
         if path == "/api/certificates":
             return 200, {"root_ca": "certs/rootCA.pem", "private_key_exported": False}
         return 404, {"error": "not found"}
+
+    def _snapshot(self) -> LiveDeploymentSnapshot:
+        poller = self.status_poller or LiveStatusPoller()
+        return poller.snapshot()
+
+    def guided_deployment_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
+        profile = build_profile(snapshot.profile)
+        by_id = {step.step_id: step for step in snapshot.steps}
+        steps = []
+        for index, profile_step in enumerate(profile.steps, start=1):
+            live_step = by_id.get(profile_step.step_id)
+            steps.append({
+                "index": index,
+                "total": len(profile.steps),
+                "step_id": profile_step.step_id,
+                "label": profile_step.label,
+                "state": live_step.state.value if live_step else "pending",
+                "detail": live_step.detail if live_step else "Waiting for this step to start.",
+                "pods": [pod.name for pod in live_step.pods] if live_step else [],
+                "hint_count": len(live_step.hints) if live_step else 0,
+            })
+        return {"profile": snapshot.profile, "overall_state": snapshot.overall_state.value, "steps": steps}
+
+    def deployment_diagnostics_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
+        findings = []
+        for step in snapshot.steps:
+            for hint in step.hints:
+                findings.append({
+                    "step_id": step.step_id,
+                    "step_label": step.label,
+                    "severity": hint.severity.value,
+                    "reason": hint.reason,
+                    "message": hint.message,
+                    "next_inspection": hint.next_inspection,
+                })
+        return {"findings": findings, "tool_warnings": list(snapshot.tool_warnings)}
+
+    def deployment_logs_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
+        resources = []
+        for step in snapshot.steps:
+            pods = list(step.pods)
+            if not pods:
+                continue
+            resources.append({
+                "step_id": step.step_id,
+                "step_label": step.label,
+                "selection_required": len(pods) > 1,
+                "pods": [
+                    {
+                        "number": index,
+                        "name": pod.name,
+                        "recent_command": ["microk8s", "kubectl", "-n", snapshot.namespace, "logs", pod.name, "--tail", "120"],
+                        "follow_command": ["microk8s", "kubectl", "-n", snapshot.namespace, "logs", pod.name, "-f"],
+                    }
+                    for index, pod in enumerate(pods, start=1)
+                ],
+            })
+        return {"resources": resources}
 
     def api_envelope(self, path: str) -> tuple[int, dict[str, Any]]:
         status, body = self.api_response(path)
