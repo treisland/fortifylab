@@ -47,6 +47,16 @@ Preferred order:
 8. Remote LAN companion web console.
 9. Packaging and upgrade hardening.
 
+## Guided TUI prototype
+
+Phase 3.2 introduces a Python guided deployment TUI prototype as an opt-in
+preview through `./bin/fortifylab tui --demo-screen`. The prototype owns the
+Python screen model, smooth in-place rendering primitives, auto-advance control
+labels, contextual log and diagnostics entry points, and deployment profile data.
+It does not execute live deployment operations yet; `./start_wizard.sh` remains
+the production guided deployment path until later Phase 3 work replaces each
+behavior with tested Python modules.
+
 ## Entry points
 
 `./start_wizard.sh` remains the friendly command for existing users. As Python

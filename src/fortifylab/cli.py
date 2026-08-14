@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .tui import build_demo_snapshot, render_guided_step
 from .version import __version__
 
 _COMMAND_MESSAGES = {
@@ -27,6 +28,12 @@ def build_parser() -> argparse.ArgumentParser:
     for name, message in _COMMAND_MESSAGES.items():
         sub = subparsers.add_parser(name, help=message)
         sub.set_defaults(message=message)
+        if name == "tui":
+            sub.add_argument(
+                "--demo-screen",
+                action="store_true",
+                help="render a deterministic guided deployment prototype screen",
+            )
     return parser
 
 
@@ -35,6 +42,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
+        return 0
+    if args.command == "tui" and args.demo_screen:
+        print(render_guided_step(build_demo_snapshot()), end="")
         return 0
     print(args.message)
     return 0
