@@ -162,11 +162,25 @@ app_index_in_full_lifecycle() {
     ! app_index_is_sample "$1"
 }
 
+sample_default_url_for_var() {
+    local variable="$1" domain="${DOMAIN:-fortifydemo.com}"
+    case "$variable" in
+        JUICE_SHOP_URL) printf '%s\n' "https://juice-shop.$domain" ;;
+        WEBGOAT_URL) printf '%s\n' "https://webgoat.$domain" ;;
+        DVWA_URL) printf '%s\n' "https://dvwa.$domain" ;;
+        *) return 1 ;;
+    esac
+}
+
 app_url_for_index() {
-    local idx="$1" variable=""
+    local idx="$1" variable="" value=""
     variable="${APP_URL_VAR[$idx]:-}"
     [ -n "$variable" ] || return 0
-    printf '%s\n' "${!variable:-}"
+    value="${!variable:-}"
+    if [ -z "$value" ]; then
+        value="$(sample_default_url_for_var "$variable" 2>/dev/null || true)"
+    fi
+    printf '%s\n' "$value"
 }
 
 app_url_display_for_index() {
@@ -629,14 +643,17 @@ apps_menu_for_scope() {
         fi
         printf '\n  %-3s %-20s %s\n' "#" "Name" "Status"
         printf '  %s\n' "─────────────────────────────────────"
-        local i visible=0
+        local i display_idx visible=0 visible_indices=()
         for i in "${!APP_LABEL[@]}"; do
             if [ "$scope" = "samples" ]; then
                 app_index_is_sample "$i" || continue
             fi
             visible=$((visible + 1))
+            display_idx="$visible"
+            [ "$scope" = "all" ] && display_idx=$((i + 1))
+            visible_indices[$visible]="$i"
             printf '  %-3d %-20s %s\n' \
-                $((i + 1)) "${APP_LABEL[$i]}" "$(app_status "${APP_PODS[$i]}")"
+                "$display_idx" "${APP_LABEL[$i]}" "$(app_status "${APP_PODS[$i]}")"
         done
         [ "$visible" -eq 0 ] && printf '  %s\n' "No sample applications are registered."
         echo
@@ -650,13 +667,20 @@ apps_menu_for_scope() {
             [Qq]) clear; exit 0 ;;
             ''|*[!0-9]*) error "Invalid selection"; sleep 1 ;;
             *)
-                if [ "$choice" -ge 1 ] && [ "$choice" -le "${#APP_LABEL[@]}" ]; then
-                    if [ "$scope" = "samples" ] && ! app_index_is_sample $((choice - 1)); then
-                        error "Select one of the sample application numbers shown above."
+                if [ "$choice" -ge 1 ]; then
+                    if [ "$scope" = "samples" ]; then
+                        if [ "$choice" -le "$visible" ] && [ -n "${visible_indices[$choice]:-}" ]; then
+                            app_action_menu "${visible_indices[$choice]}"
+                        else
+                            error "Select one of the sample application numbers shown above."
+                            sleep 1
+                        fi
+                    elif [ "$choice" -le "${#APP_LABEL[@]}" ]; then
+                        app_action_menu $((choice - 1))
+                    else
+                        error "Out of range"
                         sleep 1
-                        continue
                     fi
-                    app_action_menu $((choice - 1))
                 else
                     error "Out of range"
                     sleep 1

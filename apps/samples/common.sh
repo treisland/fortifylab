@@ -25,6 +25,17 @@ sample_kubectl() {
 sample_app_load_env() {
     # shellcheck disable=SC1090
     source "$FORTIFY_HOME_K8S/.env"
+    sample_app_apply_defaults
+}
+
+sample_app_apply_defaults() {
+    local domain="${DOMAIN:-fortifydemo.com}"
+    export JUICE_SHOP="${JUICE_SHOP:-juice-shop.$domain}"
+    export WEBGOAT="${WEBGOAT:-webgoat.$domain}"
+    export DVWA="${DVWA:-dvwa.$domain}"
+    export JUICE_SHOP_URL="${JUICE_SHOP_URL:-https://$JUICE_SHOP}"
+    export WEBGOAT_URL="${WEBGOAT_URL:-https://$WEBGOAT}"
+    export DVWA_URL="${DVWA_URL:-https://$DVWA}"
 }
 
 sample_app_start() {
