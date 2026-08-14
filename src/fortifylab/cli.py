@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import time
 
 from .bootstrap import run_bootstrap_checks
 from .config.cli import configure_parser as configure_config_parser, run as run_config_command
@@ -11,7 +13,9 @@ from .diagnostics import ClusterCollector, write_bundle
 from .operations import OperationCatalog, OperationRunner
 from .orchestration import BashOperationAdapter
 from .runtime import compatibility_report, render_compatibility_report, runtime_paths, write_runtime_log
+from .status import LiveStatusPoller, render_snapshot
 from .tui import build_demo_snapshot, build_profile, render_guided_step
+from .tui.screen import TerminalScreen
 from .version import __version__
 from .web import WebConsoleApp, WebConsoleConfig, serve_web_console
 
@@ -56,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
                 metavar="PROFILE",
                 help="print the Python orchestration plan for a deployment profile without running it",
             )
+            sub.add_argument("--status", action="store_true", help="print live deployment status without changing the cluster")
+            sub.add_argument("--profile", default="full_lab", help="deployment profile for status views")
+            sub.add_argument("--watch", action="store_true", help="refresh deployment status in place")
+            sub.add_argument("--refresh", type=int, default=5, help="watch refresh interval in seconds")
+            sub.add_argument("--json", action="store_true", help="print deployment status as JSON")
             sub.add_argument("--operation", choices=("certs", "secrets", "ssc-start", "ssc-stop", "ssc-destroy"), help="preview or run a Bash-backed operation")
             sub.add_argument("--execute", action="store_true", help="execute a mutating operation instead of dry-running it")
         if name == "logs":
@@ -139,6 +148,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "config":
         return run_config_command(args)
+    if args.command == "deploy" and args.status:
+        poller = LiveStatusPoller(profile=args.profile)
+        if args.watch:
+            screen = TerminalScreen()
+            try:
+                while True:
+                    snapshot = poller.snapshot()
+                    frame = json.dumps(snapshot.to_dict(), indent=2) + "\n" if args.json else render_snapshot(snapshot)
+                    screen.render(frame)
+                    time.sleep(max(1, args.refresh))
+            except KeyboardInterrupt:
+                screen.close()
+                return 130
+        snapshot = poller.snapshot()
+        if args.json:
+            print(json.dumps(snapshot.to_dict(), indent=2))
+        else:
+            print(render_snapshot(snapshot), end="")
+        return 0
     if args.command == "deploy" and args.operation:
         catalog = OperationCatalog()
         operations = {
