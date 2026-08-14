@@ -131,6 +131,14 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("web console check: 200", result.stdout)
         self.assertIn("operations:", result.stdout)
 
+    def test_doctor_environment_reports_bootstrap_checks(self) -> None:
+        result = self.run_module("doctor", "--environment")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("python-version: ok", result.stdout)
+        self.assertIn("clone-layout: ok", result.stdout)
+        self.assertIn("compatibility-wrappers: ok", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

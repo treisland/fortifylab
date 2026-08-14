@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .bootstrap import run_bootstrap_checks
 from .config.cli import configure_parser as configure_config_parser, run as run_config_command
 from .diagnostics import ClusterCollector, write_bundle
 from .operations import OperationCatalog, OperationRunner
@@ -35,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub = subparsers.add_parser(name, help=message)
         sub.set_defaults(message=message)
         if name == "doctor":
+            sub.add_argument("--environment", action="store_true", help="run clone-and-run bootstrap and migration checks")
             sub.add_argument(
                 "--collect",
                 action="store_true",
@@ -95,6 +97,12 @@ def main(argv: list[str] | None = None) -> int:
     if not args.command:
         parser.print_help()
         return 0
+    if args.command == "doctor" and args.environment:
+        checks = run_bootstrap_checks()
+        for check in checks:
+            state = "ok" if check.ok else "failed"
+            print(f"{check.name}: {state} - {check.detail}")
+        return 0 if all(check.ok for check in checks) else 1
     if args.command == "doctor" and args.collect:
         results = ClusterCollector().collect()
         for result in results:
