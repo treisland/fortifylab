@@ -160,6 +160,8 @@ class GuidedWizardTests(unittest.TestCase):
             "FortifyLab does not store or display that vendor default password",
             "Credential availability",
             "Certificate trust",
+            "First scan handoff",
+            "docs/examples/first-scan",
         ):
             self.assertIn(expected, WIZARD)
         self.assertNotIn("see initial admin password in SSC startup logs", WIZARD)
@@ -171,6 +173,13 @@ class GuidedWizardTests(unittest.TestCase):
         completion_menu = WIZARD.split("guided_completion_screen()", 1)[1].split("guided_deployment_menu()", 1)[0]
         self.assertIn("2. Tools and FCLI readiness", completion_menu)
         self.assertIn("2) fcli_tools_menu", completion_menu)
+
+    def test_completion_screen_links_first_scan_handoff(self) -> None:
+        self.assertIn("First scan handoff", WIZARD)
+        self.assertIn("first_scan_handoff()", WIZARD)
+        completion_menu = WIZARD.split("guided_completion_screen()", 1)[1].split("guided_deployment_menu()", 1)[0]
+        self.assertIn("3. First scan handoff", completion_menu)
+        self.assertIn("3) first_scan_handoff", completion_menu)
 
     def test_completion_screen_lists_profile_status_and_next_actions(self) -> None:
         result = self.run_wizard_functions(
@@ -1259,6 +1268,57 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("GUIDED_STEP_DURATION=", WIZARD)
         self.assertIn("GUIDED_STEP_IMPACT=", WIZARD)
         self.assertIn("persistent-data deletion is a separate expert action", WIZARD)
+
+
+    def test_cluster_profile_defaults_and_menu_are_available(self) -> None:
+        env = (ROOT / ".env.example").read_text(encoding="utf-8")
+        for phrase in (
+            'FORTIFY_CLUSTER_PROFILE="local"',
+            'FORTIFY_CLUSTER_PROFILE_NAMES="local"',
+            'FORTIFY_CLUSTER_PROFILE_LOCAL_STORAGE_CLASS="nfs"',
+            'FORTIFY_CLUSTER_PROFILE_LOCAL_INGRESS_MODE="microk8s-traefik"',
+        ):
+            self.assertIn(phrase, env)
+        for phrase in (
+            "Cluster profiles and remote readiness",
+            "cluster_profile_menu()",
+            "cluster_profile_remote_readiness()",
+            "Remote SSH checks",
+            "never copy secrets or mutate remote hosts",
+        ):
+            self.assertIn(phrase, WIZARD)
+
+    def test_cluster_profile_context_mismatch_blocks_deployment(self) -> None:
+        result = self.run_wizard_functions(
+            'wizard_log_event() { :; }; '
+            'KUBECTL=mock_kubectl; '
+            'mock_kubectl() { case "$*" in "config current-context") printf "local-context\\n" ;; esac; }; '
+            'FORTIFY_CLUSTER_PROFILE=remote; '
+            'FORTIFY_CLUSTER_PROFILE_REMOTE_KUBE_CONTEXT=remote-context; '
+            'cluster_profile_report; cluster_profile_confirm_target_context; printf "RC=%s\\n" "$?"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Selected cluster profile: remote", result.stdout)
+        self.assertIn("Kube context:       remote-context", result.stdout)
+        self.assertIn("Current context:    local-context", result.stdout)
+        self.assertIn("Warning: configured context does not match", result.stdout)
+        self.assertIn("RC=1", result.stdout)
+        self.assertIn("expects kube context 'remote-context'", result.stderr)
+
+    def test_remote_readiness_is_ssh_batch_read_only(self) -> None:
+        remote_body = WIZARD.split("cluster_profile_remote_readiness()", 1)[1].split("cluster_profile_diagnostics()", 1)[0]
+        self.assertIn("ssh -o BatchMode=yes -o ConnectTimeout=5", remote_body)
+        for command in ("docker", "microk8s", "kubectl", "helm", "snap"):
+            self.assertIn(command, remote_body)
+        for mutating_command in ("scp ", "rsync ", "apt install", "snap install", "kubectl apply", "microk8s enable"):
+            self.assertNotIn(mutating_command, remote_body)
+
+    def test_diagnostics_bundle_includes_cluster_profile_report(self) -> None:
+        helper = (ROOT / "scripts" / "lib" / "operational-help.sh").read_text(encoding="utf-8")
+        diagnostics = (ROOT / "docs" / "operations" / "diagnostics.md").read_text(encoding="utf-8")
+        self.assertIn("cluster_profile_report", helper)
+        self.assertIn("cluster-profile.txt", helper)
+        self.assertIn("cluster-profile.txt", diagnostics)
 
 
 if __name__ == "__main__":

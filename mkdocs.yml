@@ -83,6 +83,7 @@ nav:
   - Deployment:
       - Overview: deployment/index.md
       - Deployment and lifecycle: operations/deployment-and-lifecycle.md
+      - Coordinated multi-node lab: operations/coordinated-multi-node.md
       - Networking and TLS: operations/networking-and-tls.md
   - Operations:
       - Overview: operations/README.md
@@ -90,6 +91,7 @@ nav:
       - Versions and compatibility: operations/versions-and-compatibility.md
       - FCLI readiness: operations/fcli-readiness.md
       - First scan: operations/first-scan.md
+      - First-scan command examples: examples/first-scan/README.md
       - Runbook Library: operations/runbooks.md
   - Configuration:
       - Overview: configuration/index.md

@@ -24,6 +24,7 @@ fi
 source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
+source "$FORTIFY_HOME_K8S/scripts/lib/tls.sh"
 
 # Running under sudo would create files in secrets/generated/ owned by root,
 # which then block subsequent normal-user runs from rebuilding the directory.
@@ -71,10 +72,24 @@ configure_microk8s_ingress_default_tls() {
 
 fortify_resolve_license_file || exit 1
 
+TLS_MODE="$(fortify_tls_mode)"
+
 if [ ! -f "$TRUSTSTORE" ] || [ ! -f "$JVM_KEYSTORE" ]; then
   echo "❌ Certs/keystores not found. Run scripts/create-certs.sh first."
   exit 1
 fi
+
+fortify_tls_validate_cert_file "SERVER_CERT" "$SERVER_CERT" || exit 1
+fortify_tls_validate_key_file "SERVER_KEY" "$SERVER_KEY" || exit 1
+fortify_tls_cert_key_match "$SERVER_CERT" "$SERVER_KEY" || {
+  echo "❌ SERVER_CERT and SERVER_KEY do not match." >&2
+  exit 1
+}
+fortify_tls_validate_cert_hosts "$SERVER_CERT" || {
+  echo "❌ TLS certificate does not cover the configured lab hostnames." >&2
+  echo "   Re-run scripts/create-certs.sh after fixing DOMAIN/hostnames or BYO TLS inputs." >&2
+  exit 1
+}
 
 
 #--------------------------

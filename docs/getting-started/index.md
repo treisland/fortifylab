@@ -243,6 +243,10 @@ Two application tasks still require a person:
 
 Confirm that MySQL, SSC, and the SAST controller and worker are healthy before
 following the [first successful scan](../operations/first-scan.md) walkthrough.
+The completion screen also offers a **First scan handoff** that points to
+placeholder SAST/DAST command starters under `docs/examples/first-scan/`.
+Those starters keep SSC as the primary result destination, keep FoD optional,
+and require tokens and target URLs through environment variables.
 
 ## Destructive actions are separate
 
