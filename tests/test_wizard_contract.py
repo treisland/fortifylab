@@ -29,6 +29,7 @@ class WizardContractTests(unittest.TestCase):
             "app-registry.sh",
             "operations.sh",
             "guided.sh",
+            "runbooks.sh",
             "menu.sh",
         )
         self.assertIn("source_wizard_module()", entrypoint)

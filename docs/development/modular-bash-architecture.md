@@ -13,6 +13,7 @@ argument dispatch. Feature logic lives in modules under `scripts/wizard/`.
 - `guided.sh` owns deployment profiles, guided step state, probes, wait screens,
   deployment orchestration, and preflight checks.
 - `menu.sh` owns the first-time welcome flow and main menu.
+- `runbooks.sh` owns Runbook Library discovery, metadata parsing, validation, parameter prompts, previews, and execution.
 
 ## Loading Contract
 

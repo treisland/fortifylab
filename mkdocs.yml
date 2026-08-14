@@ -90,6 +90,7 @@ nav:
       - Versions and compatibility: operations/versions-and-compatibility.md
       - FCLI readiness: operations/fcli-readiness.md
       - First scan: operations/first-scan.md
+      - Runbook Library: operations/runbooks.md
   - Configuration:
       - Overview: configuration/index.md
       - Secrets and licenses: operations/secrets-and-licenses.md

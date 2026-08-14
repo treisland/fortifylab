@@ -178,13 +178,14 @@ main_menu() {
         echo "  12. Tail one pod"
         echo "  13. URLs & credentials"
         echo "  14. Tools and FCLI readiness"
-        echo "  15. Image versions"
-        echo "  16. Configuration editor"
+        echo "  15. Runbook Library"
+        echo "  16. Image versions"
+        echo "  17. Configuration editor"
 
         section "Learn"
-        echo "  17. Help Center / Fortify Knowledge Center"
-        echo "  18. Operational guidance and troubleshooting"
-        echo "  19. View wizard log"
+        echo "  18. Help Center / Fortify Knowledge Center"
+        echo "  19. Operational guidance and troubleshooting"
+        echo "  20. View wizard log"
 
         echo
         echo "   q. Quit"
@@ -206,11 +207,12 @@ main_menu() {
            12)  logs_menu ;;
            13)  urls_creds ;;
            14)  fcli_tools_menu ;;
-           15)  versions_menu ;;
-           16)  edit_env ;;
-           17)  help_center ;;
-           18)  operational_guidance_menu ;;
-           19)  wizard_log_viewer ;;
+           15)  runbooks_menu ;;
+           16)  versions_menu ;;
+           17)  edit_env ;;
+           18)  help_center ;;
+           19)  operational_guidance_menu ;;
+           20)  wizard_log_viewer ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;
         esac

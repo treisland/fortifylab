@@ -14,6 +14,7 @@ def read_wizard_source(root: Path) -> str:
         "app-registry.sh",
         "operations.sh",
         "guided.sh",
+        "runbooks.sh",
         "menu.sh",
     ):
         module = module_dir / module_name
