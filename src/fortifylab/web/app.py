@@ -9,6 +9,7 @@ from typing import Any
 
 from fortifylab.diagnostics import route_findings
 from fortifylab.operations import OperationCatalog
+from fortifylab.status import LiveStatusPoller
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,8 @@ class WebConsoleApp:
                     for spec in operations
                 ],
             }
+        if path == "/api/deployment/status":
+            return 200, LiveStatusPoller().snapshot().to_dict()
         if path == "/api/routes":
             return 200, {"findings": list(route_findings(()))}
         if path == "/api/config":

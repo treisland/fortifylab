@@ -117,12 +117,19 @@ class PythonWebConsoleTests(unittest.TestCase):
     def test_api_endpoints_cover_status_config_routes_certificates(self) -> None:
         app = WebConsoleApp(WebConsoleConfig())
 
-        for path in ("/api/status", "/api/config", "/api/routes", "/api/certificates"):
+        for path in ("/api/status", "/api/config", "/api/routes", "/api/certificates", "/api/deployment/status"):
             with self.subTest(path=path):
                 status, payload = app.api_envelope(path)
                 self.assertEqual(status, 200)
                 self.assertTrue(payload["ok"])
                 self.assertIsNone(payload["error"])
+
+    def test_deployment_status_api_returns_steps(self) -> None:
+        status, payload = WebConsoleApp(WebConsoleConfig()).api_envelope("/api/deployment/status")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertIn("steps", payload["data"])
 
 
 if __name__ == "__main__":

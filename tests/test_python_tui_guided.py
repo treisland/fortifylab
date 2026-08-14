@@ -5,7 +5,8 @@ from __future__ import annotations
 import io
 import unittest
 
-from fortifylab.tui import ControlMode, GuidedStep, StepSnapshot, StepState, build_demo_snapshot, render_guided_step
+from fortifylab.status import EventSummary, LiveState, LiveStepStatus, PodSummary, ProgressHint, HintSeverity
+from fortifylab.tui import ControlMode, GuidedStep, StepSnapshot, StepState, build_demo_snapshot, render_guided_step, step_snapshot_from_live
 from fortifylab.tui.screen import TerminalScreen
 
 
@@ -47,6 +48,24 @@ class GuidedTuiPrototypeTests(unittest.TestCase):
         self.assertEqual(output.count(TerminalScreen.CURSOR_HOME), 2)
         self.assertEqual(output.count(TerminalScreen.ERASE_TO_END), 2)
         self.assertTrue(output.endswith(TerminalScreen.SHOW_CURSOR))
+
+    def test_live_status_converts_to_guided_snapshot(self) -> None:
+        live = LiveStepStatus(
+            step_id="ssc",
+            label="Software Security Center",
+            state=LiveState.BLOCKED,
+            detail="Waiting for image pull.",
+            pods=(PodSummary("ssc-webapp-0", 0, 1, "Running", reason="ImagePullBackOff"),),
+            events=(EventSummary("Warning", "ImagePullBackOff", "pod/ssc-webapp-0", "Back-off pulling image"),),
+            hints=(ProgressHint("ssc", HintSeverity.BLOCKED, "image", "Image pull blocked.", "Check registry credentials."),),
+        )
+
+        snapshot = step_snapshot_from_live(live, index=9, total=13)
+        rendered = render_guided_step(snapshot)
+
+        self.assertEqual(snapshot.state, StepState.FAILED)
+        self.assertIn("ssc-webapp-0", rendered)
+        self.assertIn("Image pull blocked", rendered)
 
 
 if __name__ == "__main__":

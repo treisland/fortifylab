@@ -162,6 +162,20 @@ class PythonCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("LAN access requires an access token", result.stdout)
 
+    def test_deploy_status_json_handles_missing_cluster_tools(self) -> None:
+        result = self.run_module("deploy", "--status", "--json")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('"overall_state"', result.stdout)
+        self.assertIn('"tool_warnings"', result.stdout)
+
+    def test_deploy_status_text_handles_missing_cluster_tools(self) -> None:
+        result = self.run_module("deploy", "--status")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Deployment status:", result.stdout)
+        self.assertIn("Overall:", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -152,3 +152,38 @@ def build_demo_snapshot() -> StepSnapshot:
         mode=ControlMode.AUTO_ADVANCE,
         next_step_label="LIM",
     )
+
+
+def step_snapshot_from_live(
+    live_step,
+    *,
+    index: int,
+    total: int,
+    mode: ControlMode = ControlMode.INTERACTIVE,
+) -> StepSnapshot:
+    """Convert a live status step into the existing guided-step renderer model."""
+
+    state_map = {
+        "pending": StepState.PENDING,
+        "in_progress": StepState.IN_PROGRESS,
+        "complete": StepState.COMPLETE,
+        "failed": StepState.FAILED,
+        "blocked": StepState.FAILED,
+        "unknown": StepState.PENDING,
+    }
+    pods = tuple(f"{pod.name:<36} {pod.ready}/{pod.total}      {pod.phase}" for pod in live_step.pods)
+    events = tuple(f"{event.type:<8} {event.reason:<18} {event.object}   {event.message}" for event in live_step.events)
+    hints = "; ".join(hint.message for hint in live_step.hints)
+    detail = f"{live_step.detail} {hints}".strip()
+    return StepSnapshot(
+        step=GuidedStep(step_id=live_step.step_id, label=live_step.label, help_text=detail, log_scope=f"{live_step.step_id}*"),
+        index=index,
+        total=total,
+        state=state_map.get(getattr(live_step.state, "value", str(live_step.state)), StepState.PENDING),
+        detail=detail,
+        elapsed_seconds=live_step.elapsed_seconds,
+        timeout_seconds=live_step.timeout_seconds,
+        pods=pods,
+        events=events,
+        mode=mode,
+    )
