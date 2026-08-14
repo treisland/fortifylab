@@ -110,6 +110,7 @@ nav:
       - Phase 3 promotion gates: development/phase-3-promotion-gates.md
       - Phase 3 preview release notes: releases/phase-3-preview.md
       - Phase 4 preview release notes: releases/phase-4-preview.md
+      - Phase 5 preview release notes: releases/phase-5-preview.md
       - Publishing: contributing/publishing.md
   - Architecture decisions:
       - Overview: adr/README.md

@@ -8,8 +8,10 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from fortifylab.status import EventSummary, HintSeverity, LiveDeploymentSnapshot, LiveState, LiveStepStatus, PodSummary, ProgressHint
+from fortifylab.core.command import CommandResult
+from fortifylab.status import EventSummary, HintSeverity, LiveDeploymentSnapshot, LiveState, LiveStepStatus, PodSummary, ProgressHint, RouteSummary
 from fortifylab.web import WebConsoleApp, WebConsoleConfig, build_http_server
+from fortifylab.web.support import SupportInspector
 
 
 class PythonWebConsoleTests(unittest.TestCase):
@@ -57,6 +59,11 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(content_type, "text/html")
         for expected in ('data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"'):
             self.assertIn(expected, html)
+
+        _, script = WebConsoleApp(WebConsoleConfig()).static_asset("main.js")
+        _, styles = WebConsoleApp(WebConsoleConfig()).static_asset("styles.css")
+        self.assertIn("/api/services/health", script)
+        self.assertIn("uptime-strip", styles)
 
     def test_serve_once_returns_static_index(self) -> None:
         status, headers, body = self.request_once(WebConsoleConfig(port=0), "/")
@@ -116,21 +123,23 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 404)
 
     def test_api_endpoints_cover_status_config_routes_certificates(self) -> None:
-        app = WebConsoleApp(WebConsoleConfig())
+        app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller(), url_health_checker=FakeURLHealthChecker())
 
-        for path in ("/api/status", "/api/config", "/api/routes", "/api/certificates", "/api/deployment/status", "/api/deployment/guide", "/api/deployment/diagnostics", "/api/deployment/logs"):
+        for path in ("/api/status", "/api/config", "/api/routes", "/api/certificates", "/api/services", "/api/services/health", "/api/deployment/status", "/api/deployment/guide", "/api/deployment/diagnostics", "/api/deployment/logs"):
             with self.subTest(path=path):
                 status, payload = app.api_envelope(path)
                 self.assertEqual(status, 200)
                 self.assertTrue(payload["ok"])
                 self.assertIsNone(payload["error"])
 
-    def test_deployment_status_api_returns_steps(self) -> None:
-        status, payload = WebConsoleApp(WebConsoleConfig()).api_envelope("/api/deployment/status")
+    def test_deployment_status_api_returns_steps_and_event_timeline(self) -> None:
+        status, payload = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller()).api_envelope("/api/deployment/status")
 
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
         self.assertIn("steps", payload["data"])
+        self.assertEqual(payload["data"]["event_timeline"][0]["step_id"], "ssc")
+        self.assertEqual(payload["data"]["event_timeline"][0]["reason"], "ImagePullBackOff")
 
     def test_guided_deployment_api_returns_ordered_steps(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller())
@@ -160,7 +169,67 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertFalse(ssc["selection_required"])
         self.assertEqual(ssc["pods"][0]["number"], 1)
         self.assertIn("logs", ssc["pods"][0]["recent_command"])
+        self.assertIn("describe", ssc["pods"][0]["describe_command"])
+        self.assertIn("previous_command", ssc["pods"][0])
+        self.assertEqual(ssc["context"]["events"][0]["reason"], "ImagePullBackOff")
 
+    def test_routes_api_returns_hosts_entry_hints_from_ingress_evidence(self) -> None:
+        app = WebConsoleApp(
+            WebConsoleConfig(),
+            status_poller=FakeStatusPoller(),
+            support_inspector=SupportInspector(runner=fake_support_runner),
+        )
+        _, payload = app.api_envelope("/api/routes")
+
+        hints = payload["data"]["hosts_entry_hints"]
+        self.assertEqual(hints["target_ip"], "10.0.0.5")
+        self.assertEqual(hints["entries"][0]["line"], "10.0.0.5 ssc.fortifydemo.local")
+        self.assertFalse(hints["managed_by_console"])
+
+    def test_certificates_api_reports_inventory_and_traefik_default_cert_evidence(self) -> None:
+        app = WebConsoleApp(
+            WebConsoleConfig(),
+            status_poller=FakeStatusPoller(),
+            support_inspector=SupportInspector(runner=fake_support_runner),
+        )
+        _, payload = app.api_envelope("/api/certificates")
+
+        data = payload["data"]
+        tls = next(item for item in data["inventory"] if item["name"] == "tls")
+        self.assertTrue(tls["present"])
+        self.assertTrue(tls["certificate_present"])
+        self.assertTrue(tls["private_key_present"])
+        self.assertFalse(data["private_key_exported"])
+        self.assertEqual(data["traefik_default_certificate"]["status"], "configured")
+        self.assertNotIn("PRIVATE KEY", str(data))
+
+
+
+class FakeURLHealthChecker:
+    def check(self, service):
+        return {
+            "service_id": service.service_id,
+            "label": service.label,
+            "url": service.url,
+            "host": service.host,
+            "checks": {
+                "dns": {"state": "ok", "message": "DNS resolves."},
+                "tls": {"state": "ok", "message": "TLS ok."},
+                "http": {"state": "ok", "message": "HTTP returned 200.", "status_code": 200},
+            },
+            "hints": [],
+        }
+
+
+def fake_support_runner(command: tuple[str, ...]) -> CommandResult:
+    joined = " ".join(command)
+    if "get nodes" in joined:
+        return CommandResult(command, 0, json.dumps({"items": [{"status": {"addresses": [{"type": "InternalIP", "address": "10.0.0.5"}]}}]}), "", 0)
+    if "get secrets" in joined:
+        return CommandResult(command, 0, json.dumps({"items": [{"metadata": {"name": "tls"}, "type": "kubernetes.io/tls", "data": {"tls.crt": "Q0VSVA==", "tls.key": "redacted"}}]}), "", 0)
+    if "-n ingress get pods" in joined:
+        return CommandResult(command, 0, json.dumps({"items": [{"spec": {"containers": [{"args": ["--default-ssl-certificate=fortify/tls"]}]}}]}), "", 0)
+    return CommandResult(command, 1, "", "not found", 0)
 
 
 class FakeStatusPoller:
@@ -185,6 +254,7 @@ class FakeStatusPoller:
                     detail="image pull blocked",
                     pods=(PodSummary("ssc-webapp-0", 0, 1, "Running", reason="ImagePullBackOff"),),
                     events=(EventSummary("Warning", "ImagePullBackOff", "pod/ssc-webapp-0", "Back-off pulling image"),),
+                    routes=(RouteSummary("ssc.fortifydemo.local", True, tls_secret="tls", service_name="ssc-webapp", endpoints_ready=True),),
                     hints=(ProgressHint("ssc", HintSeverity.BLOCKED, "image", "Image pull blocked.", "Check registry credentials."),),
                 ),
             ),

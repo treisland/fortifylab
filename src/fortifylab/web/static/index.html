@@ -9,33 +9,96 @@
 <body>
   <main class="shell">
     <header class="topbar">
-      <div>
+      <div class="brand-block">
+        <span class="eyebrow">Remote LAN operator view</span>
         <h1>Fortify Lab Console</h1>
-        <p>Remote LAN operator view</p>
+        <p>Deployment control, evidence, and service readiness in one working surface.</p>
       </div>
-      <span id="connection-state" class="status">Connecting</span>
+      <div class="topbar-actions">
+        <span id="connection-state" class="status">Connecting</span>
+        <span id="last-updated" class="timestamp">Waiting for data</span>
+      </div>
     </header>
-    <section class="grid">
-      <article data-panel="deployment">
-        <h2>Guided Deployment</h2>
+
+    <section class="summary-strip" aria-label="Deployment summary">
+      <article class="summary-card">
+        <span>Overall</span>
+        <strong data-content="summary-state">Unknown</strong>
+      </article>
+      <article class="summary-card">
+        <span>Profile</span>
+        <strong data-content="summary-profile">Waiting</strong>
+      </article>
+      <article class="summary-card">
+        <span>Namespace</span>
+        <strong data-content="summary-namespace">Pending</strong>
+      </article>
+      <article class="summary-card">
+        <span>Operations</span>
+        <strong data-content="summary-operations">0</strong>
+      </article>
+    </section>
+
+    <section class="console-grid">
+      <aside class="timeline-column" data-panel="deployment">
+        <div class="panel-heading">
+          <span>Guided timeline</span>
+          <strong data-content="timeline-progress">0 / 0</strong>
+        </div>
         <div data-content="deployment" class="loading">Loading deployment status...</div>
-      </article>
-      <article data-panel="logs">
-        <h2>Logs</h2>
-        <div data-content="logs" class="loading">Loading log options...</div>
-      </article>
-      <article data-panel="configuration">
-        <h2>Configuration</h2>
-        <div data-content="configuration" class="loading">Loading configuration summary...</div>
-      </article>
-      <article data-panel="routes">
-        <h2>Diagnostics</h2>
-        <div data-content="routes" class="loading">Loading route checks...</div>
-      </article>
-      <article data-panel="certificates">
-        <h2>Certificates</h2>
-        <div data-content="certificates" class="loading">Loading certificate summary...</div>
-      </article>
+      </aside>
+
+      <section class="workspace-column" aria-label="Active workspace">
+        <article class="workspace-panel" data-panel="workspace">
+          <div class="panel-heading">
+            <span>Active workspace</span>
+            <strong data-content="workspace-state">Standby</strong>
+          </div>
+          <div data-content="workspace" class="loading">Building operator workspace...</div>
+        </article>
+
+        <article class="launchpad-panel" data-panel="routes">
+          <div class="panel-heading">
+            <span>Service launchpad</span>
+            <strong data-content="launchpad-count">0 services</strong>
+          </div>
+          <div data-content="routes" class="loading">Loading route checks...</div>
+        </article>
+      </section>
+
+      <aside class="evidence-column" aria-label="Evidence and health">
+        <article class="side-panel" data-panel="logs">
+          <div class="panel-heading">
+            <span>Evidence queue</span>
+            <strong data-content="logs-count">0 pods</strong>
+          </div>
+          <div data-content="logs" class="loading">Loading log options...</div>
+        </article>
+
+        <article class="side-panel" data-panel="configuration">
+          <div class="panel-heading">
+            <span>Configuration</span>
+            <strong data-content="configuration-count">0 sections</strong>
+          </div>
+          <div data-content="configuration" class="loading">Loading configuration summary...</div>
+        </article>
+
+        <article class="side-panel" data-panel="certificates">
+          <div class="panel-heading">
+            <span>Certificates</span>
+            <strong data-content="cert-state">Checking</strong>
+          </div>
+          <div data-content="certificates" class="loading">Loading certificate summary...</div>
+        </article>
+
+        <article class="side-panel" data-panel="health">
+          <div class="panel-heading">
+            <span>Health notes</span>
+            <strong data-content="health-count">0</strong>
+          </div>
+          <div data-content="health" class="loading">Loading diagnostics...</div>
+        </article>
+      </aside>
     </section>
   </main>
   <script src="main.js"></script>
