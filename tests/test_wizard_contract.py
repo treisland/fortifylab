@@ -396,5 +396,52 @@ exit 1
         self.assertNotIn("actual-client-token", output)
         self.assertNotIn("actual-fod-secret", output)
 
+    def test_sample_apps_have_isolated_lifecycle_contracts(self) -> None:
+        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        environment = (ROOT / ".env.example").read_text(encoding="utf-8")
+        hosts = (ROOT / "scripts" / "lib" / "coredns-lab-hosts.sh").read_text(encoding="utf-8")
+        for expected in (
+            "Juice Shop",
+            "WebGoat",
+            "DVWA",
+            "sample_juice_shop",
+            "sample_apps",
+            "vulnerable-sample",
+            "apps/samples/juice-shop/start.sh",
+        ):
+            self.assertIn(expected, wizard)
+        for expected in ("JUICE_SHOP", "WEBGOAT", "DVWA", "FORTIFY_SAMPLE_WEBGOAT_IMAGE"):
+            self.assertIn(expected, environment)
+        for expected in ("juice-shop.$domain", "webgoat.$domain", "dvwa.$domain"):
+            self.assertIn(expected, hosts)
+        self.assertIn('app_index_in_full_lifecycle "$idx" || continue', wizard)
+        self.assertIn("sample_default_url_for_var", wizard)
+        common = (ROOT / "apps" / "samples" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn("sample_app_apply_defaults", common)
+        self.assertIn('JUICE_SHOP="${JUICE_SHOP:-juice-shop.$domain}"', common)
+
+    def test_sample_app_defaults_support_existing_env_files(self) -> None:
+        command = """
+            export FORTIFY_HOME_K8S="$1"
+            tmp=$(mktemp -d)
+            trap 'rm -rf "$tmp"' EXIT
+            cp .env.example "$tmp/.env"
+            ln -s "$1/scripts" "$tmp/scripts"
+            sed -i '/JUICE_SHOP/d;/WEBGOAT/d;/DVWA/d' "$tmp/.env"
+            export FORTIFY_HOME_K8S="$tmp"
+            source "$2"
+            sample_app_load_env
+            printf '%s\n%s\n%s\n' "$JUICE_SHOP" "$WEBGOAT" "$DVWA"
+        """
+        output = subprocess.check_output(
+            ["bash", "-c", command, "sample-defaults-test", str(ROOT), str(ROOT / "apps" / "samples" / "common.sh")],
+            cwd=ROOT,
+            text=True,
+        )
+        self.assertIn("juice-shop.fortifydemo.com", output)
+        self.assertIn("webgoat.fortifydemo.com", output)
+        self.assertIn("dvwa.fortifydemo.com", output)
+
+
 if __name__ == "__main__":
     unittest.main()

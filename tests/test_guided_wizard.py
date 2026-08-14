@@ -44,6 +44,7 @@ class GuidedWizardTests(unittest.TestCase):
             "Express deployment",
             "Resume or repair deployment",
             "Manage individual components (expert)",
+            "Sample applications",
             "Kubernetes Dashboard access",
             "Diagnostics / live status",
             "Advanced setup and configuration",
@@ -80,6 +81,34 @@ class GuidedWizardTests(unittest.TestCase):
             self.assertIn(expected, result.stdout)
         self.assertNotIn("DEFAULT_PASS", result.stdout)
         self.assertNotIn("ControllerToken", result.stdout)
+
+    def test_sample_apps_have_visible_top_level_menu(self) -> None:
+        self.assertIn('5)  sample_apps_menu ;;', WIZARD)
+        self.assertIn('sample_apps_menu()', WIZARD)
+        self.assertIn('apps_menu_for_scope "samples"', WIZARD)
+        self.assertIn('title "$heading"', WIZARD)
+        self.assertIn('visible_indices[$visible]="$i"', WIZARD)
+        self.assertIn('app_action_menu "${visible_indices[$choice]}"', WIZARD)
+        self.assertIn('Intentionally vulnerable lab targets', WIZARD)
+        self.assertIn('Select one of the sample application numbers shown above.', WIZARD)
+
+    def test_sample_apps_menu_uses_local_numbering(self) -> None:
+        result = self.run_wizard_functions(
+            'APP_LABEL=(MySQL PostgreSQL SSC LIM SAST DAST "Juice Shop" WebGoat DVWA); '
+            'APP_PODS=(mysql postgresql ssc lim sast dast sample-juice-shop sample-webgoat sample-dvwa); '
+            'APP_SAMPLE=(0 0 0 0 0 0 1 1 1); '
+            'title() { printf "TITLE:%s\n" "$*"; }; '
+            'app_status() { printf "not deployed"; }; '
+            'fortify_lab_show_action_warning() { :; }; '
+            'ask() { read -r "$1"; }; '
+            'sample_apps_menu',
+            user_input='r\n',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('  1   Juice Shop', result.stdout)
+        self.assertIn('  2   WebGoat', result.stdout)
+        self.assertIn('  3   DVWA', result.stdout)
+        self.assertNotIn('  7   Juice Shop', result.stdout)
 
     def test_guided_and_express_share_one_operation_dispatcher(self) -> None:
         self.assertIn("run_deployment_operation()", WIZARD)
@@ -560,7 +589,7 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertNotIn("BAD_SAVE", result.stdout)
 
     def test_optional_skip_is_explicit_and_required_skip_is_rejected(self) -> None:
-        self.assertIn("GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 1)", WIZARD)
+        self.assertIn("GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1)", WIZARD)
         self.assertIn("Skip optional step", WIZARD)
         self.assertIn("is required and cannot be skipped", WIZARD)
 

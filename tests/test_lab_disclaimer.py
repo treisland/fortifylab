@@ -96,6 +96,17 @@ class LabDisclaimerTests(unittest.TestCase):
             self.assertIn("administrator token grants full control", combined)
             self.assertIn("may not be recoverable", combined)
 
+
+    def test_vulnerable_sample_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.run_helper(
+                "fortify_lab_show_action_warning vulnerable-sample",
+                config=Path(directory) / "config",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("intentionally vulnerable training targets", result.stdout)
+            self.assertIn("isolated lab networks", result.stdout)
+
     def test_unrecognized_warning_context_fails_safely(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             result = self.run_helper(
