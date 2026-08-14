@@ -52,6 +52,7 @@ class GuidedWizardTests(unittest.TestCase):
             "Advanced setup and configuration",
             "Lab lifecycle controls",
             "Tools and FCLI readiness",
+            "Runbook Library",
         ):
             self.assertIn(label, WIZARD)
 
