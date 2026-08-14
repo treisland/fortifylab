@@ -138,6 +138,16 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("python-version: ok", result.stdout)
         self.assertIn("clone-layout: ok", result.stdout)
         self.assertIn("compatibility-wrappers: ok", result.stdout)
+        self.assertIn("runtime-directories: ok", result.stdout)
+        self.assertIn("runtime-log: ok", result.stdout)
+
+    def test_doctor_compatibility_reports_migration_inputs(self) -> None:
+        result = self.run_module("doctor", "--compatibility")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(".env:", result.stdout)
+        self.assertIn("certificates:", result.stdout)
+        self.assertIn("runtime-log:", result.stdout)
 
 
 if __name__ == "__main__":

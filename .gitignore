@@ -16,6 +16,9 @@ secrets/generated/
 __pycache__/
 *.py[cod]
 
+# Local Fortify Lab runtime artifacts
+.fortifylab/
+
 # Documentation build and local Python environments
 site/
 .venv/
