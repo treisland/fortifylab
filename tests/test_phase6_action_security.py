@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import unittest
+import sys
+from pathlib import Path
 
-from fortifylab.operations import ActionPreviewCatalog, OperationCatalog, redact_value
-from fortifylab.web import WebConsoleApp, WebConsoleConfig
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from fortifylab.operations import ActionPreviewCatalog, OperationCatalog, redact_value  # noqa: E402
+from fortifylab.web import WebConsoleApp, WebConsoleConfig  # noqa: E402
 
 
 class Phase6ActionSecurityTests(unittest.TestCase):
