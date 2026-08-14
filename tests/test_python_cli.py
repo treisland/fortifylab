@@ -52,6 +52,14 @@ class PythonCliTests(unittest.TestCase):
                 self.assertIn("Python", result.stdout)
                 self.assertIn("available", result.stdout)
 
+    def test_tui_demo_screen_renders_guided_step(self) -> None:
+        result = self.run_module("tui", "--demo-screen")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Guided deployment - Step 9 of 13", result.stdout)
+        self.assertIn("Verifying Software Security Center", result.stdout)
+        self.assertIn("p. Pod logs", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
