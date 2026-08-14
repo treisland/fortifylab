@@ -60,6 +60,14 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("Verifying Software Security Center", result.stdout)
         self.assertIn("p. Pod logs", result.stdout)
 
+    def test_deploy_plan_prints_dry_run_orchestration_plan(self) -> None:
+        result = self.run_module("deploy", "--plan", "ssc_only")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Deployment plan: SSC only", result.stdout)
+        self.assertIn("./apps/ssc/start.sh", result.stdout)
+        self.assertIn("depends on: mysql", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
