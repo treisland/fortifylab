@@ -10,6 +10,7 @@ from .config.cli import configure_parser as configure_config_parser, run as run_
 from .diagnostics import ClusterCollector, write_bundle
 from .operations import OperationCatalog, OperationRunner
 from .orchestration import BashOperationAdapter
+from .runtime import compatibility_report, render_compatibility_report, runtime_paths, write_runtime_log
 from .tui import build_demo_snapshot, build_profile, render_guided_step
 from .version import __version__
 from .web import WebConsoleApp, WebConsoleConfig
@@ -37,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub.set_defaults(message=message)
         if name == "doctor":
             sub.add_argument("--environment", action="store_true", help="run clone-and-run bootstrap and migration checks")
+            sub.add_argument("--compatibility", action="store_true", help="run read-only migration compatibility checks")
             sub.add_argument(
                 "--collect",
                 action="store_true",
@@ -98,11 +100,19 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     if args.command == "doctor" and args.environment:
+        log_file = write_runtime_log("doctor --environment started", event="doctor.environment")
         checks = run_bootstrap_checks()
         for check in checks:
             state = "ok" if check.ok else "failed"
             print(f"{check.name}: {state} - {check.detail}")
+        print(f"runtime-log: ok - {log_file}")
         return 0 if all(check.ok for check in checks) else 1
+    if args.command == "doctor" and args.compatibility:
+        write_runtime_log("doctor --compatibility started", event="doctor.compatibility")
+        for line in render_compatibility_report(compatibility_report()):
+            print(line)
+        print(f"runtime-log: {runtime_paths().log_file}")
+        return 0
     if args.command == "doctor" and args.collect:
         results = ClusterCollector().collect()
         for result in results:
