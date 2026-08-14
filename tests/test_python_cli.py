@@ -110,6 +110,14 @@ class PythonCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Diagnostics bundle:", result.stdout)
 
+    def test_deploy_operation_dry_runs_mutating_operations(self) -> None:
+        result = self.run_module("deploy", "--operation", "secrets")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Operation: secrets.create", result.stdout)
+        self.assertIn("Executed: false", result.stdout)
+        self.assertIn("Dry run", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -79,6 +79,13 @@ interpretation, and sanitized bundle generation. Collectors are injectable and
 read-only so tests do not need a live Kubernetes cluster; production Bash
 diagnostics remain available while Python diagnostics mature.
 
+## Operation command layer
+
+Phase 3.6 adds Python operation descriptors for certificates, secrets, app
+lifecycle scripts, pod logs, and safe runbook previews. Mutating operations are
+dry-run by default and require explicit execution, which lets later work replace
+Bash operation internals incrementally without surprising operators.
+
 ## Entry points
 
 `./start_wizard.sh` remains the friendly command for existing users. As Python
