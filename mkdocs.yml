@@ -83,6 +83,7 @@ nav:
   - Deployment:
       - Overview: deployment/index.md
       - Deployment and lifecycle: operations/deployment-and-lifecycle.md
+      - Coordinated multi-node lab: operations/coordinated-multi-node.md
       - Networking and TLS: operations/networking-and-tls.md
   - Operations:
       - Overview: operations/README.md
