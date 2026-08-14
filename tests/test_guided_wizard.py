@@ -157,6 +157,8 @@ class GuidedWizardTests(unittest.TestCase):
             "FortifyLab does not store or display that vendor default password",
             "Credential availability",
             "Certificate trust",
+            "First scan handoff",
+            "docs/examples/first-scan",
         ):
             self.assertIn(expected, WIZARD)
         self.assertNotIn("see initial admin password in SSC startup logs", WIZARD)
@@ -168,6 +170,13 @@ class GuidedWizardTests(unittest.TestCase):
         completion_menu = WIZARD.split("guided_completion_screen()", 1)[1].split("guided_deployment_menu()", 1)[0]
         self.assertIn("2. Tools and FCLI readiness", completion_menu)
         self.assertIn("2) fcli_tools_menu", completion_menu)
+
+    def test_completion_screen_links_first_scan_handoff(self) -> None:
+        self.assertIn("First scan handoff", WIZARD)
+        self.assertIn("first_scan_handoff()", WIZARD)
+        completion_menu = WIZARD.split("guided_completion_screen()", 1)[1].split("guided_deployment_menu()", 1)[0]
+        self.assertIn("3. First scan handoff", completion_menu)
+        self.assertIn("3) first_scan_handoff", completion_menu)
 
     def test_completion_screen_lists_profile_status_and_next_actions(self) -> None:
         result = self.run_wizard_functions(
