@@ -13,7 +13,7 @@ from .orchestration import BashOperationAdapter
 from .runtime import compatibility_report, render_compatibility_report, runtime_paths, write_runtime_log
 from .tui import build_demo_snapshot, build_profile, render_guided_step
 from .version import __version__
-from .web import WebConsoleApp, WebConsoleConfig
+from .web import WebConsoleApp, WebConsoleConfig, serve_web_console
 
 _COMMAND_MESSAGES = {
     "doctor": "Python doctor command shell is available; Bash adapter is not wired yet.",
@@ -66,8 +66,16 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "web":
             sub.add_argument("--check", action="store_true", help="validate web console access-control settings")
             sub.add_argument("--bind", default="127.0.0.1", help="web console bind host")
+            sub.add_argument("--port", type=int, default=8765, help="web console port")
             sub.add_argument("--allow-lan", action="store_true", help="allow LAN binding when an access token is configured")
             sub.add_argument("--token", help="web console access token")
+            web_subparsers = sub.add_subparsers(dest="web_command", metavar="WEB_COMMAND")
+            serve = web_subparsers.add_parser("serve", help="serve the companion web console", description="serve the companion web console")
+            serve.add_argument("--bind", default="127.0.0.1", help="web console bind host")
+            serve.add_argument("--port", type=int, default=8765, help="web console port")
+            serve.add_argument("--allow-lan", action="store_true", help="allow LAN binding when an access token is configured")
+            serve.add_argument("--token", help="web console access token")
+            serve.add_argument("--once", action="store_true", help="serve one request for smoke tests")
         if name == "tui":
             sub.add_argument(
                 "--demo-screen",
@@ -169,8 +177,11 @@ def main(argv: list[str] | None = None) -> int:
             deps = ", ".join(step.dependencies) if step.dependencies else "none"
             print(f"{index}. {step.step_id}: {' '.join(step.command)} (depends on: {deps})")
         return 0
+    if args.command == "web" and getattr(args, "web_command", None) == "serve":
+        config = WebConsoleConfig(bind_host=args.bind, port=args.port, allow_lan=args.allow_lan, access_token=args.token)
+        return serve_web_console(config, once=args.once)
     if args.command == "web" and args.check:
-        config = WebConsoleConfig(bind_host=args.bind, allow_lan=args.allow_lan, access_token=args.token)
+        config = WebConsoleConfig(bind_host=args.bind, port=args.port, allow_lan=args.allow_lan, access_token=args.token)
         issues = config.validate()
         if issues:
             for issue in issues:
