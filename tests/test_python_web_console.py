@@ -63,6 +63,8 @@ class PythonWebConsoleTests(unittest.TestCase):
         _, script = WebConsoleApp(WebConsoleConfig()).static_asset("main.js")
         _, styles = WebConsoleApp(WebConsoleConfig()).static_asset("styles.css")
         self.assertIn("/api/services/health", script)
+        self.assertIn("refreshIntervalMs = 5000", script)
+        self.assertIn("window.setInterval(refreshConsole, refreshIntervalMs)", script)
         self.assertIn("uptime-strip", styles)
 
     def test_serve_once_returns_static_index(self) -> None:
@@ -150,6 +152,17 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(steps[0]["index"], 1)
         self.assertEqual(steps[0]["total"], len(steps))
         self.assertTrue(any(step["step_id"] == "ssc" and step["state"] == "blocked" for step in steps))
+
+    def test_guided_deployment_marks_prior_no_pod_steps_complete_when_later_step_is_active(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeMysqlDeployingPoller())
+        _, payload = app.api_envelope("/api/deployment/guide")
+
+        steps = payload["data"]["steps"]
+        by_id = {step["step_id"]: step for step in steps}
+        self.assertEqual(by_id["prereqs"]["state"], "complete")
+        self.assertEqual(by_id["inputs"]["state"], "complete")
+        self.assertEqual(by_id["secrets"]["state"], "complete")
+        self.assertEqual(by_id["mysql"]["state"], "in_progress")
 
     def test_deployment_diagnostics_are_contextual_and_redacted(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller())
@@ -256,6 +269,25 @@ class FakeStatusPoller:
                     events=(EventSummary("Warning", "ImagePullBackOff", "pod/ssc-webapp-0", "Back-off pulling image"),),
                     routes=(RouteSummary("ssc.fortifydemo.local", True, tls_secret="tls", service_name="ssc-webapp", endpoints_ready=True),),
                     hints=(ProgressHint("ssc", HintSeverity.BLOCKED, "image", "Image pull blocked.", "Check registry credentials."),),
+                ),
+            ),
+        )
+
+
+class FakeMysqlDeployingPoller:
+    def snapshot(self) -> LiveDeploymentSnapshot:
+        return LiveDeploymentSnapshot(
+            namespace="fortify",
+            profile="full_lab",
+            generated_at="2026-08-14T00:00:00+00:00",
+            overall_state=LiveState.IN_PROGRESS,
+            steps=(
+                LiveStepStatus(
+                    step_id="mysql",
+                    label="MySQL",
+                    state=LiveState.IN_PROGRESS,
+                    detail="Waiting for MySQL readiness.",
+                    pods=(PodSummary("mysql-0", 0, 1, "Running"),),
                 ),
             ),
         )

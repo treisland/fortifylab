@@ -1,4 +1,6 @@
 const token = new URLSearchParams(window.location.search).get("token");
+const refreshIntervalMs = 5000;
+let refreshInFlight = false;
 const state = document.querySelector("#connection-state");
 const lastUpdated = document.querySelector("#last-updated");
 const store = {
@@ -99,6 +101,13 @@ function collectRoutes() {
   return routes;
 }
 
+function renderRefreshCadence() {
+  if (!lastUpdated) return;
+  const generated = store.deploymentStatus?.generated_at ? new Date(store.deploymentStatus.generated_at) : new Date();
+  const when = Number.isNaN(generated.valueOf()) ? "just now" : generated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  lastUpdated.textContent = `Updated ${when} · refreshes every ${Math.round(refreshIntervalMs / 1000)}s`;
+}
+
 function renderSummary() {
   const statusData = store.status || {};
   const deployment = store.deploymentStatus || {};
@@ -108,10 +117,7 @@ function renderSummary() {
   setText("summary-profile", deployment.profile || guide.profile || "pending");
   setText("summary-namespace", deployment.namespace || "not reported");
   setText("summary-operations", String((statusData.operations || []).length));
-  if (lastUpdated) {
-    const generated = deployment.generated_at ? new Date(deployment.generated_at) : new Date();
-    lastUpdated.textContent = Number.isNaN(generated.valueOf()) ? "Updated just now" : `Updated ${generated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-  }
+  renderRefreshCadence();
 }
 
 function renderDeployment(data) {
@@ -311,35 +317,46 @@ async function loadPanel(key, path, render) {
   }
 }
 
-async function boot() {
-  const results = await Promise.all([
-    loadPanel("status", "/api/status", renderSummary),
-    loadPanel("deploymentStatus", "/api/deployment/status", () => {}),
-    loadPanel("guide", "/api/deployment/guide", renderDeployment),
-    loadPanel("config", "/api/config", renderConfiguration),
-    loadPanel("diagnostics", "/api/deployment/diagnostics", renderDiagnostics),
-    loadPanel("logs", "/api/deployment/logs", renderLogs),
-    loadPanel("certificates", "/api/certificates", renderCertificates),
-    loadPanel("routes", "/api/routes", () => {}),
-    loadPanel("services", "/api/services", () => {}),
-    loadPanel("serviceHealth", "/api/services/health", () => {}),
-  ]);
+async function refreshConsole() {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    const results = await Promise.all([
+      loadPanel("status", "/api/status", renderSummary),
+      loadPanel("deploymentStatus", "/api/deployment/status", () => {}),
+      loadPanel("guide", "/api/deployment/guide", renderDeployment),
+      loadPanel("config", "/api/config", renderConfiguration),
+      loadPanel("diagnostics", "/api/deployment/diagnostics", renderDiagnostics),
+      loadPanel("logs", "/api/deployment/logs", renderLogs),
+      loadPanel("certificates", "/api/certificates", renderCertificates),
+      loadPanel("routes", "/api/routes", () => {}),
+      loadPanel("services", "/api/services", () => {}),
+      loadPanel("serviceHealth", "/api/services/health", () => {}),
+    ]);
 
-  renderSummary();
-  renderWorkspace();
-  renderRoutes();
+    renderSummary();
+    renderWorkspace();
+    renderRoutes();
 
-  const loaded = results.filter(Boolean).length;
-  if (loaded === results.length) {
-    state.textContent = "Connected";
-    state.dataset.state = "ok";
-  } else if (loaded > 0) {
-    state.textContent = "Partial data";
-    state.dataset.state = "partial";
-  } else {
-    state.textContent = "Needs attention";
-    state.dataset.state = "error";
+    const loaded = results.filter(Boolean).length;
+    if (loaded === results.length) {
+      state.textContent = "Connected";
+      state.dataset.state = "ok";
+    } else if (loaded > 0) {
+      state.textContent = "Partial data";
+      state.dataset.state = "partial";
+    } else {
+      state.textContent = "Needs attention";
+      state.dataset.state = "error";
+    }
+  } finally {
+    refreshInFlight = false;
   }
 }
 
-boot();
+function scheduleRefresh() {
+  refreshConsole();
+  window.setInterval(refreshConsole, refreshIntervalMs);
+}
+
+scheduleRefresh();
