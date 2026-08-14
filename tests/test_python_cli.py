@@ -149,6 +149,19 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("certificates:", result.stdout)
         self.assertIn("runtime-log:", result.stdout)
 
+    def test_web_serve_help_is_available(self) -> None:
+        result = self.run_module("web", "serve", "--help")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("serve the companion web console", result.stdout)
+        self.assertIn("--once", result.stdout)
+
+    def test_web_serve_blocks_lan_without_token(self) -> None:
+        result = self.run_module("web", "serve", "--bind", "0.0.0.0", "--allow-lan", "--once")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("LAN access requires an access token", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

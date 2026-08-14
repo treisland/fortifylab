@@ -32,9 +32,15 @@ class WebConsoleApp:
         self.config = config
         self.static_dir = static_dir or Path(__file__).with_name("static")
 
+    def is_local_only(self) -> bool:
+        return self.config.bind_host in ("127.0.0.1", "localhost")
+
     def authorize(self, token: str | None) -> bool:
+        return self.authorize_request(token)
+
+    def authorize_request(self, token: str | None) -> bool:
         if not self.config.access_token:
-            return self.config.bind_host in ("127.0.0.1", "localhost")
+            return self.is_local_only()
         return token == self.config.access_token
 
     def api_response(self, path: str) -> tuple[int, dict[str, Any]]:
@@ -55,11 +61,23 @@ class WebConsoleApp:
             return 200, {"root_ca": "certs/rootCA.pem", "private_key_exported": False}
         return 404, {"error": "not found"}
 
+    def api_envelope(self, path: str) -> tuple[int, dict[str, Any]]:
+        status, body = self.api_response(path)
+        if status >= 400:
+            code = str(body.get("error", "not_found"))
+            return status, self.error_envelope(code, "API endpoint not found.")
+        return status, {"ok": True, "data": body, "error": None}
+
+    def error_envelope(self, code: str, message: str) -> dict[str, Any]:
+        return {"ok": False, "data": None, "error": {"code": code, "message": message}}
+
     def static_asset(self, relative: str) -> tuple[str, str]:
         safe = relative.lstrip("/") or "index.html"
         if ".." in safe:
             raise FileNotFoundError(safe)
         path = self.static_dir / safe
+        if not path.is_file():
+            raise FileNotFoundError(safe)
         content_type = "text/html" if path.suffix == ".html" else "text/css" if path.suffix == ".css" else "application/javascript"
         return content_type, path.read_text(encoding="utf-8")
 

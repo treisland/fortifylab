@@ -13,39 +13,24 @@
         <h1>Fortify Lab Console</h1>
         <p>Remote LAN operator view</p>
       </div>
-      <span class="status">Token required for LAN</span>
+      <span id="connection-state" class="status">Connecting</span>
     </header>
     <section class="grid">
-      <article>
+      <article data-panel="deployment">
         <h2>Deployment</h2>
-        <dl>
-          <div><dt>SSC</dt><dd>pending telemetry</dd></div>
-          <div><dt>LIM</dt><dd>pending telemetry</dd></div>
-          <div><dt>SAST</dt><dd>pending telemetry</dd></div>
-          <div><dt>DAST</dt><dd>pending telemetry</dd></div>
-        </dl>
+        <div data-content="deployment" class="loading">Loading deployment status...</div>
       </article>
-      <article>
-        <h2>Logs</h2>
-        <ol>
-          <li>ssc-webapp-0</li>
-          <li>lim-0</li>
-          <li>scancentral-sast-controller-0</li>
-        </ol>
-      </article>
-      <article>
+      <article data-panel="configuration">
         <h2>Configuration</h2>
-        <dl>
-          <div><dt>Domain</dt><dd>fortifydemo.local</dd></div>
-          <div><dt>Secrets</dt><dd>redacted</dd></div>
-        </dl>
+        <div data-content="configuration" class="loading">Loading configuration summary...</div>
       </article>
-      <article>
+      <article data-panel="routes">
+        <h2>Routes</h2>
+        <div data-content="routes" class="loading">Loading route checks...</div>
+      </article>
+      <article data-panel="certificates">
         <h2>Certificates</h2>
-        <dl>
-          <div><dt>Root CA</dt><dd>certs/rootCA.pem</dd></div>
-          <div><dt>Private CA key</dt><dd>never exported</dd></div>
-        </dl>
+        <div data-content="certificates" class="loading">Loading certificate summary...</div>
       </article>
     </section>
   </main>
