@@ -57,6 +57,14 @@ It does not execute live deployment operations yet; `./start_wizard.sh` remains
 the production guided deployment path until later Phase 3 work replaces each
 behavior with tested Python modules.
 
+## Deployment orchestration model
+
+Phase 3.3 adds a Python orchestration model for dependency-ordered deployment
+steps, resumable guided session metadata, retry/timeout/cancellation semantics,
+and dry-run mapping to the existing Bash deployment scripts. The model is
+inspectable with `./bin/fortifylab deploy --plan <profile>` and does not mutate
+the cluster unless later Phase 3 work explicitly wires live execution.
+
 ## Entry points
 
 `./start_wizard.sh` remains the friendly command for existing users. As Python

@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .tui import build_demo_snapshot, render_guided_step
+from .orchestration import BashOperationAdapter
+from .tui import build_demo_snapshot, build_profile, render_guided_step
 from .version import __version__
 
 _COMMAND_MESSAGES = {
@@ -28,6 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
     for name, message in _COMMAND_MESSAGES.items():
         sub = subparsers.add_parser(name, help=message)
         sub.set_defaults(message=message)
+        if name == "deploy":
+            sub.add_argument(
+                "--plan",
+                metavar="PROFILE",
+                help="print the Python orchestration plan for a deployment profile without running it",
+            )
         if name == "tui":
             sub.add_argument(
                 "--demo-screen",
@@ -37,11 +44,40 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def adapter_step_ids() -> set[str]:
+    return {
+        "certs",
+        "dashboard",
+        "secrets",
+        "mysql",
+        "postgresql",
+        "ssc",
+        "lim",
+        "sast_controller",
+        "sast_sensor",
+        "dast_core",
+        "dast_scanner",
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
+        return 0
+    if args.command == "deploy" and args.plan:
+        profile = build_profile(args.plan)
+        adapter = BashOperationAdapter()
+        step_ids = tuple(
+            step.step_id for step in profile.steps
+            if step.step_id in adapter_step_ids()
+        )
+        plan = adapter.build_plan(profile.label, step_ids)
+        print(f"Deployment plan: {plan.name}")
+        for index, step in enumerate(plan.steps, start=1):
+            deps = ", ".join(step.dependencies) if step.dependencies else "none"
+            print(f"{index}. {step.step_id}: {' '.join(step.command)} (depends on: {deps})")
         return 0
     if args.command == "tui" and args.demo_screen:
         print(render_guided_step(build_demo_snapshot()), end="")
