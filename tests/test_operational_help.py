@@ -229,6 +229,7 @@ class OperationalHelpTests(unittest.TestCase):
                     sorted(archive.getnames()),
                     [
                         "README.txt",
+                        "cluster-profile.txt",
                         "deployment-plan.txt",
                         "doctor-summary.txt",
                         "kubernetes-evidence.txt",
