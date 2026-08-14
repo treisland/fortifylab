@@ -68,6 +68,35 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("./apps/ssc/start.sh", result.stdout)
         self.assertIn("depends on: mysql", result.stdout)
 
+    def test_config_validate_reports_invalid_placeholder_values(self) -> None:
+        env_file = ROOT / ".tmp-python-config-test.env"
+        env_file.write_text("DOMAIN=fortifydemo.com\nSSC=LIM\nSSC_URL=LIM_URL\n", encoding="utf-8")
+        try:
+            result = self.run_module("config", "validate", "--env", str(env_file))
+        finally:
+            env_file.unlink(missing_ok=True)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("SSC is set to placeholder-like value LIM", result.stdout)
+        self.assertIn("SSC_URL is set to placeholder-like value LIM_URL", result.stdout)
+
+    def test_config_repair_dry_run_and_json_diagnostics_work(self) -> None:
+        env_file = ROOT / ".tmp-python-config-test.env"
+        env_file.write_text("DOMAIN=FortifyDemo.PROXMOX\nSSC=LIM\nSSC_URL=LIM_URL\n", encoding="utf-8")
+        try:
+            repair = self.run_module("config", "repair-derived", "--env", str(env_file), "--domain", "FortifyDemo.PROXMOX")
+            diagnostics = self.run_module("config", "diagnostics", "--env", str(env_file), "--json")
+            after = env_file.read_text(encoding="utf-8")
+        finally:
+            env_file.unlink(missing_ok=True)
+
+        self.assertEqual(repair.returncode, 0, repair.stderr)
+        self.assertIn("DOMAIN", repair.stdout)
+        self.assertIn("Dry run; no changes written", repair.stdout)
+        self.assertIn("FortifyDemo.PROXMOX", after)
+        self.assertEqual(diagnostics.returncode, 0, diagnostics.stderr)
+        self.assertIn('"issues"', diagnostics.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
