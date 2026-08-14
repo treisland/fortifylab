@@ -46,6 +46,8 @@ FAIL_MARK="${RED}✗${RESET}"
 INFO_MARK="${BLUE}ℹ${RESET}"
 FORTIFY_RECOMMENDED_MEMORY_GIB="${FORTIFY_RECOMMENDED_MEMORY_GIB:-16}"
 FORTIFY_RECOMMENDED_DISK_GIB="${FORTIFY_RECOMMENDED_DISK_GIB:-50}"
+FORTIFY_RECOMMENDED_FCLI_VERSION="${FORTIFY_RECOMMENDED_FCLI_VERSION:-3.23.3}"
+FORTIFY_FCLI_INSTALL_DIR="${FORTIFY_FCLI_INSTALL_DIR:-$HOME/fortify/tools/bin}"
 
 hr()       { printf '%s\n' "────────────────────────────────────────────────────────────"; }
 title()    { clear; printf '\n%s%s%s\n' "$BOLD" "$1" "$RESET"; hr; }
@@ -113,10 +115,11 @@ bootstrap_env() {
 # App registry — single source of truth for the apps menu
 # ============================================================
 
-APP_LABEL=("MySQL" "PostgreSQL" "SSC" "LIM" "ScanCentral SAST" "ScanCentral DAST")
-APP_PODS=("mysql"  "postgresql" "ssc-webapp" "lim" "scancentral-sast" "sdast")
-APP_URL_VAR=(""    ""           "SSC_URL"    "LIM_URL" "SCSAST_CTRL_URL" "SCDAST_URL")
-APP_GUIDED_STEP=("mysql" "postgresql" "ssc" "lim" "sast" "dast")
+APP_LABEL=("MySQL" "PostgreSQL" "SSC" "LIM" "ScanCentral SAST" "ScanCentral DAST" "Juice Shop" "WebGoat" "DVWA")
+APP_PODS=("mysql"  "postgresql" "ssc-webapp" "lim" "scancentral-sast" "sdast" "sample-juice-shop" "sample-webgoat" "sample-dvwa")
+APP_URL_VAR=(""    ""           "SSC_URL"    "LIM_URL" "SCSAST_CTRL_URL" "SCDAST_URL" "JUICE_SHOP_URL" "WEBGOAT_URL" "DVWA_URL")
+APP_GUIDED_STEP=("mysql" "postgresql" "ssc" "lim" "sast" "dast" "sample_juice_shop" "sample_webgoat" "sample_dvwa")
+APP_SAMPLE=(0 0 0 0 0 0 1 1 1)
 APP_START=(
     "apps/mysql/start.sh"
     "apps/postgresql/start.sh"
@@ -124,6 +127,9 @@ APP_START=(
     "apps/lim/start.sh"
     "apps/scsast/start.sh"
     "apps/scdast/core/start.sh apps/scdast/scanner/start.sh"
+    "apps/samples/juice-shop/start.sh"
+    "apps/samples/webgoat/start.sh"
+    "apps/samples/dvwa/start.sh"
 )
 APP_STOP=(
     "apps/mysql/stop.sh"
@@ -132,6 +138,9 @@ APP_STOP=(
     "apps/lim/stop.sh"
     "apps/scsast/stop.sh"
     "apps/scdast/core/stop.sh apps/scdast/scanner/stop.sh"
+    "apps/samples/juice-shop/stop.sh"
+    "apps/samples/webgoat/stop.sh"
+    "apps/samples/dvwa/stop.sh"
 )
 APP_DESTROY=(
     "apps/mysql/destroy.sh"
@@ -140,13 +149,38 @@ APP_DESTROY=(
     "apps/lim/destroy.sh"
     "apps/scsast/destroy.sh"
     "apps/scdast/core/destroy.sh apps/scdast/scanner/destroy.sh"
+    "apps/samples/juice-shop/destroy.sh"
+    "apps/samples/webgoat/destroy.sh"
+    "apps/samples/dvwa/destroy.sh"
 )
 
+app_index_is_sample() {
+    [ "${APP_SAMPLE[$1]:-0}" -eq 1 ]
+}
+
+app_index_in_full_lifecycle() {
+    ! app_index_is_sample "$1"
+}
+
+sample_default_url_for_var() {
+    local variable="$1" domain="${DOMAIN:-fortifydemo.com}"
+    case "$variable" in
+        JUICE_SHOP_URL) printf '%s\n' "https://juice-shop.$domain" ;;
+        WEBGOAT_URL) printf '%s\n' "https://webgoat.$domain" ;;
+        DVWA_URL) printf '%s\n' "https://dvwa.$domain" ;;
+        *) return 1 ;;
+    esac
+}
+
 app_url_for_index() {
-    local idx="$1" variable=""
+    local idx="$1" variable="" value=""
     variable="${APP_URL_VAR[$idx]:-}"
     [ -n "$variable" ] || return 0
-    printf '%s\n' "${!variable:-}"
+    value="${!variable:-}"
+    if [ -z "$value" ]; then
+        value="$(sample_default_url_for_var "$variable" 2>/dev/null || true)"
+    fi
+    printf '%s\n' "$value"
 }
 
 app_url_display_for_index() {
@@ -288,7 +322,7 @@ lab_lifecycle_current_profile() {
 
 lab_lifecycle_step_is_workload() {
     case "$1" in
-        mysql|postgresql|ssc|lim|sast_controller|sast_sensor|dast_core|dast_scanner) return 0 ;;
+        mysql|postgresql|ssc|lim|sast_controller|sast_sensor|dast_core|dast_scanner|sample_juice_shop|sample_webgoat|sample_dvwa) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -299,6 +333,7 @@ lab_lifecycle_app_index_selected() {
         mysql|postgresql|ssc|lim) guided_component_selected "$step" ;;
         sast) guided_component_selected sast_controller || guided_component_selected sast_sensor ;;
         dast) guided_component_selected dast_core || guided_component_selected dast_scanner ;;
+        sample_juice_shop|sample_webgoat|sample_dvwa) guided_component_selected "$step" ;;
         *) return 1 ;;
     esac
 }
@@ -351,6 +386,7 @@ lab_lifecycle_script_list() {
     local operation="$1" scope="${2:-selected}" idx field script seen="" step
     if [ "$scope" = "all" ]; then
         for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+            app_index_in_full_lifecycle "$idx" || continue
             case "$operation" in
                 destroy) field="${APP_DESTROY[$idx]}" ;;
                 stop) field="${APP_STOP[$idx]}" ;;
@@ -381,6 +417,7 @@ lab_shutdown_deployments() {
         note "Stopping all lab workloads in dependency-safe order. Persistent data is preserved."
         wizard_log_event "action=lab_lifecycle_start operation=shutdown scope=all mode=non_destructive"
         for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+            app_index_in_full_lifecycle "$idx" || continue
             note "Stopping ${APP_LABEL[$idx]}..."
             wizard_log_event "action=lab_lifecycle_component operation=shutdown scope=all component=${APP_GUIDED_STEP[$idx]}"
             run_app_scripts "${APP_STOP[$idx]}"
@@ -424,6 +461,7 @@ lab_start_deployments() {
         wizard_log_event "action=lab_lifecycle_start operation=start scope=all mode=non_destructive"
         GUIDED_MODE_CONTEXT=lifecycle
         for idx in "${!APP_LABEL[@]}"; do
+            app_index_in_full_lifecycle "$idx" || continue
             guided_run_and_verify "${APP_GUIDED_STEP[$idx]}" "${APP_LABEL[$idx]}"
             rc=$?
             if [ "$rc" -ne 0 ]; then
@@ -497,6 +535,7 @@ lab_destroy_deployments() {
     wizard_log_event "action=lab_lifecycle_start operation=destroy scope=$scope mode=destructive"
     if [ "$scope" = "all" ]; then
         for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
+            app_index_in_full_lifecycle "$idx" || continue
             note "Destroying ${APP_LABEL[$idx]}..."
             wizard_log_event "action=lab_lifecycle_component operation=destroy scope=all component=${APP_GUIDED_STEP[$idx]}"
             run_app_scripts "${APP_DESTROY[$idx]}"
@@ -585,15 +624,38 @@ EOF
 # ============================================================
 
 apps_menu() {
+    apps_menu_for_scope "all"
+}
+
+sample_apps_menu() {
+    fortify_lab_show_action_warning vulnerable-sample
+    apps_menu_for_scope "samples"
+}
+
+apps_menu_for_scope() {
+    local scope="${1:-all}" heading="Apps"
+    [ "$scope" = "samples" ] && heading="Sample applications"
     while true; do
-        title "Apps"
+        title "$heading"
+        if [ "$scope" = "samples" ]; then
+            printf '\n  Intentionally vulnerable lab targets for SAST and DAST practice.\n'
+            printf '  Keep these applications isolated to your lab network.\n'
+        fi
         printf '\n  %-3s %-20s %s\n' "#" "Name" "Status"
         printf '  %s\n' "─────────────────────────────────────"
-        local i
+        local i display_idx visible=0 visible_indices=()
         for i in "${!APP_LABEL[@]}"; do
+            if [ "$scope" = "samples" ]; then
+                app_index_is_sample "$i" || continue
+            fi
+            visible=$((visible + 1))
+            display_idx="$visible"
+            [ "$scope" = "all" ] && display_idx=$((i + 1))
+            visible_indices[$visible]="$i"
             printf '  %-3d %-20s %s\n' \
-                $((i + 1)) "${APP_LABEL[$i]}" "$(app_status "${APP_PODS[$i]}")"
+                "$display_idx" "${APP_LABEL[$i]}" "$(app_status "${APP_PODS[$i]}")"
         done
+        [ "$visible" -eq 0 ] && printf '  %s\n' "No sample applications are registered."
         echo
         echo "  r. Return to main menu"
         echo "  q. Quit"
@@ -605,8 +667,20 @@ apps_menu() {
             [Qq]) clear; exit 0 ;;
             ''|*[!0-9]*) error "Invalid selection"; sleep 1 ;;
             *)
-                if [ "$choice" -ge 1 ] && [ "$choice" -le "${#APP_LABEL[@]}" ]; then
-                    app_action_menu $((choice - 1))
+                if [ "$choice" -ge 1 ]; then
+                    if [ "$scope" = "samples" ]; then
+                        if [ "$choice" -le "$visible" ] && [ -n "${visible_indices[$choice]:-}" ]; then
+                            app_action_menu "${visible_indices[$choice]}"
+                        else
+                            error "Select one of the sample application numbers shown above."
+                            sleep 1
+                        fi
+                    elif [ "$choice" -le "${#APP_LABEL[@]}" ]; then
+                        app_action_menu $((choice - 1))
+                    else
+                        error "Out of range"
+                        sleep 1
+                    fi
                 else
                     error "Out of range"
                     sleep 1
@@ -1697,6 +1771,139 @@ versions_menu() {
     press_any
 }
 
+fcli_path() {
+    command -v fcli 2>/dev/null
+}
+
+fcli_installed_version() {
+    command -v fcli >/dev/null 2>&1 || return 1
+    fcli --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1
+}
+
+fcli_status_line() {
+    local path version
+    path=$(fcli_path || true)
+    if [ -z "$path" ]; then
+        printf '%s FCLI missing; recommended %s\n' "$WARN_MARK" "$FORTIFY_RECOMMENDED_FCLI_VERSION"
+        return 0
+    fi
+    version=$(fcli_installed_version || true)
+    if [ "$version" = "$FORTIFY_RECOMMENDED_FCLI_VERSION" ]; then
+        printf '%s FCLI %s at %s\n' "$OK_MARK" "$version" "$path"
+    elif [ -n "$version" ]; then
+        printf '%s FCLI %s at %s; recommended %s\n' "$WARN_MARK" "$version" "$path" "$FORTIFY_RECOMMENDED_FCLI_VERSION"
+    else
+        printf '%s FCLI found at %s; version unknown; recommended %s\n' "$WARN_MARK" "$path" "$FORTIFY_RECOMMENDED_FCLI_VERSION"
+    fi
+}
+
+fcli_print_status() {
+    section "FCLI status"
+    printf '  Recommended version: %s\n' "$FORTIFY_RECOMMENDED_FCLI_VERSION"
+    printf '  Install directory:    %s\n' "$FORTIFY_FCLI_INSTALL_DIR"
+    printf '  %s\n' "$(fcli_status_line)"
+    cat <<EOF
+
+  FCLI is needed only for local Fortify command-line workflows after the lab is
+  running. Missing or mismatched FCLI does not block infrastructure deployment.
+EOF
+}
+
+fcli_install_or_update() {
+    local version="${FORTIFY_RECOMMENDED_FCLI_VERSION}" target="$FORTIFY_FCLI_INSTALL_DIR"
+    local archive checksum temp_dir url checksum_url expected actual
+    if [ -z "$version" ]; then
+        error "FORTIFY_RECOMMENDED_FCLI_VERSION is empty."
+        return 1
+    fi
+    command -v curl >/dev/null 2>&1 || { error "curl is required to download FCLI."; return 1; }
+    command -v tar >/dev/null 2>&1 || { error "tar is required to extract FCLI."; return 1; }
+    command -v sha256sum >/dev/null 2>&1 || { error "sha256sum is required to verify FCLI."; return 1; }
+    temp_dir=$(mktemp -d) || return 1
+    archive="$temp_dir/fcli-linux.tgz"
+    checksum="$temp_dir/fcli-linux.tgz.sha256"
+    url="https://github.com/fortify/fcli/releases/download/v${version}/fcli-linux.tgz"
+    checksum_url="${url}.sha256"
+    note "Downloading FCLI $version from the Fortify GitHub release assets."
+    if ! curl -fsSL "$url" -o "$archive" || ! curl -fsSL "$checksum_url" -o "$checksum"; then
+        rm -rf "$temp_dir"
+        error "Could not download FCLI $version. Check network access and FORTIFY_RECOMMENDED_FCLI_VERSION."
+        return 1
+    fi
+    expected=$(awk '{print $1; exit}' "$checksum")
+    actual=$(sha256sum "$archive" | awk '{print $1; exit}')
+    if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+        rm -rf "$temp_dir"
+        error "FCLI checksum verification failed."
+        return 1
+    fi
+    mkdir -p "$target" || { rm -rf "$temp_dir"; return 1; }
+    tar -xzf "$archive" -C "$target" fcli fcli_completion || {
+        rm -rf "$temp_dir"
+        error "Could not extract FCLI into $target."
+        return 1
+    }
+    chmod 755 "$target/fcli" 2>/dev/null || true
+    rm -rf "$temp_dir"
+    note "Installed FCLI $version into $target."
+    note "Add this directory to PATH if fcli is not found: export PATH=\"$target:\$PATH\""
+}
+
+fcli_print_command_templates() {
+    local ssc_url="${SSC_URL:-https://ssc.${DOMAIN:-fortifydemo.com}}"
+    local sast_url="${SCSAST_CTRL_URL:-https://sast.${DOMAIN:-fortifydemo.com}/scancentral-ctrl/}"
+    cat <<EOF
+
+SSC-first FCLI templates
+
+  # Create a temporary SSC/FCLI session. Paste token values only when fcli asks,
+  # or replace placeholders in a private shell. Do not save filled commands.
+  fcli ssc session login --url "$ssc_url" --sc-sast-url "$sast_url" --token='<SSC_TOKEN_OR_PROMPT>' --client-auth-token='<SCANCENTRAL_CLIENT_AUTH_TOKEN>' --ssc-session=fortifylab
+
+  # Inspect the intended SSC application version before any scan submission.
+  fcli ssc appversion get '<APP_VERSION_NAME_OR_ID>' --ssc-session=fortifylab
+
+  # Later scan submission starts from a prebuilt package or MBS file; this
+  # readiness menu intentionally does not build sample apps or submit scans.
+  fcli sc-sast scan start --file='<PACKAGE_OR_MBS_FILE>' --publish-to='<APP_VERSION_NAME_OR_ID>' --ssc-session=fortifylab
+
+  fcli ssc session logout --ssc-session=fortifylab
+
+FoD optional templates
+
+  fcli fod session login --url='<FOD_URL>' --tenant='<FOD_TENANT>' --client-id='<FOD_CLIENT_ID>' --client-secret='<FOD_CLIENT_SECRET>' --fod-session=fortifylab-fod
+  fcli fod release get '<FOD_RELEASE_ID_OR_NAME>' --fod-session=fortifylab-fod
+  fcli fod session logout --fod-session=fortifylab-fod
+
+EOF
+}
+
+fcli_tools_menu() {
+    local choice
+    while true; do
+        title "Tools and FCLI readiness"
+        fcli_print_status
+        cat <<EOF
+
+  1. Install or update FCLI to the recommended version
+  2. Show FCLI status
+  3. Show secret-safe command templates
+
+  r. Return
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) fcli_install_or_update; press_any ;;
+            2) fcli_print_status; press_any ;;
+            3) fcli_print_command_templates; press_any ;;
+            [Rr]) return ;;
+            *) error "Invalid"; sleep 1 ;;
+        esac
+    done
+}
+
+
 env_is_secret_key() {
     case "$1" in
         *PASS*|*PASSWORD*|*TOKEN*|*SECRET*|*KEY*|*LICENSE*|*CREDENTIAL*) return 0 ;;
@@ -2481,14 +2688,14 @@ restart_with_microk8s_group() {
 # Deployment steps shared by Guided and Express modes
 # ============================================================
 
-GUIDED_ALL_STEP_ID=("prereqs" "inputs" "preflight" "certs" "dashboard" "secrets" "mysql" "postgresql" "ssc" "lim" "sast_controller" "sast_sensor" "dast_core" "dast_scanner" "configure")
-GUIDED_ALL_STEP_LABEL=("Host prerequisites" "Configuration and license" "Deployment pre-flight" "TLS certificates" "Kubernetes Dashboard" "Kubernetes Secrets" "MySQL" "PostgreSQL" "Software Security Center" "LIM" "ScanCentral SAST Controller" "ScanCentral SAST Sensor" "ScanCentral DAST Core" "ScanCentral DAST Scanner" "Post-deploy configuration")
-GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 1)
-GUIDED_ALL_STEP_DURATION=("5-15 min" "2-5 min" "<1 min" "1-2 min" "2-5 min" "<1 min" "3-8 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "5-15 min" "manual")
-GUIDED_ALL_STEP_IMPACT=("host packages/add-ons" "local configuration" "read-only" "creates/updates lab TLS" "applies Dashboard" "creates/updates Secrets" "applies MySQL" "applies PostgreSQL" "applies SSC" "applies LIM" "applies SAST controller" "applies SAST sensor" "applies DAST Core" "applies DAST scanner" "manual configuration")
-GUIDED_ALL_STEP_TIMEOUT=(900 300 120 180 300 60 600 600 900 600 900 600 1200 900 0)
-GUIDED_ALL_STEP_MANUAL=(0 1 0 0 0 0 0 0 0 0 0 0 0 0 1)
-GUIDED_ALL_STEP_PROBE=("prereqs_complete" "inputs_complete" "preflight_inputs_complete" "certs_ready" "dashboard_ready" "secrets_ready" "mysql_ready" "postgresql_ready" "ssc_ready" "lim_ready" "sast_controller_ready" "sast_sensor_ready" "dast_core_ready" "dast_scanner_ready" "configure_ready")
+GUIDED_ALL_STEP_ID=("prereqs" "inputs" "preflight" "certs" "dashboard" "secrets" "mysql" "postgresql" "ssc" "lim" "sast_controller" "sast_sensor" "dast_core" "dast_scanner" "sample_juice_shop" "sample_webgoat" "sample_dvwa" "configure")
+GUIDED_ALL_STEP_LABEL=("Host prerequisites" "Configuration and license" "Deployment pre-flight" "TLS certificates" "Kubernetes Dashboard" "Kubernetes Secrets" "MySQL" "PostgreSQL" "Software Security Center" "LIM" "ScanCentral SAST Controller" "ScanCentral SAST Sensor" "ScanCentral DAST Core" "ScanCentral DAST Scanner" "Juice Shop" "WebGoat" "DVWA" "Post-deploy configuration")
+GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1)
+GUIDED_ALL_STEP_DURATION=("5-15 min" "2-5 min" "<1 min" "1-2 min" "2-5 min" "<1 min" "3-8 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "3-8 min" "5-15 min" "5-15 min" "1-3 min" "1-3 min" "1-3 min" "manual")
+GUIDED_ALL_STEP_IMPACT=("host packages/add-ons" "local configuration" "read-only" "creates/updates lab TLS" "applies Dashboard" "creates/updates Secrets" "applies MySQL" "applies PostgreSQL" "applies SSC" "applies LIM" "applies SAST controller" "applies SAST sensor" "applies DAST Core" "applies DAST scanner" "applies intentionally vulnerable sample app" "applies intentionally vulnerable sample app" "applies intentionally vulnerable sample app" "manual configuration")
+GUIDED_ALL_STEP_TIMEOUT=(900 300 120 180 300 60 600 600 900 600 900 600 1200 900 300 300 300 0)
+GUIDED_ALL_STEP_MANUAL=(0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1)
+GUIDED_ALL_STEP_PROBE=("prereqs_complete" "inputs_complete" "preflight_inputs_complete" "certs_ready" "dashboard_ready" "secrets_ready" "mysql_ready" "postgresql_ready" "ssc_ready" "lim_ready" "sast_controller_ready" "sast_sensor_ready" "dast_core_ready" "dast_scanner_ready" "sample_juice_shop_ready" "sample_webgoat_ready" "sample_dvwa_ready" "configure_ready")
 GUIDED_ALL_STEP_HELP=(
     "Install the host tools and MicroK8s add-ons used by the lab."
     "Review .env and provide a readable Fortify license before deployment."
@@ -2504,6 +2711,9 @@ GUIDED_ALL_STEP_HELP=(
     "Deploy a ScanCentral SAST sensor only after the SAST controller is present."
     "Deploy DAST Core after its database and license dependencies are ready."
     "Deploy a DAST scanner only after DAST Core is ready."
+    "Deploy OWASP Juice Shop as an intentionally vulnerable lab target. Do not expose it outside an isolated lab."
+    "Deploy OWASP WebGoat as an intentionally vulnerable lab target. Do not expose it outside an isolated lab."
+    "Deploy DVWA as an intentionally vulnerable lab target. Do not expose it outside an isolated lab."
     "Configure DNS, SSC/SAST integration tokens, and the LIM pool when you are ready."
 )
 
@@ -2592,6 +2802,9 @@ guided_expand_deployment_components() {
         if guided_component_selected dast_scanner && ! guided_component_selected dast_core; then guided_add_component dast_core; changed=1; fi
         if guided_component_selected full_lab; then
             for dep in ssc lim sast_controller sast_sensor dast_core dast_scanner; do guided_component_selected "$dep" || { guided_add_component "$dep"; changed=1; }; done
+        fi
+        if guided_component_selected sample_apps; then
+            for dep in sample_juice_shop sample_webgoat sample_dvwa; do guided_component_selected "$dep" || { guided_add_component "$dep"; changed=1; }; done
         fi
     done
 }
@@ -2718,7 +2931,8 @@ guided_profile_menu() {
         3) profile=sast_full ;;
         4) profile=dast_full ;;
         5|"") profile=full_lab ;;
-        6) guided_custom_component_prompt; return $? ;;
+        6) fortify_lab_show_action_warning vulnerable-sample; profile=sample_apps ;;
+        7) guided_custom_component_prompt; return $? ;;
         *) error "Invalid profile selection"; sleep 1; return 1 ;;
     esac
     guided_apply_deployment_profile "$profile"
@@ -3113,6 +3327,18 @@ dast_scanner_ready() {
 
 dast_ready() {
     dast_scanner_ready
+}
+
+sample_juice_shop_ready() {
+    workload_ready "$NAMESPACE" deployment sample-juice-shop && resource_exists "$NAMESPACE" service sample-juice-shop && resource_exists "$NAMESPACE" ingress sample-juice-shop
+}
+
+sample_webgoat_ready() {
+    workload_ready "$NAMESPACE" deployment sample-webgoat && resource_exists "$NAMESPACE" service sample-webgoat && resource_exists "$NAMESPACE" ingress sample-webgoat
+}
+
+sample_dvwa_ready() {
+    workload_ready "$NAMESPACE" deployment sample-dvwa && resource_exists "$NAMESPACE" service sample-dvwa && resource_exists "$NAMESPACE" ingress sample-dvwa
 }
 
 configure_ready() {
@@ -3820,6 +4046,9 @@ run_deployment_operation() {
         dast_core) deployment_config_guard && run_app_scripts "apps/scdast/core/start.sh" ;;
         dast_scanner) deployment_config_guard && dast_core_ready && run_app_scripts "apps/scdast/scanner/start.sh" ;;
         dast) deployment_config_guard && run_app_scripts "apps/scdast/core/start.sh apps/scdast/scanner/start.sh" ;;
+        sample_juice_shop) fortify_lab_show_action_warning vulnerable-sample && run_app_scripts "apps/samples/juice-shop/start.sh" ;;
+        sample_webgoat) fortify_lab_show_action_warning vulnerable-sample && run_app_scripts "apps/samples/webgoat/start.sh" ;;
+        sample_dvwa) fortify_lab_show_action_warning vulnerable-sample && run_app_scripts "apps/samples/dvwa/start.sh" ;;
         configure) configure_menu ;;
         *) error "Unknown deployment operation: $operation"; return 1 ;;
     esac
@@ -3986,9 +4215,10 @@ EOF
         cat <<EOF
 
   1. Access & credentials
-  2. Certificate trust instructions
-  3. View deployment plan summary
-  4. View wizard log
+  2. Tools and FCLI readiness
+  3. Certificate trust instructions
+  4. View deployment plan summary
+  5. View wizard log
 
   r. Return to main menu
   q. Quit
@@ -3997,9 +4227,10 @@ EOF
         ask choice "Select:"
         case "$choice" in
             1) urls_creds ;;
-            2) certificate_trust_handoff ;;
-            3) wizard_deployment_plan; press_any ;;
-            4) wizard_log_viewer ;;
+            2) fcli_tools_menu ;;
+            3) certificate_trust_handoff ;;
+            4) wizard_deployment_plan; press_any ;;
+            5) wizard_log_viewer ;;
             [Rr]|"") return ;;
             [Qq]) clear; exit 0 ;;
             *) error "Invalid selection"; sleep 1 ;;
@@ -4533,25 +4764,27 @@ main_menu() {
         echo "   2. Express deployment"
         echo "   3. Resume or repair deployment"
         echo "   4. Manage individual components (expert)"
-        echo "   5. Kubernetes Dashboard access"
+        echo "   5. Sample applications"
+        echo "   6. Kubernetes Dashboard access"
 
         section "Diagnostics and advanced"
-        echo "   6. Diagnostics / live status"
-        echo "   7. Advanced setup and configuration"
+        echo "   7. Diagnostics / live status"
+        echo "   8. Advanced setup and configuration"
 
         section "Operations"
-        echo "   8. Lab lifecycle controls"
-        echo "   9. Stream logs (all pods)"
-        echo "  10. Cluster snapshot"
-        echo "  11. Tail one pod"
-        echo "  12. URLs & credentials"
-        echo "  13. Image versions"
-        echo "  14. Configuration editor"
+        echo "   9. Lab lifecycle controls"
+        echo "  10. Stream logs (all pods)"
+        echo "  11. Cluster snapshot"
+        echo "  12. Tail one pod"
+        echo "  13. URLs & credentials"
+        echo "  14. Tools and FCLI readiness"
+        echo "  15. Image versions"
+        echo "  16. Configuration editor"
 
         section "Learn"
-        echo "  15. Help Center / Fortify Knowledge Center"
-        echo "  16. Operational guidance and troubleshooting"
-        echo "  17. View wizard log"
+        echo "  17. Help Center / Fortify Knowledge Center"
+        echo "  18. Operational guidance and troubleshooting"
+        echo "  19. View wizard log"
 
         echo
         echo "   q. Quit"
@@ -4563,19 +4796,21 @@ main_menu() {
             2)  deploy_from_scratch ;;
             3)  resume_repair ;;
             4)  apps_menu ;;
-            5)  dashboard_access_menu ;;
-            6)  live_status ;;
-            7)  advanced_menu ;;
-            8)  lab_lifecycle_menu ;;
-            9)  stream_logs ;;
-           10)  cluster_status ;;
-           11)  logs_menu ;;
-           12)  urls_creds ;;
-           13)  versions_menu ;;
-           14)  edit_env ;;
-           15)  help_center ;;
-           16)  operational_guidance_menu ;;
-           17)  wizard_log_viewer ;;
+            5)  sample_apps_menu ;;
+            6)  dashboard_access_menu ;;
+            7)  live_status ;;
+            8)  advanced_menu ;;
+            9)  lab_lifecycle_menu ;;
+           10)  stream_logs ;;
+           11)  cluster_status ;;
+           12)  logs_menu ;;
+           13)  urls_creds ;;
+           14)  fcli_tools_menu ;;
+           15)  versions_menu ;;
+           16)  edit_env ;;
+           17)  help_center ;;
+           18)  operational_guidance_menu ;;
+           19)  wizard_log_viewer ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;
         esac

@@ -65,19 +65,21 @@ to suppress the banner or `NO_COLOR=1` for plain terminal output.
 Inside the wizard, the main menu is organized by task:
 
 - **Deploy:** Guided deployment, Express deployment, Resume or repair,
-  individual component management, and Kubernetes Dashboard access.
+  individual component management, vulnerable sample applications, and
+  Kubernetes Dashboard access.
 - **Diagnostics and advanced:** live status plus the advanced setup menu for
   prerequisites, license files, certificates/secrets, DNS, SSC token, LIM,
   Dashboard access, and `.env` editing.
 - **Operations:** lab lifecycle controls, logs, cluster snapshot, one-pod logs,
-  URLs and credentials, image versions, Configuration editor, and wizard log.
+  URLs and credentials, Tools and FCLI readiness, image versions, Configuration editor, and wizard log.
 - **Learn:** the Help Center / Fortify Knowledge Center and operational
   guidance.
 
 Choose **Guided deployment (recommended)** for a numbered, explanatory
 walkthrough. Guided deployment first asks for a deployment profile: SSC only,
-SAST controller only, SAST full with SSC, DAST full, Full lab, or Custom. The
-wizard expands required dependencies before it shows the final plan. Each screen
+SAST controller only, SAST full with SSC, DAST full, Full lab, Sample vulnerable
+apps, or Custom. The wizard expands required dependencies before it shows the
+final plan. Each screen
 shows status derived from current files and live Kubernetes resources. Required
 steps cannot be skipped; optional host setup and post-deploy configuration can
 be deferred. Guided wait screens poll through readiness and application checks,
@@ -125,6 +127,14 @@ to **URLs & credentials**. That credential screen lists where lab-generated
 credentials live, can print retrieval commands, and can reveal a single selected
 credential after explicit confirmation. It does not disclose stored passwords or
 tokens by default.
+
+Use **Tools and FCLI readiness** after infrastructure is running to install or
+update Fortify CLI (`fcli`), compare the installed version with
+`FORTIFY_RECOMMENDED_FCLI_VERSION`, and print SSC-first command templates. The
+templates use configured SSC and ScanCentral URLs, include FoD as an optional
+path, and keep every token or client secret as a placeholder. FCLI readiness is
+warning-only for deployment: missing or mismatched FCLI does not block SSC,
+SAST, DAST, or Dashboard profiles.
 
 If a guided operation fails, its screen remains incomplete and offers Retry.
 Fix the reported dependency, retry the same operation, or quit safely and use

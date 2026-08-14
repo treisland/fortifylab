@@ -356,5 +356,92 @@ exit 1
             self.assertLess(text.index("fortify_require_k8s_hostname"), text.index("microk8s helm"))
 
 
+
+    def test_fcli_tools_menu_is_warning_only_and_version_pinned(self) -> None:
+        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        environment = (ROOT / ".env.example").read_text(encoding="utf-8")
+        self.assertIn('FORTIFY_RECOMMENDED_FCLI_VERSION="3.23.3"', environment)
+        self.assertIn('FORTIFY_FCLI_INSTALL_DIR="$HOME/fortify/tools/bin"', environment)
+        self.assertIn("Tools and FCLI readiness", wizard)
+        self.assertIn("fcli_tools_menu()", wizard)
+        self.assertIn("fcli_install_or_update()", wizard)
+        self.assertIn("FCLI missing; recommended", wizard)
+        self.assertIn("does not block infrastructure deployment", wizard)
+        preflight = wizard.split("preflight_check()", 1)[1].split("deploy_step()", 1)[0]
+        self.assertNotIn("fcli", preflight.lower())
+
+    def test_fcli_command_templates_are_secret_safe(self) -> None:
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            source "$1"
+            DOMAIN=fortifydemo.test
+            SSC_URL=https://ssc.fortifydemo.test
+            SCSAST_CTRL_URL=https://sast.fortifydemo.test/scancentral-ctrl/
+            FORTIFY_SECRET_TOKEN=super-secret-token
+            SCANCENTRAL_CLIENT_AUTH_TOKEN=actual-client-token
+            FOD_CLIENT_SECRET=actual-fod-secret
+            fcli_print_command_templates
+        """
+        output = subprocess.check_output(
+            ["bash", "-c", command, "fcli-template-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+        )
+        self.assertIn("fcli ssc session login", output)
+        self.assertIn("https://ssc.fortifydemo.test", output)
+        self.assertIn("<SSC_TOKEN_OR_PROMPT>", output)
+        self.assertIn("<SCANCENTRAL_CLIENT_AUTH_TOKEN>", output)
+        self.assertIn("FoD optional templates", output)
+        self.assertNotIn("super-secret-token", output)
+        self.assertNotIn("actual-client-token", output)
+        self.assertNotIn("actual-fod-secret", output)
+
+    def test_sample_apps_have_isolated_lifecycle_contracts(self) -> None:
+        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        environment = (ROOT / ".env.example").read_text(encoding="utf-8")
+        hosts = (ROOT / "scripts" / "lib" / "coredns-lab-hosts.sh").read_text(encoding="utf-8")
+        for expected in (
+            "Juice Shop",
+            "WebGoat",
+            "DVWA",
+            "sample_juice_shop",
+            "sample_apps",
+            "vulnerable-sample",
+            "apps/samples/juice-shop/start.sh",
+        ):
+            self.assertIn(expected, wizard)
+        for expected in ("JUICE_SHOP", "WEBGOAT", "DVWA", "FORTIFY_SAMPLE_WEBGOAT_IMAGE"):
+            self.assertIn(expected, environment)
+        for expected in ("juice-shop.$domain", "webgoat.$domain", "dvwa.$domain"):
+            self.assertIn(expected, hosts)
+        self.assertIn('app_index_in_full_lifecycle "$idx" || continue', wizard)
+        self.assertIn("sample_default_url_for_var", wizard)
+        common = (ROOT / "apps" / "samples" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn("sample_app_apply_defaults", common)
+        self.assertIn('JUICE_SHOP="${JUICE_SHOP:-juice-shop.$domain}"', common)
+
+    def test_sample_app_defaults_support_existing_env_files(self) -> None:
+        command = """
+            export FORTIFY_HOME_K8S="$1"
+            tmp=$(mktemp -d)
+            trap 'rm -rf "$tmp"' EXIT
+            cp .env.example "$tmp/.env"
+            ln -s "$1/scripts" "$tmp/scripts"
+            sed -i '/JUICE_SHOP/d;/WEBGOAT/d;/DVWA/d' "$tmp/.env"
+            export FORTIFY_HOME_K8S="$tmp"
+            source "$2"
+            sample_app_load_env
+            printf '%s\n%s\n%s\n' "$JUICE_SHOP" "$WEBGOAT" "$DVWA"
+        """
+        output = subprocess.check_output(
+            ["bash", "-c", command, "sample-defaults-test", str(ROOT), str(ROOT / "apps" / "samples" / "common.sh")],
+            cwd=ROOT,
+            text=True,
+        )
+        self.assertIn("juice-shop.fortifydemo.com", output)
+        self.assertIn("webgoat.fortifydemo.com", output)
+        self.assertIn("dvwa.fortifydemo.com", output)
+
+
 if __name__ == "__main__":
     unittest.main()

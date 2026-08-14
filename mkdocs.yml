@@ -88,6 +88,7 @@ nav:
       - Overview: operations/README.md
       - Backup and recovery: operations/backup-and-recovery.md
       - Versions and compatibility: operations/versions-and-compatibility.md
+      - FCLI readiness: operations/fcli-readiness.md
       - First scan: operations/first-scan.md
   - Configuration:
       - Overview: configuration/index.md

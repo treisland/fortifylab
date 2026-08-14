@@ -118,5 +118,21 @@ class OperationsDocumentationTests(unittest.TestCase):
         self.assertIn("sanitized diagnostics bundle", readme)
 
 
+    def test_fcli_readiness_documentation(self) -> None:
+        guide = (ROOT / "docs" / "operations" / "fcli-readiness.md").read_text(encoding="utf-8")
+        versions = (ROOT / "docs" / "operations" / "versions-and-compatibility.md").read_text(encoding="utf-8")
+        nav = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+        for phrase in (
+            "Tools and FCLI readiness",
+            "FORTIFY_RECOMMENDED_FCLI_VERSION",
+            "SSC as the primary lab system of record",
+            "FoD optional path",
+            "do not create sample applications, package source, or submit a first scan",
+        ):
+            self.assertIn(phrase, guide)
+        self.assertIn("FCLI readiness: operations/fcli-readiness.md", nav)
+        self.assertIn("FORTIFY_RECOMMENDED_FCLI_VERSION", versions)
+
+
 if __name__ == "__main__":
     unittest.main()
