@@ -81,11 +81,28 @@ class PythonOperationsTests(unittest.TestCase):
     def test_execute_flag_runs_mutating_operation_through_injected_runner(self) -> None:
         runner = OperationRunner(lambda command: CommandResult(command, 0, "created", "", 0.01))
 
-        result = runner.run(OperationCatalog().secrets(), execute=True)
+        blocked = runner.run(OperationCatalog().secrets(), execute=True)
+        result = runner.run(OperationCatalog().secrets(), execute=True, confirmation="REFRESH SECRETS")
 
+        self.assertFalse(blocked.executed)
+        self.assertIn("REFRESH SECRETS", blocked.detail)
         self.assertTrue(result.executed)
         self.assertTrue(result.ok)
         self.assertEqual(result.detail, "created")
+        self.assertEqual(result.returncode, 0)
+        self.assertIsNotNone(result.started_at)
+        self.assertIsNotNone(result.ended_at)
+        self.assertIsNotNone(result.log_file)
+
+    def test_timeout_result_shape_is_preserved(self) -> None:
+        runner = OperationRunner(lambda command: CommandResult(command, 124, "", "timed out", 5.0, timed_out=True))
+
+        result = runner.run(OperationCatalog().logs("ssc-webapp-0", follow=False))
+
+        self.assertTrue(result.executed)
+        self.assertFalse(result.ok)
+        self.assertTrue(result.timed_out)
+        self.assertEqual(result.returncode, 124)
 
 
 if __name__ == "__main__":

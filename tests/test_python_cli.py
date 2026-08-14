@@ -176,6 +176,13 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("Deployment status:", result.stdout)
         self.assertIn("Overall:", result.stdout)
 
+    def test_deploy_operation_requires_secret_confirmation_for_execute(self) -> None:
+        result = self.run_module("deploy", "--operation", "secrets", "--execute")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("REFRESH SECRETS", result.stdout)
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--json", action="store_true", help="print deployment status as JSON")
             sub.add_argument("--operation", choices=("certs", "secrets", "ssc-start", "ssc-stop", "ssc-destroy"), help="preview or run a Bash-backed operation")
             sub.add_argument("--execute", action="store_true", help="execute a mutating operation instead of dry-running it")
+            sub.add_argument("--confirm", help="typed confirmation for guarded operations")
         if name == "logs":
             sub.add_argument("--pod", help="print the kubectl logs command for a pod, or execute it")
             sub.add_argument("--follow", action="store_true", help="follow pod logs")
@@ -176,10 +177,14 @@ def main(argv: list[str] | None = None) -> int:
             "ssc-stop": catalog.app("ssc", "stop"),
             "ssc-destroy": catalog.app("ssc", "destroy"),
         }
-        execution = OperationRunner().run(operations[args.operation], execute=args.execute)
+        execution = OperationRunner().run(operations[args.operation], execute=args.execute, confirmation=args.confirm)
         print(f"Operation: {execution.operation_id}")
         print(f"Command: {' '.join(execution.command)}")
         print(f"Executed: {str(execution.executed).lower()}")
+        if execution.returncode is not None:
+            print(f"Return code: {execution.returncode}")
+        if execution.log_file:
+            print(f"Log: {execution.log_file}")
         print(execution.detail)
         return 0 if execution.ok else 1
     if args.command == "logs" and args.pod:

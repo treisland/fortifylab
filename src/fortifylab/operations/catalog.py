@@ -62,6 +62,7 @@ class OperationCatalog:
             OperationKind.SECRET,
             self._script("scripts/create-secrets.sh"),
             warning="May rotate SSC secret.key and should be used deliberately.",
+            confirmation_phrase="REFRESH SECRETS",
         )
 
     def app(self, app_id: str, action: str) -> OperationSpec:
