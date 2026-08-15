@@ -1162,6 +1162,11 @@ class GuidedWizardTests(unittest.TestCase):
                 self.assertIn("fortify_helm_delete_if_exists", body)
 
 
+    def test_mysql_destroy_removes_chart_created_data_claim(self) -> None:
+        body = (ROOT / "apps/mysql/destroy.sh").read_text(encoding="utf-8")
+        self.assertIn('delete pvc data-mysql-0 --ignore-not-found', body)
+
+
     def test_stop_scripts_treat_missing_statefulsets_as_already_stopped(self) -> None:
         helper = (ROOT / "scripts/lib/k8s-scale.sh").read_text(encoding="utf-8")
         self.assertIn("fortify_scale_statefulset_if_exists()", helper)
