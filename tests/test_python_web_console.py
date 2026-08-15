@@ -195,9 +195,19 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertTrue(create_payload["ok"])
         self.assertEqual(job.status.value, "complete")
         self.assertEqual(list_status, 200)
-        self.assertEqual(list_payload["data"]["jobs"][0]["operation_id"], "logs.ssc-webapp-0")
+        listed_job = list_payload["data"]["jobs"][0]
+        self.assertEqual(listed_job["operation_id"], "logs.ssc-webapp-0")
+        self.assertEqual(listed_job["action_label"], "View logs for ssc-webapp-0")
+        self.assertEqual(listed_job["resource"], "ssc-webapp-0")
+        self.assertNotIn("command_preview", listed_job)
         self.assertEqual(audit_status, 200)
         self.assertGreaterEqual(len(audit_payload["data"]["entries"]), 3)
+        finished = audit_payload["data"]["entries"][-1]
+        self.assertEqual(finished["action_label"], "View logs for ssc-webapp-0")
+        self.assertEqual(finished["resource"], "ssc-webapp-0")
+        self.assertEqual(finished["operator"], "web console")
+        self.assertIn("View logs for ssc-webapp-0", finished["summary"])
+        self.assertNotIn("./apps", str(audit_payload))
 
     def test_operations_post_endpoint_creates_dry_run_job(self) -> None:
         status, headers, body = self.request_once(
