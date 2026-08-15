@@ -450,9 +450,11 @@ function renderRoutes() {
     setText("launchpad-count", `${health.length} services`);
     target("routes").innerHTML = `<ul class="service-grid">${health.map((service) => {
       const state = serviceState(service);
-      const history = uptimeHistory(state, service.service_id);
+      const lifecycle = lifecycleHintForService(service);
+      const displayState = lifecycle?.state || state;
+      const history = uptimeHistory(displayState, service.service_id);
       return `<li class="service-card">
-        <div class="row-main"><strong>${escapeHtml(service.label || service.service_id || "Service")}</strong>${pill(state)}</div>
+        <div class="row-main"><strong>${escapeHtml(service.label || service.service_id || "Service")}</strong>${pill(displayState)}</div>
         ${service.url ? `<a href="${escapeHtml(service.url)}" target="_blank" rel="noreferrer">${escapeHtml(service.url)}</a>` : `<span class="row-note">No URL reported.</span>`}
         <div class="uptime-strip" aria-label="${escapeHtml(service.label || service.service_id || "Service")} health history">${history.map((entry) => `<span data-state="${escapeHtml(entry)}"></span>`).join("")}</div>
         <div class="service-meta">
@@ -461,7 +463,7 @@ function renderRoutes() {
           ${checkPill(service, "tls")}
           ${checkPill(service, "ingress")}
         </div>
-        ${renderServiceHint(service)}
+        ${renderServiceHint(service, lifecycle)}
       </li>`;
     }).join("")}</ul>`;
     return;
@@ -495,6 +497,136 @@ function serviceState(service) {
   return "unknown";
 }
 
+function lifecycleHintForService(service) {
+  const key = serviceLifecycleKey(service);
+  if (!key) return null;
+  const record = latestLifecycleRecordForKey(key);
+  if (!record) return null;
+  const status = String(record.status || record.state || "").toLowerCase();
+  const action = record.lifecycle_action;
+  const complete = status === "complete";
+  if (["failed", "rejected"].includes(status)) {
+    return {
+      state: "action failed",
+      title: "Recent lifecycle action failed",
+      message: `${record.label} did not complete. Review Action Audit before retrying.`,
+    };
+  }
+  if (["queued", "running"].includes(status)) {
+    return {
+      state: "changing",
+      title: "Lifecycle action in progress",
+      message: `${record.label} is ${status}. Service health will refresh when the action finishes.`,
+    };
+  }
+  if (complete && action === "destroy") {
+    return {
+      state: "expected-not-deployed",
+      title: "Intentionally destroyed",
+      message: `${record.resourceLabel} was destroyed from lifecycle controls. Start it again to recreate the deployment.`,
+    };
+  }
+  if (complete && action === "stop") {
+    return {
+      state: "expected-stopped",
+      title: key === "cluster" ? "Lab intentionally stopped" : "Intentionally stopped",
+      message: `${record.resourceLabel} was stopped from lifecycle controls. Start it again when you are ready.`,
+    };
+  }
+  if (complete && action === "start") {
+    return {
+      state: null,
+      title: "Recently started",
+      message: `${record.resourceLabel} was started from lifecycle controls. Monitoring is verifying readiness.`,
+    };
+  }
+  return null;
+}
+
+function serviceLifecycleKey(service) {
+  const values = [
+    service.service_id,
+    service.label,
+    service.host,
+    service.url,
+    Object.values(service.checks || {}).map((check) => check.message || "").join(" "),
+  ].join(" ").toLowerCase();
+  const aliases = [
+    ["ssc", ["ssc", "software security center", "ssc-webapp"]],
+    ["lim", ["lim", "license and infrastructure manager"]],
+    ["mysql", ["mysql"]],
+    ["postgresql", ["postgresql", "postgres"]],
+    ["scsast", ["scsast", "scancentral sast", "sast controller"]],
+    ["scdast-core", ["scdast-core", "scancentral dast", "dast core", "dast"]],
+    ["scdast-scanner", ["scdast-scanner", "dast scanner"]],
+  ];
+  const match = aliases.find(([, names]) => names.some((name) => values.includes(name)));
+  return match ? match[0] : null;
+}
+
+function latestLifecycleRecordForKey(key) {
+  const records = lifecycleRecords()
+    .filter((record) => recordMatchesLifecycleKey(record, key) || recordMatchesLifecycleKey(record, "cluster"))
+    .sort((left, right) => lifecycleRecordTime(right) - lifecycleRecordTime(left));
+  return records[0] || null;
+}
+
+function lifecycleRecords() {
+  const jobs = (store.operationJobs?.jobs || []).map((job) => lifecycleRecordFromJob(job));
+  const audit = (store.lifecycleAudit?.entries || []).map((entry) => lifecycleRecordFromAudit(entry));
+  return [...jobs, ...audit].filter(Boolean);
+}
+
+function lifecycleRecordFromJob(job) {
+  const parsed = parseLifecycleOperation(job.operation_id);
+  if (!parsed) return null;
+  return {
+    ...parsed,
+    status: job.status,
+    timestamp: job.finished_at || job.started_at || job.created_at || job.timestamp,
+    label: job.action_label || friendlyLifecycleLabel(parsed),
+    resourceLabel: job.resource || parsed.resourceLabel,
+  };
+}
+
+function lifecycleRecordFromAudit(entry) {
+  const parsed = parseLifecycleOperation(entry.operation_id);
+  if (!parsed) return null;
+  return {
+    ...parsed,
+    status: entry.status || entry.state,
+    timestamp: entry.timestamp,
+    label: entry.action_label || friendlyLifecycleLabel(parsed),
+    resourceLabel: entry.resource || parsed.resourceLabel,
+  };
+}
+
+function parseLifecycleOperation(operationId) {
+  const parts = String(operationId || "").split(".");
+  if (parts[0] === "app" && parts.length >= 3) {
+    return { scope: "application", resourceKey: parts[1], lifecycle_action: parts[2], resourceLabel: pretty(parts[1]) };
+  }
+  if (parts[0] === "cluster" && parts.length >= 2) {
+    return { scope: "cluster", resourceKey: "cluster", lifecycle_action: parts[1], resourceLabel: "MicroK8s cluster" };
+  }
+  return null;
+}
+
+function recordMatchesLifecycleKey(record, key) {
+  if (!record) return false;
+  if (key === "cluster") return record.resourceKey === "cluster";
+  return record.resourceKey === key;
+}
+
+function lifecycleRecordTime(record) {
+  const time = Date.parse(record?.timestamp || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+function friendlyLifecycleLabel(record) {
+  return `${pretty(record.lifecycle_action || "Lifecycle")} ${record.resourceLabel || "resource"}`;
+}
+
 function checkPill(service, key) {
   const check = service.checks?.[key];
   if (!check) return pill(`${key} unknown`);
@@ -509,7 +641,10 @@ function uptimeHistory(state, seed) {
   return base;
 }
 
-function renderServiceHint(service) {
+function renderServiceHint(service, lifecycle) {
+  if (lifecycle) {
+    return `<div class="service-lifecycle-note"><strong>${escapeHtml(lifecycle.title)}</strong><span>${escapeHtml(lifecycle.message)}</span></div>`;
+  }
   const hint = (service.hints || [])[0];
   if (!hint) return "";
   return `<div class="row-note">${escapeHtml(hint.message || "Health check needs attention.")}</div>`;

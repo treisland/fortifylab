@@ -217,9 +217,9 @@ p { color: var(--muted); line-height: 1.45; }
 }
 
 .status[data-state="ok"], .pill[data-state="complete"], .pill[data-state="ready"], .pill[data-state="up"], .pill[data-state$=" ok"] { border-color: var(--success); color: var(--success); background: var(--success-soft); }
-.status[data-state="partial"], .pill[data-state="in_progress"], .pill[data-state="warning"], .pill[data-state="degraded"], .pill[data-state$=" warning"] { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
-.status[data-state="error"], .pill[data-state="failed"], .pill[data-state="blocked"], .pill[data-state="missing"], .pill[data-state="down"], .pill[data-state$=" blocked"] { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
-.status[data-state="unknown"], .pill[data-state="pending"], .pill[data-state="unknown"] { border-color: var(--line); color: var(--unknown); background: var(--unknown-soft); }
+.status[data-state="partial"], .pill[data-state="in_progress"], .pill[data-state="warning"], .pill[data-state="degraded"], .pill[data-state="changing"], .pill[data-state$=" warning"] { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
+.status[data-state="error"], .pill[data-state="failed"], .pill[data-state="blocked"], .pill[data-state="missing"], .pill[data-state="down"], .pill[data-state="action failed"], .pill[data-state$=" blocked"] { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
+.status[data-state="unknown"], .pill[data-state="pending"], .pill[data-state="unknown"], .pill[data-state="expected-stopped"], .pill[data-state="expected-not-deployed"] { border-color: var(--line); color: var(--unknown); background: var(--unknown-soft); }
 
 .summary-strip {
   display: grid;
@@ -470,6 +470,24 @@ p { color: var(--muted); line-height: 1.45; }
 .service-card a { color: var(--accent-2); font-weight: 650; text-decoration: none; overflow-wrap: anywhere; }
 .service-card a:hover { text-decoration: underline; }
 .service-meta { display: flex; flex-wrap: wrap; gap: 7px; }
+.service-lifecycle-note {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-accent) 48%, var(--surface));
+}
+.service-lifecycle-note strong {
+  color: var(--heading);
+  font-size: 12px;
+}
+.service-lifecycle-note span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
 
 .lifecycle-layout {
   display: grid;
@@ -815,9 +833,9 @@ p { color: var(--muted); line-height: 1.45; }
 }
 
 .uptime-strip span[data-state="up"] { background: var(--success); }
-.uptime-strip span[data-state="degraded"] { background: var(--warn); }
-.uptime-strip span[data-state="down"] { background: var(--bad); }
-.uptime-strip span[data-state="unknown"] { background: var(--line); }
+.uptime-strip span[data-state="degraded"], .uptime-strip span[data-state="changing"] { background: var(--warn); }
+.uptime-strip span[data-state="down"], .uptime-strip span[data-state="action failed"] { background: var(--bad); }
+.uptime-strip span[data-state="unknown"], .uptime-strip span[data-state="expected-stopped"], .uptime-strip span[data-state="expected-not-deployed"] { background: var(--line); }
 
 .log-placeholder {
   padding: 10px;
