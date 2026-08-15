@@ -25,6 +25,11 @@ fortifyConnectServer:
 
 upgradejob:
   resources: null
+  # The vendor configureEnvironment tool generates scanner start artifacts
+  # under /usr/lib64/dotnet. Run the upgrade job container as root so the
+  # generated dast-*-start archives can be written during migrations.
+  containerSecurityContext:
+    runAsUser: 0
   prepJob:
     resources: null
 

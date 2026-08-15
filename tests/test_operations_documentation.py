@@ -151,6 +151,14 @@ class OperationsDocumentationTests(unittest.TestCase):
                 self.assertIn(phrase, guide)
         self.assertIn("Coordinated multi-node lab: operations/coordinated-multi-node.md", nav)
 
+    def test_troubleshooting_documents_dast_upgradejob_artifact_permission_issue(self) -> None:
+        text = (ROOT / "docs" / "operations" / "troubleshooting.md").read_text(encoding="utf-8")
+        self.assertIn("Known issue: DAST upgrade job artifact permissions", text)
+        self.assertIn("UnauthorizedAccessException", text)
+        self.assertIn("dast-windows-start.zip", text)
+        self.assertIn("dast-linux-start.tar.gz", text)
+        self.assertIn("runAsUser", text)
+
 
 if __name__ == "__main__":
     unittest.main()
