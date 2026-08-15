@@ -7,6 +7,7 @@ let focusedPlaceholder = null;
 let selectedLifecycleActionId = null;
 let lifecycleSubmitting = false;
 let panelFocusClosing = false;
+let confirmingLifecycleActionId = null;
 const expandedLogIds = new Set();
 let followedLogActionId = null;
 let logFollowTimer = null;
@@ -608,8 +609,10 @@ function renderConfirmationControl(action) {
   if (!confirmation.required) {
     return `<div class="confirmation-note">No typed confirmation required.</div>`;
   }
-  const inputId = `confirm-${domId(action.id)}`;
-  return `<label class="confirmation-label" for="${escapeHtml(inputId)}">Required phrase</label><input id="${escapeHtml(inputId)}" data-confirmation-for="${escapeHtml(action.id)}" type="text" placeholder="${escapeHtml(confirmation.phrase || "Enter confirmation phrase")}" autocomplete="off">`;
+  if (confirmingLifecycleActionId !== action.id) {
+    return `<div class="confirmation-note guarded-note">Destructive action. Review impact before continuing.</div>`;
+  }
+  return renderGuardedConfirmation(action);
 }
 
 function actionCanRun(action) {
@@ -619,6 +622,10 @@ function actionCanRun(action) {
 function renderActionButton(action, payload) {
   if (!actionCanRun(action)) {
     return `<button type="button" class="disabled-action" disabled>${payload.execute_endpoint ? "Execution unavailable" : "Preview only"}</button>`;
+  }
+  if (action.confirmation?.required) {
+    if (confirmingLifecycleActionId === action.id) return "";
+    return `<button type="button" class="secondary-action guarded-action" data-open-lifecycle-confirmation="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>Review ${escapeHtml(action.label || "destructive action")}</button>`;
   }
   const label = action.mutates ? `Run ${action.label || "action"}` : action.kind === "logs" ? "View logs" : `Run ${action.label || "read-only action"}`;
   return `<button type="button" class="primary-action" data-run-lifecycle-action="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>${escapeHtml(label)}</button>`;
@@ -634,9 +641,10 @@ async function waitForJob(jobId) {
   }
   return null;
 }
-async function submitLifecycleAction(action, payload) {
-  const confirmation = confirmationValueFor(action.id);
+async function submitLifecycleAction(action, payload, confirmed = false) {
+  const confirmation = confirmationValueFor(action, confirmed);
   lifecycleSubmitting = true;
+  confirmingLifecycleActionId = null;
   renderLifecycleActions(store.lifecycleActions);
   try {
     const jobPayload = await postJson(payload.execute_endpoint || "/api/operations/jobs", {
@@ -658,6 +666,26 @@ async function submitLifecycleAction(action, payload) {
 }
 
 function bindLifecycleControls(payload) {
+  for (const openButton of document.querySelectorAll("[data-open-lifecycle-confirmation]")) {
+    openButton.addEventListener("click", () => {
+      confirmingLifecycleActionId = openButton.dataset.openLifecycleConfirmation;
+      renderLifecycleActions(store.lifecycleActions);
+    });
+  }
+  for (const cancelButton of document.querySelectorAll("[data-cancel-lifecycle-confirmation]")) {
+    cancelButton.addEventListener("click", () => {
+      if (confirmingLifecycleActionId === cancelButton.dataset.cancelLifecycleConfirmation) {
+        confirmingLifecycleActionId = null;
+      }
+      renderLifecycleActions(store.lifecycleActions);
+    });
+  }
+  for (const confirmButton of document.querySelectorAll("[data-confirm-lifecycle-action]")) {
+    confirmButton.addEventListener("click", () => {
+      const action = (payload.actions || []).find((item) => item.id === confirmButton.dataset.confirmLifecycleAction);
+      if (action && actionCanRun(action)) submitLifecycleAction(action, payload, true);
+    });
+  }
   for (const runButton of document.querySelectorAll("[data-run-lifecycle-action]")) {
     runButton.addEventListener("click", () => {
       const action = (payload.actions || []).find((item) => item.id === runButton.dataset.runLifecycleAction);
@@ -670,7 +698,8 @@ function renderActionPreview(action, payload) {
   const confirmation = action.confirmation || {};
   const latestJob = latestJobForAction(action.id);
   const resource = action.resource || {};
-  return `<article class="action-card ${action.impact === "destructive" ? "is-destructive" : ""}">
+  const confirming = confirmation.required && confirmingLifecycleActionId === action.id;
+  return `<article class="action-card ${action.impact === "destructive" ? "is-destructive" : ""} ${confirming ? "is-confirming" : ""}">
     <div class="action-card-top">
       <div>
         <h4>${escapeHtml(action.label || action.id || "Lifecycle action")}</h4>
@@ -688,11 +717,27 @@ function renderActionPreview(action, payload) {
   </article>`;
 }
 
-function confirmationValueFor(actionId) {
-  for (const input of document.querySelectorAll("[data-confirmation-for]")) {
-    if (input.dataset.confirmationFor === actionId) return input.value || null;
-  }
-  return null;
+function renderGuardedConfirmation(action) {
+  const label = action.label || "destructive action";
+  const resource = action.resource?.label || action.resource?.id || "this resource";
+  const warning = action.warning || "This can remove deployed resources and may delete data. Use it only when you intend to rebuild or recover the service.";
+  return `<div class="guarded-confirmation" role="group" aria-label="Confirm ${escapeHtml(label)}">
+    <div>
+      <strong>Confirm ${escapeHtml(label)}</strong>
+      <p>${escapeHtml(warning)}</p>
+      <span>Target: ${escapeHtml(resource)}</span>
+    </div>
+    <div class="guarded-actions">
+      <button type="button" class="secondary-action" data-cancel-lifecycle-confirmation="${escapeHtml(action.id)}">Cancel</button>
+      <button type="button" class="danger-action" data-confirm-lifecycle-action="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>Confirm</button>
+    </div>
+  </div>`;
+}
+
+function confirmationValueFor(action, confirmed) {
+  const confirmation = action.confirmation || {};
+  if (!confirmation.required) return null;
+  return confirmed ? confirmation.phrase || null : null;
 }
 
 function domId(value) {

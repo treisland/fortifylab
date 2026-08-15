@@ -701,7 +701,48 @@ p { color: var(--muted); line-height: 1.45; }
   font-weight: 650;
 }
 
-.primary-action, .secondary-action, .disabled-action {
+.guarded-note {
+  color: var(--bad);
+}
+
+.action-card.is-confirming {
+  background: color-mix(in srgb, var(--bad-soft) 28%, var(--panel-3));
+}
+
+.guarded-confirmation {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--bad) 42%, var(--line-soft));
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.guarded-confirmation strong {
+  display: block;
+  color: var(--heading);
+  font-size: 14px;
+}
+
+.guarded-confirmation p {
+  margin-top: 6px;
+}
+
+.guarded-confirmation span {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.guarded-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.primary-action, .secondary-action, .danger-action, .disabled-action {
   width: fit-content;
   border-radius: 4px;
   padding: 9px 12px;
@@ -731,12 +772,23 @@ p { color: var(--muted); line-height: 1.45; }
   background: var(--accent-soft);
 }
 
-.primary-action:disabled {
+.danger-action {
+  border: 1px solid var(--bad);
+  color: #ffffff;
+  background: var(--bad);
+  cursor: pointer;
+}
+
+.danger-action:hover {
+  filter: brightness(0.94);
+}
+
+.primary-action:disabled, .danger-action:disabled {
   opacity: 0.62;
   cursor: progress;
 }
 
-.secondary-action:focus-visible, .primary-action:focus-visible {
+.secondary-action:focus-visible, .primary-action:focus-visible, .danger-action:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
