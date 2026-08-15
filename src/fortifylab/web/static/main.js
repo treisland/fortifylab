@@ -631,16 +631,42 @@ function renderActionButton(action, payload) {
   return `<button type="button" class="primary-action" data-run-lifecycle-action="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>${escapeHtml(label)}</button>`;
 }
 
-async function waitForJob(jobId) {
+function mergeOperationJob(job) {
+  if (!job) return null;
+  const existingJobs = store.operationJobs?.jobs || [];
+  store.operationJobs = { jobs: [job, ...existingJobs.filter((item) => item.job_id !== job.job_id)] };
+  return job;
+}
+
+function isTerminalJob(job) {
+  return Boolean(job && !["queued", "running"].includes(job.status));
+}
+
+async function waitForJob(jobId, options = {}) {
   if (!jobId) return null;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  const attempts = options.attempts ?? 120;
+  const delayMs = options.delayMs ?? 1000;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     const data = await loadJson(`/api/operations/jobs/${encodeURIComponent(jobId)}`);
     const job = data.job;
-    if (job && !["queued", "running"].includes(job.status)) return job;
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    if (job) {
+      mergeOperationJob(job);
+      if (typeof options.onUpdate === "function") options.onUpdate(job);
+      if (isTerminalJob(job)) return job;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
   }
-  return null;
+  return latestJobById(jobId);
 }
+function latestJobById(jobId) {
+  const jobs = store.operationJobs?.jobs || [];
+  return jobs.find((job) => job.job_id === jobId) || null;
+}
+
+async function refreshOperationSurface() {
+  await refreshConsole({ force: true });
+}
+
 async function submitLifecycleAction(action, payload, confirmed = false) {
   const confirmation = confirmationValueFor(action, confirmed);
   lifecycleSubmitting = true;
@@ -652,16 +678,23 @@ async function submitLifecycleAction(action, payload, confirmed = false) {
       execute: Boolean(action.mutates && action.execution_enabled),
       confirmation,
     });
-    const finishedJob = await waitForJob(jobPayload.job?.job_id);
-    const job = finishedJob || jobPayload.job;
-    const existingJobs = store.operationJobs?.jobs || [];
-    store.operationJobs = { jobs: [job, ...existingJobs.filter((item) => item.job_id !== job.job_id)] };
+    const queuedJob = mergeOperationJob(jobPayload.job);
+    renderLifecycleActions(store.lifecycleActions);
     await loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit);
+    const finishedJob = await waitForJob(queuedJob?.job_id, {
+      onUpdate: () => {
+        if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
+      },
+    });
+    mergeOperationJob(finishedJob || queuedJob);
+    await refreshOperationSurface();
   } catch (error) {
-    store.operationJobs = { jobs: [{ operation_id: action.id, status: "failed", message: error.message }] };
+    mergeOperationJob({ operation_id: action.id, status: "failed", message: error.message });
+    await loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit);
+    await refreshOperationSurface();
   } finally {
     lifecycleSubmitting = false;
-    renderLifecycleActions(store.lifecycleActions);
+    if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
   }
 }
 
@@ -711,7 +744,7 @@ function renderActionPreview(action, payload) {
     ${renderConfirmationControl(action)}
     <div class="action-footer">
       ${renderActionButton(action, payload)}
-      ${latestJob ? `<span class="inline-job-state">${escapeHtml(pretty(latestJob.status || "submitted"))}</span>` : ""}
+      ${latestJob ? `<span class="inline-job-state" data-state="${escapeHtml(latestJob.status || "submitted")}">${escapeHtml(jobStatusLabel(latestJob))}</span>` : ""}
     </div>
     ${latestJob ? `<div class="inline-job-message">${escapeHtml(jobDisplayMessage(latestJob))}</div>` : ""}
   </article>`;
@@ -744,20 +777,53 @@ function domId(value) {
   return String(value || "action").replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
+function jobStatusLabel(job) {
+  const status = String(job?.status || "submitted");
+  const labels = { queued: "Queued", running: "Running", complete: "Complete", failed: "Failed", rejected: "Rejected" };
+  return labels[status] || pretty(status);
+}
+
 function jobDisplayMessage(job) {
-  const message = job.execution?.detail || job.message || "Action submitted.";
+  const statusMessages = {
+    queued: "Operation queued and waiting to start.",
+    running: "Operation is running. Live status will refresh when it finishes.",
+    complete: "Operation completed. Live status has been refreshed.",
+    failed: "Operation failed. Review the audit entry and logs for details.",
+    rejected: "Operation was rejected before execution.",
+  };
+  const message = job.execution?.detail || job.message || statusMessages[job.status] || "Operation submitted.";
   return message.replace(/(?:\.\/)?(?:apps|scripts)\/[^\s'"]+/g, "[operation]");
 }
 function renderLifecycleAudit(data) {
   const entries = data.entries || [];
   setText("audit-count", `${entries.length} entries`);
   target("audit").innerHTML = entries.length
-    ? `<ul class="card-list">${entries.slice(0, 6).map((entry) => `
-        <li class="card-row">
-          <div class="row-main"><strong>${escapeHtml(entry.action || "Lifecycle action")}</strong>${pill(entry.state || "unknown")}</div>
-          <div class="row-note">${escapeHtml(entry.timestamp || "time unavailable")} · ${escapeHtml(entry.operator || "operator unknown")}</div>
-        </li>`).join("")}</ul>`
+    ? `<ul class="card-list audit-list">${entries.slice(0, 6).map((entry) => {
+        const title = entry.action_label || friendlyAuditAction(entry.action, entry.operation_id);
+        const resource = entry.resource ? ` · ${entry.resource}` : "";
+        const duration = formatDuration(entry.duration_seconds);
+        const meta = [entry.timestamp || "time unavailable", entry.operator || "web console", duration].filter(Boolean).join(" · ");
+        const detail = entry.summary || entry.message || "No execution summary reported.";
+        return `
+        <li class="card-row audit-row">
+          <div class="row-main"><strong>${escapeHtml(title)}</strong>${pill(entry.status || entry.state || "unknown")}</div>
+          <div class="row-note">${escapeHtml(meta)}${escapeHtml(resource)}</div>
+          <div class="row-note">${escapeHtml(detail)}</div>
+        </li>`;
+      }).join("")}</ul>`
     : empty(data.placeholder || "No lifecycle audit entries have been recorded yet.");
+}
+
+function friendlyAuditAction(action, operationId) {
+  if (operationId) return pretty(operationId.replace(/^app\./, "").replace(/\./g, " "));
+  return pretty(String(action || "Lifecycle action").replace(/^job\./, ""));
+}
+
+function formatDuration(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) return "";
+  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
+  return `${seconds.toFixed(1)}s`;
 }
 
 async function loadPanel(key, path, render) {
@@ -782,8 +848,14 @@ async function loadPanel(key, path, render) {
   }
 }
 
-async function refreshConsole() {
-  if (refreshInFlight) return;
+async function refreshConsole(options = {}) {
+  if (refreshInFlight) {
+    if (!options.force) return false;
+    for (let attempt = 0; attempt < 20 && refreshInFlight; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+    if (refreshInFlight) return false;
+  }
   refreshInFlight = true;
   try {
     const results = await Promise.all([
@@ -820,6 +892,7 @@ async function refreshConsole() {
       state.textContent = "Needs attention";
       state.dataset.state = "error";
     }
+    return loaded === results.length;
   } finally {
     refreshInFlight = false;
   }
