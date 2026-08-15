@@ -51,9 +51,9 @@ cp .env.example .env
 
 ### Python CLI preview
 
-Phase 3 introduces a dependency-free Python CLI foundation while the Bash wizard
-remains the supported guided experience. From a cloned repository, preview the
-new command shell with:
+Phase 3 introduces a Python CLI/TUI migration path while the Bash wizard remains
+the supported guided experience. The current preview command shell runs from a
+clone with the Python standard library only:
 
 ```bash
 ./bin/fortifylab --help
@@ -68,7 +68,22 @@ deployment prototype, and `./bin/fortifylab config diagnostics --env .env`
 previews the Phase 3.4 configuration engine. `./bin/fortifylab doctor
 --bundle-dir ./diagnostics-out` writes a sanitized Phase 3.5 diagnostics bundle.
 `./bin/fortifylab deploy --operation secrets` previews the Phase 3.6 operation
-command layer as a dry run. Bash remains the production guided wizard.
+command layer as a dry run. Bash remains the production guided wizard and
+compatibility entrypoint.
+
+Phase 3.8 records the richer Python console dependency posture in
+`requirements-python.txt`. Install it only when developing or previewing the next
+CLI/TUI slices:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-python.txt
+```
+
+That file is intentionally separate from `requirements-docs.txt`: Typer, Rich,
+Pydantic, and Textual are runtime-console dependencies, while MkDocs and related
+packages are documentation dependencies.
 
 The first launch displays a Fortify Lab banner with the current version and a
 mandatory **LAB / DEMO USE ONLY** notice. Type `LAB` to acknowledge that this
