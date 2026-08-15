@@ -8,8 +8,8 @@ from urllib.parse import urlparse
 from .envfile import EnvDocument, EnvUpdate
 
 
-HOST_KEYS = ("SSC", "LIM", "SCDAST", "SCSAST")
-URL_KEYS = ("SSC_URL", "LIM_URL", "LIM_API_URL", "SCDAST_URL", "SCSAST_URL", "SCSAST_CTRL_URL")
+HOST_KEYS = ("SSC", "LIM", "SCDAST", "SCSAST", "LAB_HOST")
+URL_KEYS = ("SSC_URL", "LIM_URL", "LIM_API_URL", "SCDAST_URL", "SCSAST_URL", "SCSAST_CTRL_URL", "LAB_URL")
 PLACEHOLDER_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 DOMAIN_RE = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)+$")
 
@@ -24,6 +24,7 @@ def expected_host(key: str, domain: str) -> str | None:
         "LIM": f"lim.{domain}",
         "SCDAST": f"dast.{domain}",
         "SCSAST": f"sast.{domain}",
+        "LAB_HOST": f"lab.{domain}",
     }
     return mapping.get(key)
 
@@ -36,6 +37,7 @@ def expected_url(key: str, domain: str) -> str | None:
         "SCDAST_URL": f"https://dast.{domain}",
         "SCSAST_URL": f"https://sast.{domain}",
         "SCSAST_CTRL_URL": f"https://sast.{domain}/scancentral-ctrl/",
+        "LAB_URL": f"https://lab.{domain}:8443",
     }
     return mapping.get(key)
 
@@ -48,12 +50,14 @@ def domain_url_updates(domain: str) -> tuple[EnvUpdate, ...]:
         EnvUpdate("LIM", "lim.$DOMAIN", expression=True),
         EnvUpdate("SCDAST", "dast.$DOMAIN", expression=True),
         EnvUpdate("SCSAST", "sast.$DOMAIN", expression=True),
+        EnvUpdate("LAB_HOST", "lab.$DOMAIN", expression=True),
         EnvUpdate("SSC_URL", "https://$SSC", expression=True),
         EnvUpdate("LIM_URL", "https://$LIM", expression=True),
         EnvUpdate("LIM_API_URL", "https://$LIM/LIM.API", expression=True),
         EnvUpdate("SCDAST_URL", "https://$SCDAST", expression=True),
         EnvUpdate("SCSAST_URL", "https://$SCSAST", expression=True),
         EnvUpdate("SCSAST_CTRL_URL", "https://$SCSAST/scancentral-ctrl/", expression=True),
+        EnvUpdate("LAB_URL", "https://$LAB_HOST:8443", expression=True),
     )
 
 

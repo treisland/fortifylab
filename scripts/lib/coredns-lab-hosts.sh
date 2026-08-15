@@ -7,7 +7,7 @@ fortify_lab_node_ip() {
 
 fortify_lab_hostnames() {
     local domain="${DOMAIN:-fortifydemo.com}"
-    printf '%s\n' "ssc.$domain" "sast.$domain" "dast.$domain" "lim.$domain" "dashboard.$domain" "juice-shop.$domain" "webgoat.$domain" "dvwa.$domain"
+    printf '%s\n' "ssc.$domain" "sast.$domain" "dast.$domain" "lim.$domain" "dashboard.$domain" "lab.$domain" "juice-shop.$domain" "webgoat.$domain" "dvwa.$domain"
 }
 
 fortify_lab_hostnames_inline() {
@@ -26,7 +26,7 @@ fortify_patch_coredns_corefile() {
             print "    # fortifylab hosts end"
         }
         function flush_hosts_block() {
-            if (hosts_block ~ /(ssc|sast|dast|lim|dashboard|juice-shop|webgoat|dvwa)\./) {
+            if (hosts_block ~ /(ssc|sast|dast|lim|dashboard|lab|juice-shop|webgoat|dvwa)\./) {
                 print_block()
                 managed=1
             } else {

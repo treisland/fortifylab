@@ -5,6 +5,7 @@ from __future__ import annotations
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import ssl
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -18,7 +19,12 @@ TOKEN_COOKIE = "fortifylab_token"
 def build_http_server(config: WebConsoleConfig, *, app: WebConsoleApp | None = None) -> ThreadingHTTPServer:
     web_app = app or WebConsoleApp(config)
     handler = make_handler(web_app)
-    return ThreadingHTTPServer((config.bind_host, config.port), handler)
+    server = ThreadingHTTPServer((config.bind_host, config.port), handler)
+    if config.tls_enabled():
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(str(config.tls_cert), str(config.tls_key))
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+    return server
 
 
 def serve_web_console(config: WebConsoleConfig, *, once: bool = False, static_dir: Path | None = None) -> int:
@@ -28,8 +34,7 @@ def serve_web_console(config: WebConsoleConfig, *, once: bool = False, static_di
             print(issue)
         return 1
     server = build_http_server(config, app=WebConsoleApp(config, static_dir=static_dir))
-    url = f"http://{config.bind_host}:{server.server_port}"
-    print(f"Fortify Lab web console listening on {url}")
+    print(f"Fortify Lab web console listening on {config.public_url()}")
     try:
         if once:
             server.timeout = 30
