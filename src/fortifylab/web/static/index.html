@@ -15,6 +15,7 @@
         <p>Deployment control, evidence, and service readiness in one working surface.</p>
       </div>
       <div class="topbar-actions">
+        <button type="button" id="open-intro" class="guide-open-button">Guide</button>
         <div class="theme-switch" aria-label="Theme">
           <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
           <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
@@ -24,6 +25,8 @@
         <span id="last-updated" class="timestamp">Waiting for data</span>
       </div>
     </header>
+
+    <section id="cockpit-intro" class="cockpit-intro-panel" aria-live="polite"></section>
 
     <section class="guided-journey-panel" data-panel="guided">
       <div class="panel-heading">
@@ -122,6 +125,14 @@
             <strong data-content="health-count">0</strong>
           </div>
           <div data-content="health" class="loading">Loading diagnostics...</div>
+        </article>
+
+        <article class="side-panel" data-panel="help">
+          <div class="panel-heading">
+            <span>Operator guide</span>
+            <strong data-content="help-count">Ready</strong>
+          </div>
+          <div data-content="help" class="loading">Loading contextual help...</div>
         </article>
 
         <article class="side-panel" data-panel="security">

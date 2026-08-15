@@ -65,7 +65,7 @@ class PythonWebConsoleTests(unittest.TestCase):
         content_type, html = WebConsoleApp(WebConsoleConfig()).static_asset("index.html")
 
         self.assertEqual(content_type, "text/html")
-        for expected in ('data-panel="guided"', 'data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"', 'data-panel="lifecycle"', 'data-panel="security"', 'data-panel="audit"'):
+        for expected in ('id="cockpit-intro"', 'id="open-intro"', 'data-panel="guided"', 'data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"', 'data-panel="lifecycle"', 'data-panel="security"', 'data-panel="audit"', 'data-panel="help"'):
             self.assertIn(expected, html)
         for expected in ('data-theme-choice="system"', 'data-theme-choice="light"', 'data-theme-choice="dark"'):
             self.assertIn(expected, html)
@@ -75,11 +75,24 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("/api/guided/journey", script)
         self.assertIn("renderGuidedJourney", script)
         self.assertIn("Next best action", script)
+        self.assertIn("fortifylab.operatorIntro", script)
+        self.assertIn("renderCockpitIntro", script)
+        self.assertIn("Start tour", script)
+        self.assertIn("Resume tour", script)
+        self.assertIn("Skip tour", script)
+        self.assertIn("setupIntroControls", script)
+        self.assertIn("data-tour-action", script)
         self.assertIn("data-guided-panel", script)
         self.assertIn("/api/services/health", script)
         self.assertIn("/api/security/posture", script)
         self.assertIn("/api/lifecycle/actions", script)
         self.assertIn("/api/lifecycle/audit", script)
+        self.assertIn("/api/help/topics", script)
+        self.assertIn("/api/recovery/state", script)
+        self.assertIn("loadOptionalPanel", script)
+        self.assertIn("fallbackHelpTopics", script)
+        self.assertIn("renderHelp", script)
+        self.assertIn("openHelpTopic", script)
         self.assertIn("fallbackLifecycleActions", script)
         self.assertIn("Preview only", script)
         self.assertIn("refreshIntervalMs = 5000", script)
@@ -125,6 +138,11 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("data-refresh-log-workspace", script)
         self.assertIn("data-copy-log-output", script)
         self.assertIn("data-download-log-output", script)
+        self.assertIn("serviceLogOperationId", script)
+        self.assertIn("bindServiceControls", script)
+        self.assertIn("data-service-log", script)
+        self.assertIn("data-service-help", script)
+        self.assertIn("Explain status", script)
         self.assertNotIn("data-log-action", script)
         self.assertNotIn("data-log-follow", script)
         self.assertIn(":root[data-theme=\"dark\"]", styles)
@@ -135,6 +153,14 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("action failed", styles)
         self.assertIn("guided-journey-panel", styles)
         self.assertIn("guided-checks", styles)
+        self.assertIn("cockpit-intro-panel", styles)
+        self.assertIn("intro-steps", styles)
+        self.assertIn("guide-open-button", styles)
+        self.assertIn("help-layout", styles)
+        self.assertIn("help-topic-list", styles)
+        self.assertIn("help-reader", styles)
+        self.assertIn("recovery-callout", styles)
+        self.assertIn("service-actions", styles)
         self.assertIn("lifecycle-layout", styles)
         self.assertIn("control-grid", styles)
         self.assertIn("panel-focus-button", styles)
@@ -272,7 +298,7 @@ class PythonWebConsoleTests(unittest.TestCase):
     def test_api_endpoints_cover_status_config_routes_certificates(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller(), url_health_checker=FakeURLHealthChecker())
 
-        for path in ("/api/status", "/api/config", "/api/routes", "/api/certificates", "/api/services", "/api/services/health", "/api/security/posture", "/api/lifecycle/actions", "/api/lifecycle/audit", "/api/deployment/status", "/api/deployment/guide", "/api/guided/journey", "/api/deployment/diagnostics", "/api/deployment/logs"):
+        for path in ("/api/status", "/api/cockpit/state", "/api/help/topics", "/api/help/topics/networking/tls", "/api/config", "/api/routes", "/api/certificates", "/api/services", "/api/services/health", "/api/security/posture", "/api/lifecycle/actions", "/api/lifecycle/audit", "/api/deployment/status", "/api/deployment/guide", "/api/guided/journey", "/api/deployment/diagnostics", "/api/deployment/logs"):
             with self.subTest(path=path):
                 status, payload = app.api_envelope(path)
                 self.assertEqual(status, 200)
@@ -299,7 +325,21 @@ class PythonWebConsoleTests(unittest.TestCase):
 
     def test_guided_journey_api_points_to_diagnostics_when_configured_and_blocked(self) -> None:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8") as env_file:
-            env_file.write("DOMAIN=fortifydemo.local\n")
+            env_file.write(
+                "DOMAIN=fortifydemo.local\n"
+                "SSC=ssc.fortifydemo.local\n"
+                "LIM=lim.fortifydemo.local\n"
+                "SCDAST=dast.fortifydemo.local\n"
+                "SCSAST=sast.fortifydemo.local\n"
+                "LAB_HOST=lab.fortifydemo.local\n"
+                "SSC_URL=https://ssc.fortifydemo.local\n"
+                "LIM_URL=https://lim.fortifydemo.local\n"
+                "LIM_API_URL=https://lim.fortifydemo.local/LIM.API\n"
+                "SCDAST_URL=https://dast.fortifydemo.local\n"
+                "SCSAST_URL=https://sast.fortifydemo.local\n"
+                "SCSAST_CTRL_URL=https://sast.fortifydemo.local/scancentral-ctrl/\n"
+                "LAB_URL=https://lab.fortifydemo.local:8443\n"
+            )
             env_file.flush()
             app = WebConsoleApp(
                 WebConsoleConfig(env_file=Path(env_file.name)),
@@ -433,6 +473,169 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(data["traefik_default_certificate"]["status"], "configured")
         self.assertNotIn("PRIVATE KEY", str(data))
 
+    def test_help_topics_api_references_existing_docs_without_large_content(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig())
+
+        status, topics = app.api_envelope("/api/help/topics")
+        detail_status, detail = app.api_envelope("/api/help/topics/networking/tls")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(detail_status, 200)
+        topic_ids = {topic["id"] for topic in topics["data"]["topics"]}
+        self.assertIn("configuration/env", topic_ids)
+        self.assertIn("networking/tls", topic_ids)
+        self.assertIn("logs/workspace", topic_ids)
+        self.assertIn("docs/operations/networking-and-tls.md", detail["data"]["docs"])
+        self.assertEqual(detail["data"]["content_policy"], "concise-summary")
+        self.assertLess(len(detail["data"]["content"]), 240)
+        self.assertNotIn("PRIVATE KEY", str(detail))
+
+    def test_unknown_help_topic_returns_404_envelope(self) -> None:
+        status, payload = WebConsoleApp(WebConsoleConfig()).api_envelope("/api/help/topics/nope")
+
+        self.assertEqual(status, 404)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "help topic not found")
+
+    def test_cockpit_state_combines_live_status_jobs_help_and_recovery(self) -> None:
+        app = WebConsoleApp(
+            WebConsoleConfig(),
+            status_poller=FakeStatusPoller(),
+            support_inspector=SupportInspector(runner=fake_support_runner),
+            url_health_checker=FakeURLHealthChecker(),
+        )
+
+        status, payload = app.api_envelope("/api/cockpit/state")
+
+        self.assertEqual(status, 200)
+        data = payload["data"]
+        self.assertEqual(data["version"], 1)
+        self.assertEqual(data["state_sources"]["cluster"], "live")
+        self.assertEqual(data["state_sources"]["wizard_history"], "historical")
+        self.assertTrue(data["wizard_state"]["live_first"])
+        self.assertEqual(data["deployment"]["event_timeline"][0]["reason"], "ImagePullBackOff")
+        self.assertIn("journey", data)
+        self.assertIn("services", data)
+        self.assertIn("health", data)
+        self.assertIn("routes", data)
+        self.assertIn("certificates", data)
+        self.assertIn("lifecycle", data)
+        self.assertIn("jobs", data)
+        self.assertIn("audit", data)
+        self.assertIn("logs", data)
+        suggestion_ids = {item["id"] for item in data["recovery"]["suggestions"]}
+        self.assertIn("image-pull-backoff", suggestion_ids)
+        self.assertTrue(any(topic["id"] == "operations/support-bundle" for topic in data["help"]["suggested_topics"]))
+        self.assertNotIn("password", str(data).lower())
+        self.assertNotIn("PRIVATE KEY", str(data))
+
+    def test_cockpit_recovery_detects_dns_404_backend_and_default_cert(self) -> None:
+        app = WebConsoleApp(
+            WebConsoleConfig(),
+            status_poller=FakeStatusPoller(),
+            support_inspector=SupportInspector(runner=fake_default_cert_support_runner),
+            url_health_checker=ProblemURLHealthChecker(),
+        )
+
+        _, payload = app.api_envelope("/api/cockpit/state")
+
+        suggestion_ids = {item["id"] for item in payload["data"]["recovery"]["suggestions"]}
+        self.assertIn("traefik-default-cert", suggestion_ids)
+        self.assertIn("dns-miss-ssc", suggestion_ids)
+        self.assertIn("route-404-lim", suggestion_ids)
+        self.assertIn("backend-unreachable-dashboard", suggestion_ids)
+
+    def test_cockpit_recovery_detects_invalid_env_placeholders_and_missing_tls_secret(self) -> None:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as env_file:
+            env_file.write("DOMAIN=fortifydemo.proxmox\nSSC=LIM\nSSC_URL=LIM_URL\n")
+            env_file.flush()
+            app = WebConsoleApp(
+                WebConsoleConfig(env_file=Path(env_file.name)),
+                status_poller=FakeMissingSecretsPoller(),
+                support_inspector=SupportInspector(runner=fake_missing_tls_runner),
+                url_health_checker=FakeURLHealthChecker(),
+            )
+
+            _, payload = app.api_envelope("/api/cockpit/state")
+
+        suggestion_ids = {item["id"] for item in payload["data"]["recovery"]["suggestions"]}
+        self.assertIn("invalid-env-placeholders", suggestion_ids)
+        self.assertIn("missing-kubernetes-secrets", suggestion_ids)
+        self.assertTrue(payload["data"]["configuration"]["issues"])
+
+
+    def test_support_bundle_preview_api_is_redacted_and_summarized(self) -> None:
+        app = WebConsoleApp(
+            WebConsoleConfig(),
+            status_poller=FakeStatusPoller(),
+            support_inspector=SupportInspector(runner=fake_support_runner),
+            url_health_checker=FakeURLHealthChecker(),
+        )
+
+        status, payload = app.api_envelope("/api/support/bundle")
+
+        self.assertEqual(status, 200)
+        data = payload["data"]
+        self.assertEqual(data["mode"], "preview")
+        self.assertTrue(data["redaction"]["enabled"])
+        section_ids = {section["id"] for section in data["sections"]}
+        self.assertIn("configuration", section_ids)
+        self.assertIn("service_health", section_ids)
+        self.assertIn("routes_certificates", section_ids)
+        self.assertIn("diagnostics", section_ids)
+        self.assertNotIn("password", str(data).lower())
+
+    def test_security_posture_reports_secure_and_insecure_cockpit_modes(self) -> None:
+        insecure = WebConsoleApp(WebConsoleConfig(bind_host="0.0.0.0", allow_lan=True, enable_actions=True))
+
+        _, insecure_payload = insecure.api_envelope("/api/security/posture")
+
+        self.assertEqual(insecure_payload["data"]["console"]["readiness"], "warning")
+        self.assertTrue(insecure_payload["data"]["console"]["warnings"])
+        self.assertEqual(insecure_payload["data"]["console"]["auth_mode"], "disabled")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cert = Path(tmpdir) / "lab.crt"
+            key = Path(tmpdir) / "lab.key"
+            cert.write_text("cert", encoding="utf-8")
+            key.write_text("key", encoding="utf-8")
+            secure = WebConsoleApp(WebConsoleConfig(
+                bind_host="0.0.0.0",
+                allow_lan=True,
+                access_token="token",
+                enable_actions=True,
+                tls_cert=cert,
+                tls_key=key,
+            ))
+
+            _, secure_payload = secure.api_envelope("/api/security/posture")
+
+        console = secure_payload["data"]["console"]
+        self.assertEqual(console["readiness"], "ready")
+        self.assertEqual(console["auth_mode"], "bearer-token")
+        self.assertEqual(console["certificate_source"], "configured-files")
+        self.assertTrue(console["csrf"]["required"])
+
+    def test_operation_jobs_reject_conflicting_mutating_actions(self) -> None:
+        def slow_runner(command: tuple[str, ...]) -> CommandResult:
+            time.sleep(0.1)
+            return CommandResult(command, 0, "done", "", 0.1)
+
+        manager = OperationJobManager(runner=OperationRunner(slow_runner))
+
+        first, created = manager.submit(OperationJobRequest("cluster.stop", execute=True))
+        second, second_created = manager.submit(OperationJobRequest("app.ssc.start", execute=True))
+
+        self.assertTrue(created)
+        self.assertTrue(second_created)
+        self.assertEqual(second.status.value, "rejected")
+        self.assertIn(first.job_id, second.audit[0].detail["conflict_with"])
+        self.assertIn("already active", second.message)
+        payload = manager.operation_payloads()[0]
+        self.assertIn("conflicts_with", payload)
+        self.assertIn("resource_scope", payload)
+
+
 
 
 class FakeURLHealthChecker:
@@ -451,12 +654,46 @@ class FakeURLHealthChecker:
         }
 
 
+class ProblemURLHealthChecker:
+    def check(self, service):
+        payload = FakeURLHealthChecker().check(service)
+        if service.service_id == "ssc":
+            payload["checks"]["dns"] = {"state": "blocked", "message": f"DNS did not resolve {service.host}."}
+        if service.service_id == "lim":
+            payload["checks"]["http"] = {"state": "ok", "message": "HTTP returned 404.", "status_code": 404}
+        if service.service_id == "dashboard":
+            payload["checks"]["http"] = {"state": "warning", "message": "HTTP returned 500.", "status_code": 500}
+        return payload
+
+
 def fake_support_runner(command: tuple[str, ...]) -> CommandResult:
     joined = " ".join(command)
     if "get nodes" in joined:
         return CommandResult(command, 0, json.dumps({"items": [{"status": {"addresses": [{"type": "InternalIP", "address": "10.0.0.5"}]}}]}), "", 0)
     if "get secrets" in joined:
         return CommandResult(command, 0, json.dumps({"items": [{"metadata": {"name": "tls"}, "type": "kubernetes.io/tls", "data": {"tls.crt": "Q0VSVA==", "tls.key": "redacted"}}]}), "", 0)
+    if "-n ingress get pods" in joined:
+        return CommandResult(command, 0, json.dumps({"items": [{"spec": {"containers": [{"args": ["--default-ssl-certificate=fortify/tls"]}]}}]}), "", 0)
+    return CommandResult(command, 1, "", "not found", 0)
+
+
+def fake_default_cert_support_runner(command: tuple[str, ...]) -> CommandResult:
+    joined = " ".join(command)
+    if "get nodes" in joined:
+        return CommandResult(command, 0, json.dumps({"items": [{"status": {"addresses": [{"type": "InternalIP", "address": "10.0.0.5"}]}}]}), "", 0)
+    if "get secrets" in joined:
+        return CommandResult(command, 0, json.dumps({"items": [{"metadata": {"name": "tls"}, "type": "kubernetes.io/tls", "data": {"tls.crt": "Q0VSVA==", "tls.key": "redacted"}}]}), "", 0)
+    if "-n ingress get pods" in joined:
+        return CommandResult(command, 0, json.dumps({"items": [{"spec": {"containers": [{"args": ["--entrypoints.websecure.http.tls=true"]}]}}]}), "", 0)
+    return CommandResult(command, 1, "", "not found", 0)
+
+
+def fake_missing_tls_runner(command: tuple[str, ...]) -> CommandResult:
+    joined = " ".join(command)
+    if "get nodes" in joined:
+        return CommandResult(command, 0, json.dumps({"items": [{"status": {"addresses": [{"type": "InternalIP", "address": "10.0.0.5"}]}}]}), "", 0)
+    if "get secrets" in joined:
+        return CommandResult(command, 0, json.dumps({"items": []}), "", 0)
     if "-n ingress get pods" in joined:
         return CommandResult(command, 0, json.dumps({"items": [{"spec": {"containers": [{"args": ["--default-ssl-certificate=fortify/tls"]}]}}]}), "", 0)
     return CommandResult(command, 1, "", "not found", 0)
@@ -486,6 +723,31 @@ class FakeStatusPoller:
                     events=(EventSummary("Warning", "ImagePullBackOff", "pod/ssc-webapp-0", "Back-off pulling image"),),
                     routes=(RouteSummary("ssc.fortifydemo.local", True, tls_secret="tls", service_name="ssc-webapp", endpoints_ready=True),),
                     hints=(ProgressHint("ssc", HintSeverity.BLOCKED, "image", "Image pull blocked.", "Check registry credentials."),),
+                ),
+            ),
+        )
+
+
+class FakeMissingSecretsPoller:
+    def snapshot(self) -> LiveDeploymentSnapshot:
+        return LiveDeploymentSnapshot(
+            namespace="fortify",
+            profile="ssc_only",
+            generated_at="2026-08-14T00:00:00+00:00",
+            overall_state=LiveState.BLOCKED,
+            steps=(
+                LiveStepStatus(
+                    step_id="secrets",
+                    label="Create Kubernetes Secrets",
+                    state=LiveState.BLOCKED,
+                    detail="TLS secret is missing.",
+                ),
+                LiveStepStatus(
+                    step_id="ssc",
+                    label="Software Security Center",
+                    state=LiveState.PENDING,
+                    detail="Waiting for secrets.",
+                    routes=(RouteSummary("ssc.fortifydemo.proxmox", True, tls_secret="tls", service_name="ssc-webapp", endpoints_ready=False),),
                 ),
             ),
         )
