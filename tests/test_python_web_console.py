@@ -15,6 +15,7 @@ from fortifylab.core.command import CommandResult
 from fortifylab.operations import OperationJobManager, OperationJobRequest, OperationRunner
 from fortifylab.status import EventSummary, HintSeverity, LiveDeploymentSnapshot, LiveState, LiveStepStatus, PodSummary, ProgressHint, RouteSummary
 from fortifylab.web import WebConsoleApp, WebConsoleConfig, build_http_server
+from fortifylab.web.server import write_json, write_text
 from fortifylab.web.support import SupportInspector
 
 
@@ -257,6 +258,29 @@ class PythonWebConsoleTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 404)
 
+    def test_response_writes_ignore_client_disconnects(self) -> None:
+        class BrokenWriter:
+            def write(self, payload: bytes) -> None:
+                raise BrokenPipeError("client disconnected")
+
+        class FakeHandler:
+            wfile = BrokenWriter()
+
+            def send_response(self, status: int) -> None:
+                self.status = status
+
+            def send_header(self, name: str, value: str) -> None:
+                pass
+
+            def end_headers(self) -> None:
+                pass
+
+        handler = FakeHandler()
+
+        write_json(handler, 200, {"ok": True})
+        write_text(handler, 200, "text/plain; charset=utf-8", "ok")
+
+        self.assertEqual(handler.status, 200)
 
     def test_operations_api_exposes_job_payload_helpers(self) -> None:
         manager = OperationJobManager(runner=OperationRunner(lambda command: CommandResult(command, 0, "logs", "", 0.01)))

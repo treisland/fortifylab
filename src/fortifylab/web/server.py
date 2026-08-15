@@ -5,6 +5,7 @@ from __future__ import annotations
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import socket
 import ssl
 from pathlib import Path
 from typing import Any
@@ -136,7 +137,7 @@ def write_json(
     handler.send_header("Content-Length", str(len(payload)))
     _maybe_cookie(handler, set_cookie=set_cookie, token=token)
     handler.end_headers()
-    handler.wfile.write(payload)
+    write_response_body(handler, payload)
 
 
 def write_text(
@@ -154,10 +155,20 @@ def write_text(
     handler.send_header("Content-Length", str(len(payload)))
     _maybe_cookie(handler, set_cookie=set_cookie, token=token)
     handler.end_headers()
-    handler.wfile.write(payload)
+    write_response_body(handler, payload)
 
 
 def _maybe_cookie(handler: BaseHTTPRequestHandler, *, set_cookie: bool, token: str | None) -> None:
     if not set_cookie or not token:
         return
     handler.send_header("Set-Cookie", f"{TOKEN_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/")
+
+
+def write_response_body(handler: BaseHTTPRequestHandler, payload: bytes) -> None:
+    try:
+        handler.wfile.write(payload)
+    except (BrokenPipeError, ConnectionResetError, socket.timeout, ssl.SSLError):
+        # Browsers can abort polling or navigation requests while the server is
+        # writing. Treat that as a client disconnect instead of printing a
+        # scary traceback in the operator terminal.
+        return
