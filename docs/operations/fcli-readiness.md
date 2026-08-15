@@ -14,19 +14,39 @@ export FORTIFY_RECOMMENDED_FCLI_VERSION="3.23.3"
 export FORTIFY_FCLI_INSTALL_DIR="$HOME/fortify/tools/bin"
 ```
 
-Then open **Tools and FCLI readiness → Install or update FCLI**. The wizard
-downloads the pinned Linux release asset, verifies the `.sha256` checksum, and
-extracts `fcli` into the user-local install directory. Add that directory to
-`PATH` if your shell does not already find it:
+Then open **Tools and FCLI readiness -> Install or update FCLI**. The wizard
+downloads the pinned Linux release asset, verifies the `.sha256` checksum,
+extracts `fcli` into the user-local install directory, adds that directory to the
+current shell `PATH`, and persists the PATH handoff in the selected shell
+profile when it is not already present.
 
-```bash
-export PATH="$HOME/fortify/tools/bin:$PATH"
-fcli --version
-```
+If Fortify Lab TLS certificates already exist, the install flow also activates
+fcli lab TLS trust for the current shell and persists only non-secret truststore
+location/type hints. It does not write the truststore password to shell profiles.
 
 FCLI is warning-only for Fortify Lab deployment. Missing or mismatched FCLI does
 not block Guided deployment, Express deployment, component start/upgrade, or
 lifecycle operations.
+
+## Lab TLS trust
+
+fcli is Java-based, so browser trust and operating-system trust are not always
+enough for local mkcert certificates. Use **Tools and FCLI readiness -> Configure
+fcli trust for lab TLS** after generating TLS certificates, or rerun the install
+flow after certificates exist.
+
+The wizard sets these values for the current shell:
+
+```bash
+export FCLI_TRUSTSTORE="$TRUSTSTORE"
+export FCLI_TRUSTSTORE_TYPE="JKS"
+export FCLI_TRUSTSTORE_PWD="<DEFAULT_PASS from private .env>"
+```
+
+Only the non-secret truststore path and type are persisted for future shells.
+Set the password privately per shell, or use the wizard option again, before
+running SSC login runbooks. This is the usual fix for fcli `PKIX` certificate
+validation failures against the local SSC URL.
 
 ## SSC-primary handoff
 
@@ -44,7 +64,9 @@ ready for that separate lifecycle.
 For repeatable operator checks, use the official Fortify Lab fcli runbooks in
 `runbooks/official/fcli/` or read the [fcli runbook notes](../runbooks/fcli.md).
 Those runbooks follow the official [fcli v3 documentation](https://fortify.github.io/fcli/v3/)
-and keep local SSC login separate from FoD commands.
+and keep local SSC login separate from FoD commands. The intended Local SSC path
+is trust -> token guidance -> login/discovery -> doctor/inventory -> optional
+app-version and FPR actions -> policy/summary -> logout cleanup.
 
 ## FoD optional path
 

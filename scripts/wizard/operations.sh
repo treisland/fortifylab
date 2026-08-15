@@ -1785,6 +1785,83 @@ fcli_persist_path() {
     } >> "$profile"
 }
 
+
+fcli_truststore_path() {
+    local truststore="${TRUSTSTORE:-}"
+    if [ -z "$truststore" ]; then
+        truststore="${FORTIFY_CERTS:-$FORTIFY_HOME_K8S/certs}/truststore"
+    fi
+    printf '%s\n' "$truststore"
+}
+
+fcli_trust_configured_current() {
+    local truststore="${1:-$(fcli_truststore_path)}"
+    [ "${FCLI_TRUSTSTORE:-}" = "$truststore" ] &&
+        [ "${FCLI_TRUSTSTORE_TYPE:-}" = "JKS" ] &&
+        [ -n "${FCLI_TRUSTSTORE_PWD:-}" ]
+}
+
+fcli_export_lab_trust() {
+    local truststore="${1:-$(fcli_truststore_path)}"
+    [ -s "$truststore" ] || return 1
+    [ -n "${DEFAULT_PASS:-}" ] || return 2
+    export FCLI_TRUSTSTORE="$truststore"
+    export FCLI_TRUSTSTORE_TYPE="JKS"
+    export FCLI_TRUSTSTORE_PWD="$DEFAULT_PASS"
+}
+
+fcli_profile_has_lab_trust_hints() {
+    local profile="$1" truststore="${2:-$(fcli_truststore_path)}"
+    [ -f "$profile" ] || return 1
+    grep -F "export FCLI_TRUSTSTORE=\"$truststore\"" "$profile" >/dev/null 2>&1 &&
+        grep -F 'export FCLI_TRUSTSTORE_TYPE="JKS"' "$profile" >/dev/null 2>&1
+}
+
+fcli_persist_lab_trust_hints() {
+    local truststore="${1:-$(fcli_truststore_path)}" profile
+    [ -s "$truststore" ] || return 1
+    profile="$(fcli_shell_profile_path)"
+    mkdir -p "$(dirname "$profile")" || return 1
+    if fcli_profile_has_lab_trust_hints "$profile" "$truststore"; then
+        return 0
+    fi
+    {
+        printf '\n# FortifyLab fcli TLS trust hints; set the truststore password privately per shell.\n'
+        printf 'export FCLI_TRUSTSTORE="%s"\n' "$truststore"
+        printf 'export FCLI_TRUSTSTORE_TYPE="JKS"\n'
+    } >> "$profile"
+}
+
+fcli_configure_lab_trust() {
+    local truststore="${1:-$(fcli_truststore_path)}" profile
+    if [ ! -s "$truststore" ]; then
+        error "Lab truststore not found at $truststore. Generate TLS certificates first."
+        return 1
+    fi
+    if [ -z "${DEFAULT_PASS:-}" ]; then
+        error "DEFAULT_PASS is required to activate fcli lab TLS trust for this shell."
+        return 1
+    fi
+    fcli_export_lab_trust "$truststore" || return 1
+    fcli_persist_lab_trust_hints "$truststore" || return 1
+    profile="$(fcli_shell_profile_path)"
+    note "Activated fcli lab TLS trust for this shell."
+    note "Persisted non-secret truststore hints in $profile."
+    note "For future shells, export FCLI_TRUSTSTORE_PWD from DEFAULT_PASS in a private shell."
+}
+
+fcli_trust_status_line() {
+    local truststore
+    truststore="$(fcli_truststore_path)"
+    if [ ! -s "$truststore" ]; then
+        printf '%s Lab truststore missing at %s\n' "$WARN_MARK" "$truststore"
+    elif fcli_trust_configured_current "$truststore"; then
+        printf '%s FCLI lab TLS trust active for %s\n' "$OK_MARK" "$truststore"
+    else
+        printf '%s Lab truststore exists but fcli trust env is not active\n' "$WARN_MARK"
+    fi
+}
+
 fcli_path() {
     command -v fcli 2>/dev/null && return 0
     if [ -x "$FORTIFY_FCLI_INSTALL_DIR/fcli" ]; then
@@ -1822,6 +1899,7 @@ fcli_print_status() {
     printf '  Recommended version: %s\n' "$FORTIFY_RECOMMENDED_FCLI_VERSION"
     printf '  Install directory:    %s\n' "$FORTIFY_FCLI_INSTALL_DIR"
     printf '  %s\n' "$(fcli_status_line)"
+    printf '  %s\n' "$(fcli_trust_status_line)"
     cat <<EOF
 
   FCLI is needed only for local Fortify command-line workflows after the lab is
@@ -1866,7 +1944,17 @@ fcli_install_or_update() {
     chmod 755 "$target/fcli" 2>/dev/null || true
     rm -rf "$temp_dir"
     note "Installed FCLI $version into $target."
-    note "Add this directory to PATH if fcli is not found: export PATH=\"$target:\$PATH\""
+    if fcli_export_current_path "$target"; then
+        note "Added FCLI to the current shell PATH."
+    fi
+    if fcli_persist_path "$target"; then
+        note "Persisted the FCLI PATH handoff in $(fcli_shell_profile_path)."
+    fi
+    if [ -s "$(fcli_truststore_path)" ]; then
+        fcli_configure_lab_trust "$(fcli_truststore_path)" || return 1
+    else
+        note "Generate TLS certificates before configuring fcli lab TLS trust."
+    fi
 }
 
 fcli_print_command_templates() {
@@ -1906,8 +1994,9 @@ fcli_tools_menu() {
         cat <<EOF
 
   1. Install or update FCLI to the recommended version
-  2. Show FCLI status
-  3. Show secret-safe command templates
+  2. Configure fcli trust for lab TLS
+  3. Show FCLI status
+  4. Show secret-safe command templates
 
   r. Return
 EOF
@@ -1915,8 +2004,9 @@ EOF
         ask choice "Select:"
         case "$choice" in
             1) fcli_install_or_update; press_any ;;
-            2) fcli_print_status; press_any ;;
-            3) fcli_print_command_templates; press_any ;;
+            2) fcli_configure_lab_trust; press_any ;;
+            3) fcli_print_status; press_any ;;
+            4) fcli_print_command_templates; press_any ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
         esac
