@@ -3,12 +3,34 @@ auth:
 
 primary:
   persistence:
-    enable: true
+    enabled: true
     #existingClaim: 'mysql-pvc'
     storageClass: 'nfs'
     size: 8Gi
     accessModes: 
       - ReadWriteOnce
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 10
+    failureThreshold: 60
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 120
+    periodSeconds: 10
+    timeoutSeconds: 10
+    failureThreshold: 12
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 10
+    failureThreshold: 12
   configuration: |-
     [mysqld]
       skip-name-resolve
