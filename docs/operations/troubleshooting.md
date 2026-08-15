@@ -137,6 +137,16 @@ starting over.
 5. Check the scanner only after Core is healthy; scanner registration is the
    final application-level confirmation.
 
+!!! note "Known issue: DAST upgrade job artifact permissions"
+    During DAST Core install or upgrade, the vendor `configureEnvironment` step
+    generates scanner start archives named `dast-windows-start.zip` and
+    `dast-linux-start.tar.gz` under `/usr/lib64/dotnet`. If the upgrade job
+    does not run with permission to write there, logs show
+    `UnauthorizedAccessException` for those paths after migrations complete.
+    Fortify Lab sets the DAST Core upgrade job container `runAsUser` to `0` in
+    `apps/scdast/core/resource_override.yaml` so artifact generation can
+    complete without changing the runtime DAST services.
+
 Do not use permissive TLS client flags as a repair. Correct hostname, ingress,
 certificate, and trust configuration instead.
 

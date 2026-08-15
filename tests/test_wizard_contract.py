@@ -197,6 +197,15 @@ class WizardContractTests(unittest.TestCase):
         self.assertNotIn("api.ingress.annotations.\"traefik\\\\.ingress\\\\.kubernetes\\\\.io/service", scdast)
 
 
+    def test_dast_upgradejob_can_write_vendor_artifacts_without_relaxing_runtime_services(self) -> None:
+        override = (ROOT / "apps" / "scdast" / "core" / "resource_override.yaml").read_text(encoding="utf-8")
+        self.assertIn("upgradejob:\n  resources: null", override)
+        self.assertIn("  containerSecurityContext:\n    runAsUser: 0", override)
+        self.assertIn("dast-*-start archives", override)
+        runtime_prefix = override.split("upgradejob:", 1)[0]
+        self.assertNotIn("runAsUser: 0", runtime_prefix)
+
+
     def test_app_starts_refresh_coredns_before_hostname_based_workloads(self) -> None:
         for relative in (
             "apps/ssc/start.sh",
