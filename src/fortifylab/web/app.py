@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fortifylab.diagnostics import route_findings
-from fortifylab.operations import OperationJobManager, OperationJobRequest
+from fortifylab.operations import ActionPreview, OperationJobManager, OperationJobRequest, OperationSpec
 from fortifylab.operations.previews import ActionPreviewCatalog
 from fortifylab.status import LiveDeploymentSnapshot, LiveState, LiveStatusPoller, LiveStepStatus, build_service_registry, service_health_payload
 from fortifylab.tui.profiles import LOG_SCOPES, build_profile
@@ -195,24 +195,48 @@ class WebConsoleApp:
     def lifecycle_actions_payload(self) -> dict[str, Any]:
         action_payload = self.action_catalog_payload()
         execute_enabled = bool(action_payload["security"].get("enable_actions"))
-        actions = []
-        for action in action_payload["actions"]:
-            command = action.get("command", [])
-            actions.append({
-                **action,
-                "command_preview": command,
-                "job": {
-                    "state": "not_started",
-                    "message": "No lifecycle job has been submitted from the web console.",
-                },
-            })
+        snapshot = self._snapshot()
+        specs = self._dynamic_lifecycle_specs(snapshot)
+        actions = [self._lifecycle_action_payload(spec, snapshot) for spec in specs]
         return {
             "mode": "actions_enabled" if execute_enabled else "preview_only",
-            "execute_endpoint": "/api/operations/jobs" if execute_enabled else None,
+            "execute_endpoint": "/api/operations/jobs",
             "security": action_payload["security"],
             "confirmation_contract": action_payload["confirmation_contract"],
             "actions": actions,
         }
+
+    def _dynamic_lifecycle_specs(self, snapshot: LiveDeploymentSnapshot) -> list[OperationSpec]:
+        catalog = self.operation_jobs.catalog
+        specs: list[OperationSpec] = [catalog.certs(), catalog.secrets(), catalog.cluster("start"), catalog.cluster("stop")]
+        seen = {spec.operation_id for spec in specs}
+        for step in snapshot.steps:
+            app_id = _app_id_for_step(step.step_id)
+            if app_id:
+                action = "stop" if _step_has_running_workload(step) else "start"
+                for spec in (catalog.app(app_id, action), catalog.app(app_id, "destroy")):
+                    if spec.operation_id not in seen:
+                        specs.append(spec)
+                        seen.add(spec.operation_id)
+            for pod in step.pods:
+                spec = catalog.logs(pod.name, follow=False)
+                if spec.operation_id not in seen:
+                    specs.append(spec)
+                    seen.add(spec.operation_id)
+        return specs
+
+    def _lifecycle_action_payload(self, spec: OperationSpec, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
+        preview = ActionPreview(spec, self.config.enable_actions and spec.mutates).to_dict()
+        resource = _resource_for_operation(spec.operation_id, snapshot)
+        preview.update({
+            "command_preview": preview.get("command", []),
+            "resource": resource,
+            "job": {
+                "state": "not_started",
+                "message": "No lifecycle job has been submitted from the web console.",
+            },
+        })
+        return preview
 
     def lifecycle_audit_payload(self) -> dict[str, Any]:
         entries = [entry.to_api_dict() for entry in self.operation_jobs.audit_entries()]
@@ -371,3 +395,42 @@ def _step_has_live_evidence(step: LiveStepStatus | None) -> bool:
     if step.state is not LiveState.PENDING:
         return True
     return bool(step.pods or step.events or step.routes or step.hints)
+
+
+APP_STEP_IDS = {
+    "mysql": "mysql",
+    "postgresql": "postgresql",
+    "ssc": "ssc",
+    "lim": "lim",
+    "scsast": "scsast",
+    "scsast_ctrl": "scsast",
+    "scdast_core": "scdast-core",
+    "scdast": "scdast-core",
+    "scdast_scanner": "scdast-scanner",
+}
+
+
+def _app_id_for_step(step_id: str) -> str | None:
+    return APP_STEP_IDS.get(step_id)
+
+
+def _step_has_running_workload(step: LiveStepStatus) -> bool:
+    return any(pod.ready > 0 or pod.phase.lower() == "running" for pod in step.pods)
+
+
+def _resource_for_operation(operation_id: str, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
+    if operation_id.startswith("cluster."):
+        return {"id": "cluster", "label": "MicroK8s cluster", "state": snapshot.overall_state.value, "scope": "cluster"}
+    if operation_id.startswith("logs."):
+        pod_name = operation_id.removeprefix("logs.")
+        for step in snapshot.steps:
+            if any(pod.name == pod_name for pod in step.pods):
+                return {"id": pod_name, "label": pod_name, "state": step.state.value, "scope": "pod", "step_id": step.step_id, "step_label": step.label}
+        return {"id": pod_name, "label": pod_name, "state": "unknown", "scope": "pod"}
+    if operation_id.startswith("app."):
+        app_id = operation_id.split(".")[1]
+        for step in snapshot.steps:
+            if _app_id_for_step(step.step_id) == app_id:
+                return {"id": app_id, "label": step.label, "state": step.state.value, "scope": "application", "step_id": step.step_id}
+        return {"id": app_id, "label": app_id, "state": "not_deployed", "scope": "application"}
+    return {"id": "maintenance", "label": "Maintenance", "state": "available", "scope": "maintenance"}

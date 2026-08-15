@@ -82,9 +82,13 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("setupPanelFocus", script)
         self.assertIn("openFocusedPanel", script)
         self.assertIn("panel-focus-overlay", script)
+        self.assertIn("closeFocusedPanel", script)
+        self.assertIn("renderActionGroups", script)
+        self.assertIn("waitForJob", script)
         self.assertIn("postJson", script)
         self.assertIn("data-run-lifecycle-action", script)
         self.assertIn("View logs", script)
+        self.assertIn("data-log-action", script)
         self.assertIn(":root[data-theme=\"dark\"]", styles)
         self.assertIn("prefers-color-scheme: dark", styles)
         self.assertIn("uptime-strip", styles)
@@ -94,6 +98,9 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("is-focused-panel.lifecycle-panel", styles)
         self.assertIn("primary-action", styles)
         self.assertIn("action-card.is-selected", styles)
+        self.assertIn("panel-focus-in", styles)
+        self.assertIn("action-groups", styles)
+        self.assertIn("log-output", styles)
 
     def test_serve_once_returns_static_index(self) -> None:
         status, headers, body = self.request_once(WebConsoleConfig(port=0), "/")
@@ -224,12 +231,27 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertTrue(posture["data"]["actions"]["read_only"])
         self.assertTrue(posture["data"]["console"]["token_required"])
         self.assertEqual(actions["data"]["mode"], "preview_only")
-        self.assertIsNone(actions["data"]["execute_endpoint"])
+        self.assertEqual(actions["data"]["execute_endpoint"], "/api/operations/jobs")
         destroy = next(action for action in actions["data"]["actions"] if action["id"] == "app.ssc.destroy")
         self.assertEqual(destroy["confirmation"]["phrase"], "DESTROY ssc")
         self.assertIn("./apps/ssc/destroy.sh", destroy["command_preview"])
         self.assertNotIn("password", str(actions).lower())
         self.assertEqual(audit["data"]["entries"], [])
+
+    def test_lifecycle_actions_are_dynamic_from_live_state(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig(enable_actions=True), status_poller=FakeStatusPoller())
+
+        _, payload = app.api_envelope("/api/lifecycle/actions")
+        actions = {action["id"]: action for action in payload["data"]["actions"]}
+
+        self.assertIn("cluster.start", actions)
+        self.assertIn("cluster.stop", actions)
+        self.assertIn("app.ssc.stop", actions)
+        self.assertNotIn("app.ssc.start", actions)
+        self.assertIn("logs.ssc-webapp-0", actions)
+        self.assertEqual(actions["app.ssc.stop"]["resource"]["scope"], "application")
+        self.assertEqual(actions["logs.ssc-webapp-0"]["resource"]["scope"], "pod")
+        self.assertTrue(actions["app.ssc.stop"]["execution_enabled"])
 
     def test_deployment_status_api_returns_steps_and_event_timeline(self) -> None:
         status, payload = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller()).api_envelope("/api/deployment/status")

@@ -6,6 +6,8 @@ let focusedPanel = null;
 let focusedPlaceholder = null;
 let selectedLifecycleActionId = null;
 let lifecycleSubmitting = false;
+let panelFocusClosing = false;
+const panelFocusAnimationMs = 180;
 const state = document.querySelector("#connection-state");
 const lastUpdated = document.querySelector("#last-updated");
 const store = {
@@ -31,18 +33,33 @@ function panelTitle(panel) {
 
 function closeFocusedPanel() {
   const overlay = document.querySelector("#panel-focus-overlay");
-  if (focusedPanel && focusedPlaceholder) {
-    focusedPanel.classList.remove("is-focused-panel");
-    focusedPlaceholder.replaceWith(focusedPanel);
+  if (!focusedPanel || !focusedPlaceholder) {
+    if (overlay) overlay.remove();
+    document.body.classList.remove("panel-focus-open");
+    return;
   }
-  focusedPanel = null;
-  focusedPlaceholder = null;
-  document.body.classList.remove("panel-focus-open");
-  if (overlay) overlay.remove();
+  if (panelFocusClosing) return;
+  panelFocusClosing = true;
+  overlay?.classList.add("is-closing");
+  focusedPanel.classList.add("is-collapsing");
+  window.setTimeout(() => {
+    if (focusedPanel && focusedPlaceholder) {
+      focusedPanel.classList.remove("is-focused-panel", "is-collapsing");
+      focusedPlaceholder.replaceWith(focusedPanel);
+    }
+    focusedPanel = null;
+    focusedPlaceholder = null;
+    panelFocusClosing = false;
+    document.body.classList.remove("panel-focus-open");
+    if (overlay) overlay.remove();
+  }, panelFocusAnimationMs);
 }
 
 function openFocusedPanel(panel) {
-  if (focusedPanel === panel) return;
+  if (focusedPanel === panel) {
+    closeFocusedPanel();
+    return;
+  }
   closeFocusedPanel();
   focusedPanel = panel;
   focusedPlaceholder = document.createElement("div");
@@ -53,10 +70,14 @@ function openFocusedPanel(panel) {
   overlay.id = "panel-focus-overlay";
   overlay.className = "panel-focus-overlay";
   const title = panelTitle(panel);
-  overlay.innerHTML = `<div class="panel-focus-shell" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)} fullscreen panel"><div class="panel-focus-bar"><div><span>Focused panel</span><strong>${escapeHtml(title)}</strong></div><button type="button" class="panel-focus-close" aria-label="Close fullscreen panel">x</button></div><div class="panel-focus-stage"></div></div>`;
+  overlay.innerHTML = `<div class="panel-focus-shell" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)} fullscreen panel"><div class="panel-focus-bar"><div><span>Focused panel</span><strong>${escapeHtml(title)}</strong></div><button type="button" class="panel-focus-close" aria-label="Collapse fullscreen panel">Collapse</button></div><div class="panel-focus-stage"></div></div>`;
   document.body.appendChild(overlay);
   panel.classList.add("is-focused-panel");
   overlay.querySelector(".panel-focus-stage").appendChild(panel);
+  overlay.querySelector(".panel-focus-close").addEventListener("click", closeFocusedPanel);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closeFocusedPanel();
+  });
   overlay.querySelector(".panel-focus-close").focus();
   document.body.classList.add("panel-focus-open");
 }
@@ -312,9 +333,43 @@ function renderLogs(data) {
     ? `<ul class="card-list">${pods.slice(0, 8).map((pod) => `
         <li class="card-row">
           <div class="row-main"><strong>${escapeHtml(pod.step_label || "Pod logs")}</strong><span>${escapeHtml(pod.name)}</span></div>
+          <div class="log-actions">
+            <button type="button" class="secondary-action" data-log-action="logs.${escapeHtml(pod.name)}">View recent logs</button>
+          </div>
           <code class="command">${escapeHtml(commandLine(pod.recent_command))}</code>
+          ${renderLogOutput(`logs.${pod.name}`)}
         </li>`).join("")}</ul>`
     : empty("No pod log options reported yet.");
+  bindLogControls();
+}
+
+function renderLogOutput(operationId) {
+  const job = latestJobForAction(operationId);
+  if (!job) return "";
+  const detail = job.execution?.detail || job.message || "Log request submitted.";
+  return `<pre class="log-output">${escapeHtml(detail)}</pre>`;
+}
+
+function bindLogControls() {
+  for (const button of document.querySelectorAll("[data-log-action]")) {
+    button.addEventListener("click", () => submitReadOnlyOperation(button.dataset.logAction));
+  }
+}
+
+async function submitReadOnlyOperation(operationId) {
+  if (!operationId) return;
+  try {
+    const jobPayload = await postJson("/api/operations/jobs", { operation_id: operationId });
+    const finishedJob = await waitForJob(jobPayload.job?.job_id);
+    const job = finishedJob || jobPayload.job;
+    const existingJobs = store.operationJobs?.jobs || [];
+    store.operationJobs = { jobs: [job, ...existingJobs.filter((item) => item.job_id !== job.job_id)] };
+  } catch (error) {
+    store.operationJobs = { jobs: [{ operation_id: operationId, status: "failed", message: error.message }] };
+  } finally {
+    if (store.logs) renderLogs(store.logs);
+    if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
+  }
 }
 
 function renderDiagnostics(data) {
@@ -462,16 +517,17 @@ function renderLifecycleActions(data) {
     return;
   }
   if (!selectedLifecycleActionId || !actions.some((action) => action.id === selectedLifecycleActionId)) {
-    const firstRunnable = actions.find((action) => actionCanRun(action)) || actions[0];
+    const firstRunnable = actions.find((action) => action.resource?.scope === "application" && actionCanRun(action)) || actions.find((action) => actionCanRun(action)) || actions[0];
     selectedLifecycleActionId = firstRunnable.id;
   }
   const selected = actions.find((action) => action.id === selectedLifecycleActionId) || actions[0];
   const latestJob = latestJobForAction(selected.id);
   target("lifecycle").innerHTML = `
     <div class="lifecycle-layout">
-      <ul class="action-list">${actions.map((action) => renderActionPreview(action, action.id === selected.id)).join("")}</ul>
+      <div class="action-groups">${renderActionGroups(actions, selected.id)}</div>
       <div class="confirmation-box">
         <div class="row-main"><strong>${escapeHtml(selected.label || "Lifecycle action")}</strong>${pill(selected.impact || "unknown")}</div>
+        <div class="selected-resource">${escapeHtml(resourceSummary(selected))}</div>
         <p>${escapeHtml(selected.warning || actionHelpText(selected))}</p>
         ${renderConfirmationControl(selected)}
         <code class="command">${actionCommandPreview(selected).length ? escapeHtml(commandLine(actionCommandPreview(selected))) : "Command preview pending backend support."}</code>
@@ -486,6 +542,28 @@ function renderLifecycleActions(data) {
   bindLifecycleControls(payload);
 }
 
+function renderActionGroups(actions, selectedId) {
+  const groups = [
+    ["application", "Applications"],
+    ["cluster", "Cluster"],
+    ["pod", "Logs"],
+    ["maintenance", "Maintenance"],
+  ];
+  const content = groups.map(([scope, label]) => {
+    const scoped = actions.filter((action) => (action.resource?.scope || "maintenance") === scope);
+    if (!scoped.length) return "";
+    return `<section class="action-group"><h3>${escapeHtml(label)}</h3><ul class="action-list">${scoped.map((action) => renderActionPreview(action, action.id === selectedId)).join("")}</ul></section>`;
+  }).join("");
+  return content || `<ul class="action-list">${actions.map((action) => renderActionPreview(action, action.id === selectedId)).join("")}</ul>`;
+}
+
+function resourceSummary(action) {
+  const resource = action.resource || {};
+  const label = resource.label || resource.id || "Fortify Lab";
+  const state = resource.state ? pretty(resource.state) : "available";
+  const scope = resource.scope ? pretty(resource.scope) : "operation";
+  return `${label} · ${scope} · ${state}`;
+}
 function latestJobForAction(actionId) {
   const jobs = store.operationJobs?.jobs || [];
   return jobs.find((job) => job.operation_id === actionId) || null;
@@ -517,6 +595,16 @@ function renderActionButton(action, payload) {
   return `<button type="button" class="primary-action" data-run-lifecycle-action="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>${escapeHtml(label)}</button>`;
 }
 
+async function waitForJob(jobId) {
+  if (!jobId) return null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const data = await loadJson(`/api/operations/jobs/${encodeURIComponent(jobId)}`);
+    const job = data.job;
+    if (job && !["queued", "running"].includes(job.status)) return job;
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+  }
+  return null;
+}
 async function submitLifecycleAction(action, payload) {
   const confirmation = document.querySelector("#lifecycle-confirmation")?.value || null;
   lifecycleSubmitting = true;
@@ -527,8 +615,10 @@ async function submitLifecycleAction(action, payload) {
       execute: Boolean(action.mutates && action.execution_enabled),
       confirmation,
     });
+    const finishedJob = await waitForJob(jobPayload.job?.job_id);
+    const job = finishedJob || jobPayload.job;
     const existingJobs = store.operationJobs?.jobs || [];
-    store.operationJobs = { jobs: [jobPayload.job, ...existingJobs.filter((job) => job.job_id !== jobPayload.job.job_id)] };
+    store.operationJobs = { jobs: [job, ...existingJobs.filter((item) => item.job_id !== job.job_id)] };
     await loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit);
   } catch (error) {
     store.operationJobs = { jobs: [{ operation_id: action.id, status: "failed", message: error.message }] };
@@ -624,6 +714,8 @@ async function refreshConsole() {
     renderSummary();
     renderWorkspace();
     renderRoutes();
+    if (store.logs) renderLogs(store.logs);
+    if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
 
     const loaded = results.filter(Boolean).length;
     if (loaded === results.length) {
