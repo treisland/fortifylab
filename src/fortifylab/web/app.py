@@ -207,7 +207,7 @@ class WebConsoleApp:
         return ActionPreviewCatalog(enable_actions=self.config.enable_actions)
 
     def _snapshot(self) -> LiveDeploymentSnapshot:
-        poller = self.status_poller or LiveStatusPoller()
+        poller = self.status_poller or LiveStatusPoller(env_file=self.config.env_file)
         return poller.snapshot()
 
     def _support_inspector(self, snapshot: LiveDeploymentSnapshot) -> SupportInspector:

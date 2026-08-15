@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 import json
+from pathlib import Path
+import shutil
 
+from fortifylab.config import parse_env_text, validate_hosts_and_urls
 from fortifylab.core.command import CommandResult, run_command
 from fortifylab.tui.profiles import LOG_SCOPES, build_profile
 
@@ -14,6 +17,44 @@ from .model import EventSummary, HelmReleaseSummary, LiveDeploymentSnapshot, Liv
 
 
 Runner = Callable[[tuple[str, ...]], CommandResult]
+
+PLATFORM_STEP_IDS = {"prereqs", "inputs", "preflight", "certs", "dashboard", "secrets"}
+REQUIRED_SECRET_NAMES = {
+    "regcred",
+    "fortify-secrets",
+    "tls",
+    "tls-pfx",
+    "tls-pfx-password",
+    "scdast-utilityservice-certificate",
+    "scdast-db-owner",
+    "scdast-db-standard",
+    "scdast-ssc-serviceaccount",
+    "scdast-service-token",
+    "lim-pool",
+    "lim-admin-credentials",
+    "lim-jwt-security-key",
+    "lim-server-certificate",
+    "lim-signing-certificate",
+    "lim-signing-certificate-password",
+}
+REQUIRED_FORTIFY_SECRET_KEYS = {
+    "fortify.license",
+    "ssc.autoconfig",
+    "secret.key",
+    "keystore.jks",
+    "truststore",
+    "default_password",
+    "scancentral-client-auth-token",
+    "scancentral-worker-auth-token",
+    "scancentral-ssc-scancentral-ctrl-secret",
+    "jvm_truststore",
+    "http_truststore",
+    "keystore_password",
+    "key_password",
+    "jvm_truststore_password",
+    "http_truststore_password",
+    "keystore_alias",
+}
 
 
 class LiveStatusPoller:
@@ -24,10 +65,12 @@ class LiveStatusPoller:
         profile: str = "full_lab",
         kubectl: str = "microk8s kubectl",
         helm: str = "microk8s helm3",
+        env_file: Path | None = None,
         runner: Runner | None = None,
     ) -> None:
         self.namespace = namespace
         self.profile = profile
+        self.env_file = env_file
         self.kubectl = tuple(kubectl.split())
         self.helm = tuple(helm.split())
         self.runner = runner or self._default_runner
@@ -39,17 +82,21 @@ class LiveStatusPoller:
         ingress_json = self._json_command((*self.kubectl, "-n", self.namespace, "get", "ingress", "-o", "json"), warnings)
         endpoints_json = self._json_command((*self.kubectl, "-n", self.namespace, "get", "endpoints", "-o", "json"), warnings)
         helm_json = self._json_command((*self.helm, "-n", self.namespace, "list", "-o", "json"), warnings)
+        secrets_json = self._json_command((*self.kubectl, "-n", self.namespace, "get", "secrets", "-o", "json"), warnings)
 
         pods = _parse_pods(pods_json)
         events = _parse_events(events_json)
         routes = _parse_routes(ingress_json, endpoints_json)
         releases = _parse_helm(helm_json)
-        profile = build_profile(self.profile)
-        steps = tuple(self._step_status(step.step_id, step.label, pods, events, routes) for step in profile.steps)
+        env_path, env_values, env_issues = self._env_state()
+        profile_id = env_values.get("FORTIFY_DEPLOYMENT_PROFILE") or self.profile
+        profile = build_profile(profile_id)
+        platform = PlatformState(self, env_path, env_values, env_issues, secrets_json)
+        steps = tuple(self._step_status(step.step_id, step.label, pods, events, routes, platform) for step in profile.steps)
         overall = _overall_state(steps, warnings)
         return LiveDeploymentSnapshot(
             namespace=self.namespace,
-            profile=self.profile,
+            profile=profile.profile_id,
             generated_at=datetime.now(timezone.utc).isoformat(),
             overall_state=overall,
             steps=steps,
@@ -75,6 +122,7 @@ class LiveStatusPoller:
         pods: tuple[PodSummary, ...],
         events: tuple[EventSummary, ...],
         routes: tuple[RouteSummary, ...],
+        platform: "PlatformState",
     ) -> LiveStepStatus:
         scope = LOG_SCOPES.get(step_id)
         step_pods = _matching_pods(scope, pods)
@@ -83,7 +131,17 @@ class LiveStatusPoller:
         hints = hints_for_step(step_id, step_pods, step_events, step_routes)
         state = _state_for(step_pods, hints)
         detail = _detail_for(state, step_pods, hints)
+        platform_state = platform.state_for(step_id)
+        if platform_state is not None and (state is LiveState.PENDING or step_id in PLATFORM_STEP_IDS):
+            state, detail = platform_state
         return LiveStepStatus(step_id=step_id, label=label, state=state, detail=detail, pods=step_pods, events=step_events, routes=step_routes, hints=hints)
+
+    def _env_state(self) -> tuple[Path, dict[str, str], tuple[str, ...]]:
+        env_path = Path(self.env_file) if self.env_file else Path.cwd() / ".env"
+        if not env_path.is_file():
+            return env_path, {}, ("No .env file found.",)
+        document = parse_env_text(env_path.read_text(encoding="utf-8"))
+        return env_path, document.values(), validate_hosts_and_urls(document)
 
     @staticmethod
     def _default_runner(command: tuple[str, ...]) -> CommandResult:
@@ -91,6 +149,105 @@ class LiveStatusPoller:
             return run_command(command, timeout=20)
         except OSError as exc:
             return CommandResult(args=command, returncode=127, stdout="", stderr=str(exc), duration_seconds=0)
+
+
+class PlatformState:
+    def __init__(self, poller: LiveStatusPoller, env_path: Path, env_values: dict[str, str], env_issues: tuple[str, ...], secrets_payload: object) -> None:
+        self.poller = poller
+        self.env_path = env_path
+        self.env_values = env_values
+        self.env_issues = env_issues
+        self.secrets = _secret_items(secrets_payload)
+
+    def state_for(self, step_id: str) -> tuple[LiveState, str] | None:
+        if step_id == "prereqs":
+            return self._prereqs()
+        if step_id == "inputs":
+            return self._inputs()
+        if step_id == "preflight":
+            return self._preflight()
+        if step_id == "certs":
+            return self._certs()
+        if step_id == "dashboard":
+            return self._dashboard()
+        if step_id == "secrets":
+            return self._secrets()
+        return None
+
+    def _prereqs(self) -> tuple[LiveState, str]:
+        required = ("openssl", "envsubst", "curl", "java", "docker", "mkcert", "microk8s")
+        missing = [command for command in required if shutil.which(command) is None]
+        if missing:
+            return LiveState.PENDING, f"Missing host tools: {', '.join(missing)}."
+        return LiveState.COMPLETE, "Host prerequisite commands are available."
+
+    def _inputs(self) -> tuple[LiveState, str]:
+        if not self.env_path.is_file():
+            return LiveState.PENDING, f"No .env file found at {self.env_path}."
+        if self.env_issues:
+            return LiveState.BLOCKED, self.env_issues[0]
+        return LiveState.COMPLETE, ".env host and URL values are usable."
+
+    def _preflight(self) -> tuple[LiveState, str]:
+        prereqs, _ = self._prereqs()
+        inputs, detail = self._inputs()
+        if prereqs is not LiveState.COMPLETE:
+            return LiveState.PENDING, "Waiting for host prerequisites before pre-flight."
+        if inputs is not LiveState.COMPLETE:
+            return inputs, detail
+        storage = self.poller.runner((*self.poller.kubectl, "get", "storageclass", "nfs", "-o", "json"))
+        docker_config = Path.home() / ".docker" / "config.json"
+        if not storage.ok:
+            return LiveState.PENDING, "StorageClass nfs is not available yet."
+        if not docker_config.is_file():
+            return LiveState.PENDING, "Docker auth config is not available yet."
+        return LiveState.COMPLETE, "Pre-flight prerequisites are present."
+
+    def _certs(self) -> tuple[LiveState, str]:
+        root = self.env_path.parent
+        certs_dir = Path(self.env_values.get("FORTIFY_CERTS") or root / "certs")
+        paths = {
+            "TLS certificate": Path(self.env_values.get("SERVER_CERT") or certs_dir / "tls.crt"),
+            "TLS key": Path(self.env_values.get("SERVER_KEY") or certs_dir / "tls.key"),
+            "JVM keystore": Path(self.env_values.get("JVM_KEYSTORE") or certs_dir / "keystore.jks"),
+            "Truststore": Path(self.env_values.get("TRUSTSTORE") or certs_dir / "truststore"),
+        }
+        missing = [label for label, item in paths.items() if not item.is_file() or item.stat().st_size == 0]
+        if missing:
+            return LiveState.PENDING, f"Missing certificate artifacts: {', '.join(missing)}."
+        return LiveState.COMPLETE, "TLS certificate, key, keystore, and truststore artifacts exist."
+
+    def _dashboard(self) -> tuple[LiveState, str]:
+        dashboard_ns = "kubernetes-dashboard"
+        kong = self.poller.runner((*self.poller.kubectl, "-n", dashboard_ns, "get", "service", "kubernetes-dashboard-kong-proxy", "-o", "json"))
+        if not kong.ok:
+            dashboard_ns = "kube-system"
+        ingress = self.poller.runner((*self.poller.kubectl, "-n", dashboard_ns, "get", "ingress", "ingress-dashboard", "-o", "json"))
+        if not ingress.ok:
+            return LiveState.PENDING, "Dashboard ingress is not present yet."
+        return LiveState.COMPLETE, "Dashboard ingress is present."
+
+    def _secrets(self) -> tuple[LiveState, str]:
+        names = set(self.secrets)
+        missing_names = sorted(REQUIRED_SECRET_NAMES - names)
+        if missing_names:
+            return LiveState.PENDING, f"Missing Kubernetes Secret {missing_names[0]}."
+        fortify = self.secrets.get("fortify-secrets", set())
+        missing_keys = sorted(REQUIRED_FORTIFY_SECRET_KEYS - set(fortify))
+        if missing_keys:
+            return LiveState.PENDING, f"Missing key {missing_keys[0]} in secret fortify-secrets."
+        return LiveState.COMPLETE, "All required Kubernetes Secrets and fortify-secrets keys are present."
+
+
+def _secret_items(payload: object) -> dict[str, set[str]]:
+    items = payload.get("items", []) if isinstance(payload, dict) else []
+    result: dict[str, set[str]] = {}
+    for item in items:
+        name = item.get("metadata", {}).get("name", "")
+        data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
+        if name:
+            result[name] = set(data)
+    return result
 
 
 def _parse_pods(payload: object) -> tuple[PodSummary, ...]:
@@ -218,7 +375,7 @@ def _detail_for(state: LiveState, pods: tuple[PodSummary, ...], hints: tuple) ->
 def _overall_state(steps: tuple[LiveStepStatus, ...], warnings: list[str]) -> LiveState:
     if warnings:
         return LiveState.UNKNOWN
-    states = {step.state for step in steps if step.pods or step.routes}
+    states = {step.state for step in steps if step.pods or step.routes or step.step_id in PLATFORM_STEP_IDS}
     if not states:
         return LiveState.PENDING
     if LiveState.BLOCKED in states:

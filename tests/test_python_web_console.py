@@ -8,12 +8,14 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from fortifylab.core.command import CommandResult
 from fortifylab.operations import OperationJobManager, OperationJobRequest, OperationRunner
 from fortifylab.status import EventSummary, HintSeverity, LiveDeploymentSnapshot, LiveState, LiveStepStatus, PodSummary, ProgressHint, RouteSummary
+from fortifylab.status.polling import LiveStatusPoller, REQUIRED_FORTIFY_SECRET_KEYS, REQUIRED_SECRET_NAMES
 from fortifylab.web import WebConsoleApp, WebConsoleConfig, build_http_server
 from fortifylab.web.server import write_json, write_text
 from fortifylab.web.support import SupportInspector
@@ -464,6 +466,99 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(actions["logs.ssc-webapp-0"]["resource"]["scope"], "pod")
         self.assertTrue(actions["app.ssc.stop"]["execution_enabled"])
 
+
+    def test_live_status_poller_uses_env_profile_and_platform_step_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            certs = root / "certs"
+            certs.mkdir()
+            for name in ("tls.crt", "tls.key", "keystore.jks", "truststore"):
+                (certs / name).write_text("present", encoding="utf-8")
+            docker_home = root / "home"
+            (docker_home / ".docker").mkdir(parents=True)
+            (docker_home / ".docker" / "config.json").write_text("{}", encoding="utf-8")
+            env_file = root / ".env"
+            env_file.write_text(
+                "DOMAIN=fortifydemo.proxmox\n"
+                "SSC=ssc.fortifydemo.proxmox\n"
+                "LIM=lim.fortifydemo.proxmox\n"
+                "SCDAST=dast.fortifydemo.proxmox\n"
+                "SCSAST=sast.fortifydemo.proxmox\n"
+                "LAB_HOST=lab.fortifydemo.proxmox\n"
+                "SSC_URL=https://ssc.fortifydemo.proxmox\n"
+                "LIM_URL=https://lim.fortifydemo.proxmox\n"
+                "LIM_API_URL=https://lim.fortifydemo.proxmox/LIM.API\n"
+                "SCDAST_URL=https://dast.fortifydemo.proxmox\n"
+                "SCSAST_URL=https://sast.fortifydemo.proxmox\n"
+                "SCSAST_CTRL_URL=https://sast.fortifydemo.proxmox/scancentral-ctrl/\n"
+                "LAB_URL=https://lab.fortifydemo.proxmox:8443\n"
+                "FORTIFY_DEPLOYMENT_PROFILE=sast_full\n"
+                f"FORTIFY_CERTS={certs}\n"
+                f"SERVER_CERT={certs / 'tls.crt'}\n"
+                f"SERVER_KEY={certs / 'tls.key'}\n"
+                f"JVM_KEYSTORE={certs / 'keystore.jks'}\n"
+                f"TRUSTSTORE={certs / 'truststore'}\n",
+                encoding="utf-8",
+            )
+            poller = LiveStatusPoller(env_file=env_file, runner=fake_platform_runner)
+
+            with patch("shutil.which", return_value="/usr/bin/tool"), patch("pathlib.Path.home", return_value=docker_home):
+                snapshot = poller.snapshot()
+
+        by_id = {step.step_id: step for step in snapshot.steps}
+        self.assertEqual(snapshot.profile, "sast_full")
+        self.assertEqual(len(snapshot.steps), 11)
+        for step_id in ("prereqs", "inputs", "preflight", "certs", "dashboard", "secrets"):
+            self.assertEqual(by_id[step_id].state, LiveState.COMPLETE, step_id)
+        self.assertNotIn("lim", by_id)
+        self.assertNotIn("dast_core", by_id)
+
+    def test_guided_pipeline_uses_env_profile_and_platform_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            certs = root / "certs"
+            certs.mkdir()
+            for name in ("tls.crt", "tls.key", "keystore.jks", "truststore"):
+                (certs / name).write_text("present", encoding="utf-8")
+            docker_home = root / "home"
+            (docker_home / ".docker").mkdir(parents=True)
+            (docker_home / ".docker" / "config.json").write_text("{}", encoding="utf-8")
+            env_file = root / ".env"
+            env_file.write_text(
+                "DOMAIN=fortifydemo.proxmox\n"
+                "SSC=ssc.fortifydemo.proxmox\n"
+                "LIM=lim.fortifydemo.proxmox\n"
+                "SCDAST=dast.fortifydemo.proxmox\n"
+                "SCSAST=sast.fortifydemo.proxmox\n"
+                "LAB_HOST=lab.fortifydemo.proxmox\n"
+                "SSC_URL=https://ssc.fortifydemo.proxmox\n"
+                "LIM_URL=https://lim.fortifydemo.proxmox\n"
+                "LIM_API_URL=https://lim.fortifydemo.proxmox/LIM.API\n"
+                "SCDAST_URL=https://dast.fortifydemo.proxmox\n"
+                "SCSAST_URL=https://sast.fortifydemo.proxmox\n"
+                "SCSAST_CTRL_URL=https://sast.fortifydemo.proxmox/scancentral-ctrl/\n"
+                "LAB_URL=https://lab.fortifydemo.proxmox:8443\n"
+                "FORTIFY_DEPLOYMENT_PROFILE=sast_full\n"
+                f"FORTIFY_CERTS={certs}\n"
+                f"SERVER_CERT={certs / 'tls.crt'}\n"
+                f"SERVER_KEY={certs / 'tls.key'}\n"
+                f"JVM_KEYSTORE={certs / 'keystore.jks'}\n"
+                f"TRUSTSTORE={certs / 'truststore'}\n",
+                encoding="utf-8",
+            )
+            app = WebConsoleApp(WebConsoleConfig(env_file=env_file), status_poller=LiveStatusPoller(env_file=env_file, runner=fake_platform_runner))
+
+            with patch("shutil.which", return_value="/usr/bin/tool"), patch("pathlib.Path.home", return_value=docker_home):
+                _, payload = app.api_envelope("/api/pipeline/guided")
+
+        stages = payload["data"]["stages"]
+        by_id = {stage["id"]: stage for stage in stages}
+        self.assertEqual(payload["data"]["profile"], "sast_full")
+        self.assertEqual(payload["data"]["progress"]["total"], 11)
+        self.assertEqual(by_id["prereqs"]["state"], "complete")
+        self.assertEqual(by_id["secrets"]["state"], "complete")
+        self.assertEqual(payload["data"]["progress"]["complete"], 6)
+
     def test_deployment_status_api_returns_steps_and_event_timeline(self) -> None:
         status, payload = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller()).api_envelope("/api/deployment/status")
 
@@ -861,6 +956,27 @@ class FakeMysqlDeployingPoller:
                 ),
             ),
         )
+
+
+def fake_platform_runner(command: tuple[str, ...]) -> CommandResult:
+    joined = " ".join(command)
+    if "get secrets" in joined:
+        items = []
+        for name in sorted(REQUIRED_SECRET_NAMES):
+            data = {key: "dmFsdWU=" for key in REQUIRED_FORTIFY_SECRET_KEYS} if name == "fortify-secrets" else {"value": "dmFsdWU="}
+            items.append({"metadata": {"name": name}, "data": data})
+        return CommandResult(command, 0, json.dumps({"items": items}), "", 0)
+    if "get storageclass nfs" in joined:
+        return CommandResult(command, 0, json.dumps({"metadata": {"name": "nfs"}}), "", 0)
+    if "kubernetes-dashboard get service kubernetes-dashboard-kong-proxy" in joined:
+        return CommandResult(command, 0, json.dumps({"metadata": {"name": "kubernetes-dashboard-kong-proxy"}}), "", 0)
+    if "kubernetes-dashboard get ingress ingress-dashboard" in joined:
+        return CommandResult(command, 0, json.dumps({"metadata": {"name": "ingress-dashboard"}}), "", 0)
+    if "get pods" in joined or "get events" in joined or "get ingress" in joined or "get endpoints" in joined:
+        return CommandResult(command, 0, json.dumps({"items": []}), "", 0)
+    if "helm3" in joined and "list" in joined:
+        return CommandResult(command, 0, json.dumps([]), "", 0)
+    return CommandResult(command, 1, "", "not found", 0)
 
 
 def wait_for_web_job(manager: OperationJobManager, job_id: str, *, timeout: float = 2.0):
