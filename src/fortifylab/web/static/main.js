@@ -7,6 +7,10 @@ let focusedPlaceholder = null;
 let selectedLifecycleActionId = null;
 let lifecycleSubmitting = false;
 let panelFocusClosing = false;
+const expandedLogIds = new Set();
+let followedLogActionId = null;
+let logFollowTimer = null;
+const logRequestsInFlight = new Set();
 const panelFocusAnimationMs = 180;
 const state = document.querySelector("#connection-state");
 const lastUpdated = document.querySelector("#last-updated");
@@ -327,37 +331,80 @@ function renderHintList(hints) {
 
 function renderLogs(data) {
   const resources = data.resources || [];
-  const pods = resources.flatMap((resource) => (resource.pods || []).map((pod) => ({ ...pod, step_label: resource.step_label })));
+  const pods = resources.flatMap((resource) => (resource.pods || []).map((pod) => ({ ...pod, step_label: resource.step_label, step_state: resource.state })));
   setText("logs-count", `${pods.length} pods`);
   target("logs").innerHTML = pods.length
-    ? `<ul class="card-list">${pods.slice(0, 8).map((pod) => `
-        <li class="card-row">
+    ? `<ul class="card-list">${pods.slice(0, 8).map((pod) => {
+        const operationId = `logs.${pod.name}`;
+        const expanded = expandedLogIds.has(operationId);
+        const following = followedLogActionId === operationId;
+        return `
+        <li class="card-row log-card ${expanded ? "is-expanded" : ""}">
           <div class="row-main"><strong>${escapeHtml(pod.step_label || "Pod logs")}</strong><span>${escapeHtml(pod.name)}</span></div>
+          <div class="row-note">${escapeHtml(pod.phase || "unknown")} · Ready ${escapeHtml(pod.ready || "0/0")}</div>
           <div class="log-actions">
-            <button type="button" class="secondary-action" data-log-action="logs.${escapeHtml(pod.name)}">View recent logs</button>
+            <button type="button" class="secondary-action" data-log-action="${escapeHtml(operationId)}">${expanded ? "Collapse logs" : "View recent logs"}</button>
+            <button type="button" class="secondary-action" data-log-follow="${escapeHtml(operationId)}">${following ? "Stop following" : "Follow logs"}</button>
           </div>
-          <code class="command">${escapeHtml(commandLine(pod.recent_command))}</code>
-          ${renderLogOutput(`logs.${pod.name}`)}
-        </li>`).join("")}</ul>`
+          ${expanded ? renderLogOutput(operationId) : ""}
+        </li>`;
+      }).join("")}</ul>`
     : empty("No pod log options reported yet.");
   bindLogControls();
 }
 
 function renderLogOutput(operationId) {
   const job = latestJobForAction(operationId);
-  if (!job) return "";
+  const following = followedLogActionId === operationId;
+  if (!job) return `<div class="row-note log-placeholder">${following ? "Following logs; waiting for the first refresh." : "No log output loaded yet."}</div>`;
   const detail = job.execution?.detail || job.message || "Log request submitted.";
   return `<pre class="log-output">${escapeHtml(detail)}</pre>`;
 }
 
 function bindLogControls() {
   for (const button of document.querySelectorAll("[data-log-action]")) {
-    button.addEventListener("click", () => submitReadOnlyOperation(button.dataset.logAction));
+    button.addEventListener("click", () => toggleRecentLogs(button.dataset.logAction));
+  }
+  for (const button of document.querySelectorAll("[data-log-follow]")) {
+    button.addEventListener("click", () => toggleFollowLogs(button.dataset.logFollow));
   }
 }
 
-async function submitReadOnlyOperation(operationId) {
+function toggleRecentLogs(operationId) {
   if (!operationId) return;
+  if (expandedLogIds.has(operationId)) {
+    expandedLogIds.delete(operationId);
+    if (followedLogActionId === operationId) stopFollowingLogs();
+    if (store.logs) renderLogs(store.logs);
+    return;
+  }
+  expandedLogIds.add(operationId);
+  submitReadOnlyOperation(operationId);
+}
+
+function toggleFollowLogs(operationId) {
+  if (!operationId) return;
+  if (followedLogActionId === operationId) {
+    stopFollowingLogs();
+    if (store.logs) renderLogs(store.logs);
+    return;
+  }
+  stopFollowingLogs();
+  followedLogActionId = operationId;
+  expandedLogIds.add(operationId);
+  submitReadOnlyOperation(operationId);
+  logFollowTimer = window.setInterval(() => submitReadOnlyOperation(operationId), refreshIntervalMs);
+}
+
+function stopFollowingLogs() {
+  if (logFollowTimer) window.clearInterval(logFollowTimer);
+  logFollowTimer = null;
+  followedLogActionId = null;
+}
+
+async function submitReadOnlyOperation(operationId) {
+  if (!operationId || logRequestsInFlight.has(operationId)) return;
+  logRequestsInFlight.add(operationId);
   try {
     const jobPayload = await postJson("/api/operations/jobs", { operation_id: operationId });
     const finishedJob = await waitForJob(jobPayload.job?.job_id);
@@ -367,6 +414,7 @@ async function submitReadOnlyOperation(operationId) {
   } catch (error) {
     store.operationJobs = { jobs: [{ operation_id: operationId, status: "failed", message: error.message }] };
   } finally {
+    logRequestsInFlight.delete(operationId);
     if (store.logs) renderLogs(store.logs);
     if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
   }
@@ -501,7 +549,6 @@ function fallbackLifecycleActions() {
       impact: operation.impact,
       mutates: operation.impact !== "read-only",
       warning: "Backend action preview endpoint is not available yet.",
-      command_preview: [],
       confirmation: { required: operation.impact === "destructive", phrase: operation.impact === "destructive" ? "shown by backend before execution" : null },
       job: { state: "not_started", message: "Preview only; no job endpoint is available." },
     })),
@@ -510,51 +557,32 @@ function fallbackLifecycleActions() {
 
 function renderLifecycleActions(data) {
   const payload = data || fallbackLifecycleActions();
-  const actions = payload.actions || [];
-  setText("lifecycle-mode", payload.mode ? pretty(payload.mode) : "Preview only");
+  const actions = (payload.actions || []).filter((action) => action.resource?.scope !== "pod");
+  const modeLabel = payload.mode ? pretty(payload.mode) : "Preview only";
+  setText("lifecycle-mode", modeLabel);
   if (!actions.length) {
     target("lifecycle").innerHTML = empty("No lifecycle actions are available for preview yet.");
     return;
   }
-  if (!selectedLifecycleActionId || !actions.some((action) => action.id === selectedLifecycleActionId)) {
-    const firstRunnable = actions.find((action) => action.resource?.scope === "application" && actionCanRun(action)) || actions.find((action) => actionCanRun(action)) || actions[0];
-    selectedLifecycleActionId = firstRunnable.id;
-  }
-  const selected = actions.find((action) => action.id === selectedLifecycleActionId) || actions[0];
-  const latestJob = latestJobForAction(selected.id);
   target("lifecycle").innerHTML = `
     <div class="lifecycle-layout">
-      <div class="action-groups">${renderActionGroups(actions, selected.id)}</div>
-      <div class="confirmation-box">
-        <div class="row-main"><strong>${escapeHtml(selected.label || "Lifecycle action")}</strong>${pill(selected.impact || "unknown")}</div>
-        <div class="selected-resource">${escapeHtml(resourceSummary(selected))}</div>
-        <p>${escapeHtml(selected.warning || actionHelpText(selected))}</p>
-        ${renderConfirmationControl(selected)}
-        <code class="command">${actionCommandPreview(selected).length ? escapeHtml(commandLine(actionCommandPreview(selected))) : "Command preview pending backend support."}</code>
-        ${renderActionButton(selected, payload)}
-      </div>
-      <div class="job-box">
-        <div class="row-main"><strong>Job status</strong>${pill(latestJob?.status || selected.job?.state || "not_started")}</div>
-        <p>${escapeHtml(latestJob?.message || selected.job?.message || "No lifecycle job has been submitted from the web console.")}</p>
-        ${latestJob?.execution?.detail ? `<code class="command">${escapeHtml(latestJob.execution.detail)}</code>` : ""}
-      </div>
+      ${renderActionGroups(actions, payload)}
     </div>`;
   bindLifecycleControls(payload);
 }
 
-function renderActionGroups(actions, selectedId) {
-  const groups = [
-    ["application", "Applications"],
-    ["cluster", "Cluster"],
-    ["pod", "Logs"],
-    ["maintenance", "Maintenance"],
-  ];
-  const content = groups.map(([scope, label]) => {
-    const scoped = actions.filter((action) => (action.resource?.scope || "maintenance") === scope);
-    if (!scoped.length) return "";
-    return `<section class="action-group"><h3>${escapeHtml(label)}</h3><ul class="action-list">${scoped.map((action) => renderActionPreview(action, action.id === selectedId)).join("")}</ul></section>`;
-  }).join("");
-  return content || `<ul class="action-list">${actions.map((action) => renderActionPreview(action, action.id === selectedId)).join("")}</ul>`;
+function renderActionGroups(actions, payload) {
+  const labActions = actions.filter((action) => ["cluster", "maintenance"].includes(action.resource?.scope || "maintenance"));
+  const appActions = actions.filter((action) => action.resource?.scope === "application");
+  return `
+    <section class="action-group lab-controls">
+      <div class="section-heading"><h3>Overall lab controls</h3><span>${escapeHtml(payload.mode ? pretty(payload.mode) : "Preview only")}</span></div>
+      <div class="control-grid compact-controls">${labActions.length ? labActions.map((action) => renderActionPreview(action, payload)).join("") : empty("No lab-level actions are available.")}</div>
+    </section>
+    <section class="action-group deployment-controls">
+      <div class="section-heading"><h3>Individual deployment controls</h3><span>${appActions.length} actions</span></div>
+      <div class="control-grid">${appActions.length ? appActions.map((action) => renderActionPreview(action, payload)).join("") : empty("No deployment-level actions are available yet.")}</div>
+    </section>`;
 }
 
 function resourceSummary(action) {
@@ -571,7 +599,7 @@ function latestJobForAction(actionId) {
 
 function actionHelpText(action) {
   if (!action.mutates) return "Read-only operation. Useful for evidence collection without changing the lab.";
-  if (action.execution_enabled) return "Execution is enabled. Review the command and confirmation requirements before running.";
+  if (action.execution_enabled) return "Execution is enabled for this action.";
   return "Execution is disabled until the web console is started with action execution enabled.";
 }
 
@@ -580,7 +608,8 @@ function renderConfirmationControl(action) {
   if (!confirmation.required) {
     return `<div class="confirmation-note">No typed confirmation required.</div>`;
   }
-  return `<label class="confirmation-label" for="lifecycle-confirmation">Required phrase</label><input id="lifecycle-confirmation" type="text" placeholder="${escapeHtml(confirmation.phrase || "Enter confirmation phrase")}" autocomplete="off">`;
+  const inputId = `confirm-${domId(action.id)}`;
+  return `<label class="confirmation-label" for="${escapeHtml(inputId)}">Required phrase</label><input id="${escapeHtml(inputId)}" data-confirmation-for="${escapeHtml(action.id)}" type="text" placeholder="${escapeHtml(confirmation.phrase || "Enter confirmation phrase")}" autocomplete="off">`;
 }
 
 function actionCanRun(action) {
@@ -606,7 +635,7 @@ async function waitForJob(jobId) {
   return null;
 }
 async function submitLifecycleAction(action, payload) {
-  const confirmation = document.querySelector("#lifecycle-confirmation")?.value || null;
+  const confirmation = confirmationValueFor(action.id);
   lifecycleSubmitting = true;
   renderLifecycleActions(store.lifecycleActions);
   try {
@@ -629,32 +658,50 @@ async function submitLifecycleAction(action, payload) {
 }
 
 function bindLifecycleControls(payload) {
-  for (const button of document.querySelectorAll("[data-lifecycle-action]")) {
-    button.addEventListener("click", () => {
-      selectedLifecycleActionId = button.dataset.lifecycleAction;
-      renderLifecycleActions(store.lifecycleActions);
+  for (const runButton of document.querySelectorAll("[data-run-lifecycle-action]")) {
+    runButton.addEventListener("click", () => {
+      const action = (payload.actions || []).find((item) => item.id === runButton.dataset.runLifecycleAction);
+      if (action && actionCanRun(action)) submitLifecycleAction(action, payload);
     });
   }
-  const runButton = document.querySelector("[data-run-lifecycle-action]");
-  if (!runButton) return;
-  runButton.addEventListener("click", () => {
-    const action = (payload.actions || []).find((item) => item.id === runButton.dataset.runLifecycleAction);
-    if (action && actionCanRun(action)) submitLifecycleAction(action, payload);
-  });
 }
 
-function actionCommandPreview(action) {
-  return action.command_preview || action.command || [];
-}
-
-function renderActionPreview(action, selected = false) {
+function renderActionPreview(action, payload) {
   const confirmation = action.confirmation || {};
-  const commandPreview = actionCommandPreview(action);
-  return `<li class="action-card ${selected ? "is-selected" : ""}">
-    <button type="button" class="action-select" data-lifecycle-action="${escapeHtml(action.id)}"><span>${escapeHtml(action.label || action.id || "Lifecycle action")}</span>${pill(action.impact || "unknown")}</button>
-    <div class="row-note">${escapeHtml(action.kind || "operation")} · ${action.mutates ? "mutating" : "read-only"} · ${confirmation.required ? "typed confirmation required" : "no typed confirmation"}</div>
-    ${commandPreview.length ? `<code class="command">${escapeHtml(commandLine(commandPreview))}</code>` : `<div class="row-note">Command preview will appear when backend metadata is available.</div>`}
-  </li>`;
+  const latestJob = latestJobForAction(action.id);
+  const resource = action.resource || {};
+  return `<article class="action-card ${action.impact === "destructive" ? "is-destructive" : ""}">
+    <div class="action-card-top">
+      <div>
+        <h4>${escapeHtml(action.label || action.id || "Lifecycle action")}</h4>
+        <div class="row-note">${escapeHtml(resourceSummary(action))}</div>
+      </div>
+      ${pill(action.impact || "unknown")}
+    </div>
+    <p>${escapeHtml(action.warning || actionHelpText(action))}</p>
+    ${renderConfirmationControl(action)}
+    <div class="action-footer">
+      ${renderActionButton(action, payload)}
+      ${latestJob ? `<span class="inline-job-state">${escapeHtml(pretty(latestJob.status || "submitted"))}</span>` : ""}
+    </div>
+    ${latestJob ? `<div class="inline-job-message">${escapeHtml(jobDisplayMessage(latestJob))}</div>` : ""}
+  </article>`;
+}
+
+function confirmationValueFor(actionId) {
+  for (const input of document.querySelectorAll("[data-confirmation-for]")) {
+    if (input.dataset.confirmationFor === actionId) return input.value || null;
+  }
+  return null;
+}
+
+function domId(value) {
+  return String(value || "action").replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function jobDisplayMessage(job) {
+  const message = job.execution?.detail || job.message || "Action submitted.";
+  return message.replace(/(?:\.\/)?(?:apps|scripts)\/[^\s'"]+/g, "[operation]");
 }
 function renderLifecycleAudit(data) {
   const entries = data.entries || [];

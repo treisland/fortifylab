@@ -146,4 +146,4 @@ class OperationCatalog:
 
     def _script(self, relative: str) -> tuple[str, ...]:
         prefix = f"{self.repo_root}/" if self.repo_root != "." else "./"
-        return (f"{prefix}{relative}",)
+        return ("bash", f"{prefix}{relative}")

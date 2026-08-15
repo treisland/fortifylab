@@ -87,19 +87,22 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("waitForJob", script)
         self.assertIn("postJson", script)
         self.assertIn("data-run-lifecycle-action", script)
-        self.assertIn("View logs", script)
+        self.assertIn("View recent logs", script)
+        self.assertIn("Collapse logs", script)
+        self.assertIn("Follow logs", script)
         self.assertIn("data-log-action", script)
+        self.assertIn("data-log-follow", script)
         self.assertIn(":root[data-theme=\"dark\"]", styles)
         self.assertIn("prefers-color-scheme: dark", styles)
         self.assertIn("uptime-strip", styles)
         self.assertIn("lifecycle-layout", styles)
-        self.assertIn("confirmation-box", styles)
+        self.assertIn("control-grid", styles)
         self.assertIn("panel-focus-button", styles)
         self.assertIn("is-focused-panel.lifecycle-panel", styles)
         self.assertIn("primary-action", styles)
-        self.assertIn("action-card.is-selected", styles)
+        self.assertIn("action-card.is-destructive", styles)
         self.assertIn("panel-focus-in", styles)
-        self.assertIn("action-groups", styles)
+        self.assertIn("inline-job-message", styles)
         self.assertIn("log-output", styles)
 
     def test_serve_once_returns_static_index(self) -> None:
@@ -234,7 +237,10 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(actions["data"]["execute_endpoint"], "/api/operations/jobs")
         destroy = next(action for action in actions["data"]["actions"] if action["id"] == "app.ssc.destroy")
         self.assertEqual(destroy["confirmation"]["phrase"], "DESTROY ssc")
-        self.assertIn("./apps/ssc/destroy.sh", destroy["command_preview"])
+        self.assertNotIn("command", destroy)
+        self.assertNotIn("command_display", destroy)
+        self.assertNotIn("command_preview", destroy)
+        self.assertNotIn("./apps", str(actions))
         self.assertNotIn("password", str(actions).lower())
         self.assertEqual(audit["data"]["entries"], [])
 
@@ -272,15 +278,15 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(steps[0]["total"], len(steps))
         self.assertTrue(any(step["step_id"] == "ssc" and step["state"] == "blocked" for step in steps))
 
-    def test_guided_deployment_marks_prior_no_pod_steps_complete_when_later_step_is_active(self) -> None:
+    def test_guided_deployment_does_not_infer_unobserved_steps_complete(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeMysqlDeployingPoller())
         _, payload = app.api_envelope("/api/deployment/guide")
 
         steps = payload["data"]["steps"]
         by_id = {step["step_id"]: step for step in steps}
-        self.assertEqual(by_id["prereqs"]["state"], "complete")
-        self.assertEqual(by_id["inputs"]["state"], "complete")
-        self.assertEqual(by_id["secrets"]["state"], "complete")
+        self.assertEqual(by_id["prereqs"]["state"], "pending")
+        self.assertEqual(by_id["inputs"]["state"], "pending")
+        self.assertEqual(by_id["secrets"]["state"], "pending")
         self.assertEqual(by_id["mysql"]["state"], "in_progress")
 
     def test_deployment_diagnostics_are_contextual_and_redacted(self) -> None:

@@ -228,8 +228,9 @@ class WebConsoleApp:
     def _lifecycle_action_payload(self, spec: OperationSpec, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
         preview = ActionPreview(spec, self.config.enable_actions and spec.mutates).to_dict()
         resource = _resource_for_operation(spec.operation_id, snapshot)
+        for sensitive_key in ("command", "command_display", "command_preview"):
+            preview.pop(sensitive_key, None)
         preview.update({
-            "command_preview": preview.get("command", []),
             "resource": resource,
             "job": {
                 "state": "not_started",
@@ -249,20 +250,11 @@ class WebConsoleApp:
     def guided_deployment_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
         profile = build_profile(snapshot.profile)
         by_id = {step.step_id: step for step in snapshot.steps}
-        live_indexes = [
-            index
-            for index, profile_step in enumerate(profile.steps, start=1)
-            if _step_has_live_evidence(by_id.get(profile_step.step_id))
-        ]
-        active_index = min(live_indexes) if live_indexes else None
         steps = []
         for index, profile_step in enumerate(profile.steps, start=1):
             live_step = by_id.get(profile_step.step_id)
             state = live_step.state.value if live_step else "pending"
             detail = live_step.detail if live_step else "Waiting for this step to start."
-            if active_index is not None and index < active_index and state == "pending":
-                state = "complete"
-                detail = "Completed before the current live deployment step."
             steps.append({
                 "index": index,
                 "total": len(profile.steps),
@@ -415,7 +407,7 @@ def _app_id_for_step(step_id: str) -> str | None:
 
 
 def _step_has_running_workload(step: LiveStepStatus) -> bool:
-    return any(pod.ready > 0 or pod.phase.lower() == "running" for pod in step.pods)
+    return bool(step.pods)
 
 
 def _resource_for_operation(operation_id: str, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
