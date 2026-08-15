@@ -65,7 +65,7 @@ class PythonWebConsoleTests(unittest.TestCase):
         content_type, html = WebConsoleApp(WebConsoleConfig()).static_asset("index.html")
 
         self.assertEqual(content_type, "text/html")
-        for expected in ('id="cockpit-intro"', 'id="open-intro"', 'data-panel="guided"', 'data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"', 'data-panel="lifecycle"', 'data-panel="security"', 'data-panel="audit"', 'data-panel="help"'):
+        for expected in ('class="app-shell"', 'class="nav-rail"', 'data-workspace-link="dashboard"', 'data-workspace-link="guided"', 'data-workspace-link="services"', 'data-workspace-link="logs"', 'data-workspace-link="lifecycle"', 'data-workspace-link="configuration"', 'data-workspace-link="certificates"', 'data-workspace-link="diagnostics"', 'data-workspace-link="audit"', 'data-workspace-link="docs"', 'data-workspace="dashboard"', 'Operator dashboard', 'Resource links', 'id="back-to-top"', 'id="cockpit-intro"', 'id="open-intro"', 'data-panel="guided"', 'data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"', 'data-panel="lifecycle"', 'data-panel="security"', 'data-panel="audit"', 'data-panel="help"'):
             self.assertIn(expected, html)
         for expected in ('data-theme-choice="system"', 'data-theme-choice="light"', 'data-theme-choice="dark"'):
             self.assertIn(expected, html)
@@ -140,9 +140,19 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("data-download-log-output", script)
         self.assertIn("serviceLogOperationId", script)
         self.assertIn("bindServiceControls", script)
+        self.assertIn("setupWorkspaceNavigation", script)
+        self.assertIn("workspaceFromHash", script)
+        self.assertIn("data-workspace-link", script)
+        self.assertIn("renderDashboard", script)
+        self.assertIn("renderDashboardServices", script)
+        self.assertIn("resource-link-grid", script)
+        self.assertIn("data-service-diagnose", script)
+        self.assertIn("setupBackToTop", script)
+        self.assertIn("prefers-reduced-motion: reduce", script)
         self.assertIn("data-service-log", script)
         self.assertIn("data-service-help", script)
-        self.assertIn("Explain status", script)
+        self.assertIn("Diagnose", script)
+        self.assertIn("Help", script)
         self.assertNotIn("data-log-action", script)
         self.assertNotIn("data-log-follow", script)
         self.assertIn(":root[data-theme=\"dark\"]", styles)
@@ -175,6 +185,13 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("log-workspace", styles)
         self.assertIn("log-toolbar", styles)
         self.assertIn("tail-control", styles)
+        self.assertIn("app-shell", styles)
+        self.assertIn("nav-rail", styles)
+        self.assertIn("workspace-nav", styles)
+        self.assertIn("workspace-page", styles)
+        self.assertIn("dashboard-grid", styles)
+        self.assertIn("resource-link-card", styles)
+        self.assertIn("back-to-top", styles)
 
     def test_serve_once_returns_static_index(self) -> None:
         status, headers, body = self.request_once(WebConsoleConfig(port=0), "/")
