@@ -144,6 +144,38 @@ class OperationJobManager:
                 )
                 return job, False
 
+            conflict = self._active_conflict(spec, request.execute)
+            if conflict:
+                message = conflict_message(spec, conflict)
+                job = OperationJob(
+                    job_id=f"opjob-{uuid4().hex[:12]}",
+                    operation_id=spec.operation_id,
+                    command=spec.command,
+                    action_label=spec.label,
+                    resource_label=resource_label(spec),
+                    kind=spec.kind.value,
+                    impact=spec.impact.value,
+                    operator=request.source,
+                    execute=request.execute,
+                    status=OperationJobStatus.REJECTED,
+                    ended_at=_now(),
+                    message=message,
+                )
+                job = self._record_locked(
+                    job,
+                    "job.rejected",
+                    job.status.value,
+                    message,
+                    {
+                        "conflict_with": conflict.job_id,
+                        "conflict_operation_id": conflict.operation_id,
+                        "conflict_group": spec.conflict_group,
+                    },
+                )
+                self._jobs[job.job_id] = job
+                self._prune_locked()
+                return job, True
+
             job = OperationJob(
                 job_id=f"opjob-{uuid4().hex[:12]}",
                 operation_id=spec.operation_id,
@@ -214,6 +246,19 @@ class OperationJobManager:
                 return job
         return None
 
+    def _active_conflict(self, spec: OperationSpec, execute: bool) -> OperationJob | None:
+        if not execute or not spec.mutates:
+            return None
+        for job in self._jobs.values():
+            if not job.active or not job.execute:
+                continue
+            active_spec = self.catalog.get(job.operation_id)
+            if not active_spec.mutates:
+                continue
+            if operations_conflict(spec, active_spec):
+                return job
+        return None
+
     def _record_locked(self, job: OperationJob, action: str, status: str, message: str, detail: dict[str, Any]) -> OperationJob:
         entry = OperationAuditEntry(
             audit_id=f"audit-{uuid4().hex[:12]}",
@@ -243,6 +288,36 @@ class OperationJobManager:
             self._jobs.pop(job.job_id, None)
 
 
+def operations_conflict(candidate: OperationSpec, active: OperationSpec) -> bool:
+    if not candidate.mutates or not active.mutates:
+        return False
+    if candidate.conflict_group == "cluster" or active.conflict_group == "cluster":
+        return True
+    if candidate.conflict_group and candidate.conflict_group == active.conflict_group:
+        return True
+    return bool(set(candidate.resource_scope).intersection(active.resource_scope))
+
+
+def conflict_contract(spec: OperationSpec) -> dict[str, Any]:
+    if not spec.mutates:
+        return {"policy": "none", "reason": "Read-only operations do not block mutating lifecycle jobs."}
+    if spec.conflict_group == "cluster":
+        return {"policy": "exclusive", "reason": "Cluster lifecycle actions affect every FortifyLab service."}
+    return {
+        "policy": "resource-scope",
+        "reason": "Mutating actions are blocked while another action owns the same resource scope.",
+        "group": spec.conflict_group,
+        "scope": list(spec.resource_scope),
+    }
+
+
+def conflict_message(spec: OperationSpec, active: OperationJob) -> str:
+    return (
+        f"{spec.label} cannot start because {active.action_label or humanize_operation_id(active.operation_id)} "
+        "is already active. Wait for the current job to finish, then refresh and retry."
+    )
+
+
 def operation_spec_payload(spec: OperationSpec) -> dict[str, Any]:
     return {
         "id": spec.operation_id,
@@ -254,6 +329,9 @@ def operation_spec_payload(spec: OperationSpec) -> dict[str, Any]:
         "confirmation_phrase": spec.confirmation_phrase,
         "warning": spec.warning,
         "command_preview": list(spec.command),
+        "conflict_group": spec.conflict_group,
+        "resource_scope": list(spec.resource_scope),
+        "conflicts_with": conflict_contract(spec),
     }
 
 

@@ -12,6 +12,9 @@ from fortifylab.operations import ActionPreview, OperationJobManager, OperationJ
 from fortifylab.operations.previews import ActionPreviewCatalog
 from fortifylab.status import LiveDeploymentSnapshot, LiveState, LiveStatusPoller, LiveStepStatus, build_service_registry, service_health_payload
 from fortifylab.tui.profiles import LOG_SCOPES, build_profile
+from fortifylab.web.cockpit import cockpit_state_payload
+from fortifylab.web.help import help_topic_payload, help_topics_payload
+from fortifylab.web.recovery import recovery_suggestions_payload
 from fortifylab.web.security import ActionSecurityMode
 from fortifylab.web.support import SupportInspector
 
@@ -92,6 +95,20 @@ class WebConsoleApp:
                     for item in self.operation_jobs.operation_payloads()
                 ],
             }
+        if path == "/api/cockpit/state":
+            return 200, self.cockpit_state_payload()
+        if path == "/api/help/topics":
+            return 200, help_topics_payload()
+        if path == "/api/recovery/state":
+            return 200, self.recovery_state_payload()
+        if path == "/api/support/bundle":
+            return 200, self.support_bundle_payload()
+        if path.startswith("/api/help/topics/"):
+            topic_id = path.removeprefix("/api/help/topics/")
+            topic = help_topic_payload(topic_id)
+            if topic is None:
+                return 404, {"error": "help topic not found"}
+            return 200, topic
         if path == "/api/security/posture":
             return 200, self.security_posture_payload()
         if path == "/api/lifecycle/actions":
@@ -193,35 +210,55 @@ class WebConsoleApp:
     def service_registry_payload(self) -> dict[str, Any]:
         return self._service_registry().to_dict()
 
-    def service_health_payload(self) -> dict[str, Any]:
-        snapshot = self._snapshot()
+    def service_health_payload(self, snapshot: LiveDeploymentSnapshot | None = None) -> dict[str, Any]:
+        snapshot = snapshot or self._snapshot()
         return service_health_payload(self._service_registry(), checker=self.url_health_checker, snapshot=snapshot)
 
     def security_posture_payload(self) -> dict[str, Any]:
+        tls_enabled = self.config.tls_enabled()
+        token_required = bool(self.config.access_token)
+        local_only = self.is_local_only()
+        warnings = []
+        if self.config.allow_lan and not tls_enabled:
+            warnings.append("Remote LAN access is enabled without HTTPS serving.")
+        if self.config.allow_lan and not token_required:
+            warnings.append("Remote LAN access requires an access token before the console can start safely.")
+        if self.config.enable_actions and not token_required and not local_only:
+            warnings.append("Mutating actions are enabled on a non-local console without token protection.")
         return {
             "console": {
                 "bind_host": self.config.bind_host,
                 "public_url": self.config.public_url(),
-                "local_only": self.is_local_only(),
+                "local_only": local_only,
                 "lan_access": self.config.allow_lan,
-                "token_required": bool(self.config.access_token),
-                "tls_enabled": self.config.tls_enabled(),
+                "token_required": token_required,
+                "auth_mode": "bearer-token" if token_required else ("local-only" if local_only else "disabled"),
+                "csrf": {
+                    "required": bool(self.config.enable_actions and token_required),
+                    "mode": "design-hook",
+                    "status": "planned" if self.config.enable_actions else "not_required_for_preview",
+                },
+                "tls_enabled": tls_enabled,
                 "tls_cert_configured": bool(self.config.tls_cert),
                 "tls_key_configured": bool(self.config.tls_key),
+                "certificate_source": "configured-files" if tls_enabled else "not-configured",
+                "readiness": "warning" if warnings else "ready",
+                "warnings": warnings,
             },
             "actions": self.action_security_payload(),
             "boundaries": [
                 "Lifecycle execution is disabled unless the console is started with action execution enabled.",
                 "Mutating operations require an explicit backend action endpoint before they can run.",
-                "Destructive operations require exact typed confirmation and recovery review.",
+                "Conflicting mutating operations are rejected while an overlapping job is active.",
+                "Destructive operations require deliberate confirmation and recovery review.",
                 "Secrets, private keys, licenses, and token values are never returned by the console APIs.",
             ],
         }
 
-    def lifecycle_actions_payload(self) -> dict[str, Any]:
+    def lifecycle_actions_payload(self, snapshot: LiveDeploymentSnapshot | None = None) -> dict[str, Any]:
         action_payload = self.action_catalog_payload()
         execute_enabled = bool(action_payload["security"].get("enable_actions"))
-        snapshot = self._snapshot()
+        snapshot = snapshot or self._snapshot()
         specs = self._dynamic_lifecycle_specs(snapshot)
         actions = [self._lifecycle_action_payload(spec, snapshot) for spec in specs]
         return {
@@ -273,6 +310,82 @@ class WebConsoleApp:
             "redaction": "Commands and output are redacted before display.",
         }
 
+    def cockpit_state_payload(self) -> dict[str, Any]:
+        snapshot = self._snapshot()
+        support = self._support_inspector(snapshot)
+        deployment_status = snapshot.to_dict()
+        deployment_status["event_timeline"] = self.event_timeline_payload(snapshot)
+        guide = self.guided_deployment_payload(snapshot)
+        routes = support.routes_payload(snapshot)
+        routes["findings"] = list(route_findings(()))
+        certificates = support.certificate_payload(snapshot)
+        diagnostics = self.deployment_diagnostics_payload(snapshot)
+        service_health = self.service_health_payload(snapshot)
+        return cockpit_state_payload(
+            snapshot=snapshot,
+            deployment_status=deployment_status,
+            guide=guide,
+            journey=self.guided_journey_payload(snapshot),
+            services=self.service_registry_payload(),
+            service_health=service_health,
+            routes=routes,
+            certificates=certificates,
+            security=self.security_posture_payload(),
+            lifecycle=self.lifecycle_actions_payload(snapshot),
+            jobs={"jobs": [job.to_api_dict() for job in self.operation_jobs.list_jobs()]},
+            audit=self.lifecycle_audit_payload(),
+            diagnostics=diagnostics,
+            support_bundle=self.support_bundle_payload(),
+            logs=self.deployment_logs_payload(snapshot),
+            config=self.configuration_payload(),
+        )
+
+    def recovery_state_payload(self) -> dict[str, Any]:
+        snapshot = self._snapshot()
+        support = self._support_inspector(snapshot)
+        deployment_status = snapshot.to_dict()
+        deployment_status["event_timeline"] = self.event_timeline_payload(snapshot)
+        routes = support.routes_payload(snapshot)
+        routes["findings"] = list(route_findings(()))
+        diagnostics = self.deployment_diagnostics_payload(snapshot)
+        recovery = recovery_suggestions_payload(
+            snapshot_payload=deployment_status,
+            config_payload=self.configuration_payload(),
+            services_payload=self.service_health_payload(snapshot),
+            routes_payload=routes,
+            certificates_payload=support.certificate_payload(snapshot),
+            diagnostics_payload=diagnostics,
+        )
+        suggestions = recovery.get("suggestions", [])
+        next_recovery = suggestions[0] if suggestions else None
+        if next_recovery:
+            next_recovery = {
+                **next_recovery,
+                "label": next_recovery.get("title"),
+                "reason": next_recovery.get("summary"),
+            }
+        return {**recovery, "next_recovery": next_recovery}
+
+    def support_bundle_payload(self) -> dict[str, Any]:
+        snapshot = self._snapshot()
+        support = self._support_inspector(snapshot)
+        routes = support.routes_payload(snapshot)
+        routes["findings"] = list(route_findings(()))
+        certificates = support.certificate_payload(snapshot)
+        diagnostics = self.deployment_diagnostics_payload(snapshot)
+        health = self.service_health_payload(snapshot)
+        logs = self.deployment_logs_payload(snapshot)
+        return support.support_bundle_preview(
+            snapshot,
+            config=self.configuration_payload(),
+            health=health,
+            routes=routes,
+            certificates=certificates,
+            audit=self.lifecycle_audit_payload(),
+            diagnostics=diagnostics,
+            logs=logs,
+        )
+
     def guided_deployment_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
         profile = build_profile(snapshot.profile)
         by_id = {step.step_id: step for step in snapshot.steps}
@@ -294,12 +407,12 @@ class WebConsoleApp:
         return {"profile": snapshot.profile, "overall_state": snapshot.overall_state.value, "steps": steps}
 
 
-    def guided_journey_payload(self) -> dict[str, Any]:
-        snapshot = self._snapshot()
+    def guided_journey_payload(self, snapshot: LiveDeploymentSnapshot | None = None) -> dict[str, Any]:
+        snapshot = snapshot or self._snapshot()
         guide = self.guided_deployment_payload(snapshot)
         config = self.configuration_payload()
         certificates = self._support_inspector(snapshot).certificate_payload(snapshot)
-        health = self.service_health_payload()
+        health = self.service_health_payload(snapshot)
         diagnostics = self.deployment_diagnostics_payload(snapshot)
         steps = guide.get("steps", [])
         incomplete = [step for step in steps if step.get("state") != "complete"]
@@ -348,6 +461,9 @@ class WebConsoleApp:
     def configuration_payload(self) -> dict[str, Any]:
         env_file = self.config.env_file or Path(".env")
         present = env_file.is_file()
+        config_issues = list(self._service_registry().config_issues) if present else []
+        if not present:
+            config_issues.append("No .env file was found for this console session.")
         return {
             "sections": ["identity", "urls", "versions", "credentials"],
             "secrets_redacted": True,
@@ -356,7 +472,7 @@ class WebConsoleApp:
                 "path": str(env_file),
                 "status": "found" if present else "missing",
             },
-            "issues": () if present else ("No .env file was found for this console session.",),
+            "issues": tuple(config_issues),
         }
 
     def deployment_diagnostics_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:

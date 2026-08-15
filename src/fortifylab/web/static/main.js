@@ -1,6 +1,7 @@
 const token = new URLSearchParams(window.location.search).get("token");
 const refreshIntervalMs = 5000;
 const themeStorageKey = "fortifylab.theme";
+const introStorageKey = "fortifylab.operatorIntro";
 let refreshInFlight = false;
 let focusedPanel = null;
 let focusedPlaceholder = null;
@@ -9,6 +10,7 @@ let lifecycleSubmitting = false;
 let panelFocusClosing = false;
 let confirmingLifecycleActionId = null;
 let logWorkspace = { open: false, operationId: null, mode: "recent", tail: "120" };
+let selectedHelpTopicId = "overview";
 let followedLogActionId = null;
 let logFollowTimer = null;
 const logRequestsInFlight = new Set();
@@ -31,6 +33,8 @@ const store = {
   lifecycleAudit: null,
   operationJobs: null,
   guidedJourney: null,
+  helpTopics: null,
+  recoveryState: null,
 };
 
 function panelTitle(panel) {
@@ -285,9 +289,14 @@ function renderGuidedJourney(data) {
         ${guidedCheck("Deployment", deployment.overall_state || "pending", deployment.total_steps ? `${deployment.complete_steps || 0} of ${deployment.total_steps} steps complete` : "Waiting for profile", "deployment")}
         ${guidedCheck("Monitoring", serviceCounts.total ? `${serviceCounts.up || 0}/${serviceCounts.total} up` : "waiting", serviceCounts.total ? `${serviceCounts.down || 0} down · ${serviceCounts.degraded || 0} degraded` : "No services reported", "routes")}
       </div>
-      ${links.length ? `<div class="guided-links">${links.map((link) => `<button type="button" class="secondary-action" data-guided-panel="${escapeHtml(link.panel)}">${escapeHtml(link.label)}</button>`).join("")}</div>` : ""}
+      <div class="guided-links">
+        ${links.map((link) => `<button type="button" class="secondary-action" data-guided-panel="${escapeHtml(link.panel)}">${escapeHtml(link.label)}</button>`).join("")}
+        <button type="button" class="secondary-action" data-help-topic-button="overview">Open operator guide</button>
+      </div>
     </div>`;
   bindGuidedJourneyControls();
+  document.querySelector("[data-help-topic-button]")?.addEventListener("click", () => openHelpTopic("overview"));
+  renderCockpitIntro();
 }
 
 function guidedCheck(label, state, detail, panel) {
@@ -296,6 +305,214 @@ function guidedCheck(label, state, detail, panel) {
     <strong>${escapeHtml(pretty(state))}</strong>
     <small>${escapeHtml(detail)}</small>
   </button>`;
+}
+
+function introPreference() {
+  try {
+    return window.localStorage.getItem(introStorageKey) || "new";
+  } catch (error) {
+    return "new";
+  }
+}
+
+function setIntroPreference(value) {
+  try {
+    window.localStorage.setItem(introStorageKey, value);
+  } catch (error) {
+    // First-run guidance is nice to have; do not block the console if storage is unavailable.
+  }
+}
+
+function cockpitTourSteps() {
+  const action = store.guidedJourney?.next_action || {};
+  return [
+    { id: "orient", label: "Orient", panel: "guided", detail: "Review the recommended next action and the deployment path." },
+    { id: "configure", label: "Configure", panel: "configuration", detail: "Check domain, profile, URLs, credentials, and redaction status." },
+    { id: "trust", label: "Trust TLS", panel: "certificates", detail: "Retrieve the root CA and verify the lab is not serving the Traefik default certificate." },
+    { id: "deploy", label: "Deploy", panel: action.panel || "deployment", detail: action.reason || "Run the guided deployment and watch the active workspace." },
+    { id: "observe", label: "Observe", panel: "routes", detail: "Open service links, inspect uptime checks, and jump into logs or recovery help." },
+  ];
+}
+
+function activeTourIndex() {
+  const actionPanel = store.guidedJourney?.next_action?.panel;
+  const steps = cockpitTourSteps();
+  const index = steps.findIndex((step) => step.panel === actionPanel);
+  if (index >= 0) return index;
+  const focused = focusStep();
+  if (!focused) return 0;
+  if (["failed", "blocked"].includes(focused.state)) return 4;
+  if (focused.state === "in_progress") return 3;
+  return 1;
+}
+
+function renderCockpitIntro(forceOpen = false) {
+  const node = document.querySelector("#cockpit-intro");
+  if (!node) return;
+  const preference = introPreference();
+  const shouldShow = forceOpen || preference !== "skipped";
+  node.hidden = !shouldShow;
+  if (!shouldShow) return;
+  const action = store.guidedJourney?.next_action || {};
+  const journeyState = store.guidedJourney?.state || "getting ready";
+  const tourSteps = cockpitTourSteps();
+  const activeIndex = activeTourIndex();
+  const resumed = preference === "started";
+  node.innerHTML = `
+    <div class="intro-copy">
+      <span class="eyebrow">Guided operator cockpit</span>
+      <h2>${resumed ? "Resume your lab path" : "Start with confidence"}</h2>
+      <p>${escapeHtml(store.guidedJourney?.summary || "Use this console to configure, deploy, monitor, recover, and launch FortifyLab services without memorizing terminal commands.")}</p>
+      <div class="intro-next"><strong>Next:</strong> ${escapeHtml(action.label || "Review lab readiness")} <span>${escapeHtml(pretty(journeyState))}</span></div>
+    </div>
+    <ol class="intro-steps" aria-label="Operator tour steps">
+      ${tourSteps.map((step, index) => `<li class="${index === activeIndex ? "is-current" : ""}"><button type="button" data-guided-panel="${escapeHtml(step.panel)}"><span>${index + 1}</span><strong>${escapeHtml(step.label)}</strong><small>${escapeHtml(step.detail)}</small></button></li>`).join("")}
+    </ol>
+    <div class="intro-actions">
+      <button type="button" class="primary-action" data-tour-action="${resumed ? "resume" : "start"}">${resumed ? "Resume tour" : "Start tour"}</button>
+      <button type="button" class="secondary-action" data-tour-action="resume">Open next step</button>
+      <button type="button" class="secondary-action" data-tour-action="skip">Skip tour</button>
+    </div>`;
+  bindIntroControls();
+}
+
+function bindIntroControls() {
+  for (const button of document.querySelectorAll("[data-tour-action]")) {
+    button.addEventListener("click", () => {
+      const action = button.dataset.tourAction;
+      if (action === "skip") {
+        setIntroPreference("skipped");
+        renderCockpitIntro();
+        return;
+      }
+      setIntroPreference("started");
+      const nextPanel = store.guidedJourney?.next_action?.panel || cockpitTourSteps()[activeTourIndex()]?.panel || "guided";
+      openPanelByName(nextPanel);
+      renderCockpitIntro(true);
+    });
+  }
+  bindGuidedJourneyControls();
+}
+
+function setupIntroControls() {
+  document.querySelector("#open-intro")?.addEventListener("click", () => {
+    setIntroPreference("started");
+    renderCockpitIntro(true);
+    document.querySelector("#cockpit-intro")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
+function fallbackHelpTopics() {
+  return {
+    topics: [
+      {
+        id: "overview",
+        title: "Operator cockpit",
+        summary: "Use the guided path as the deployment spine. The panels below give live status, actions, logs, docs, certificates, and recovery signals.",
+        panel: "guided",
+        actions: ["Open guided path", "Review active workspace", "Check health notes"],
+      },
+      {
+        id: "service-health",
+        title: "Service health and launchpad",
+        summary: "Service cards combine DNS, HTTP, TLS, ingress, lifecycle, and recent uptime signals. A failed badge usually points to Health notes or Evidence queue next.",
+        panel: "routes",
+        actions: ["Open service URL", "Inspect health notes", "View related pod logs"],
+      },
+      {
+        id: "logs",
+        title: "Dedicated logs workspace",
+        summary: "Open recent logs for a pod or follow them live while deployment continues. Use pause, refresh, copy, and download when gathering evidence.",
+        panel: "logs",
+        actions: ["Open Evidence queue", "Follow logs", "Download output"],
+      },
+      {
+        id: "tls",
+        title: "TLS and root CA",
+        summary: "Trust the mkcert root CA on client machines and confirm the service is not serving Traefik's default certificate.",
+        panel: "certificates",
+        actions: ["Retrieve root CA", "Check TLS badge", "Review certificate notes"],
+      },
+      {
+        id: "recovery",
+        title: "Guided recovery",
+        summary: "When deployment stalls, start with Health notes, then Evidence queue. Prefer guided repair actions over manual Kubernetes edits.",
+        panel: "health",
+        actions: ["Open health notes", "Inspect logs", "Refresh service checks"],
+      },
+    ],
+  };
+}
+
+function helpTopics() {
+  const topics = store.helpTopics?.topics || store.helpTopics || fallbackHelpTopics().topics;
+  return Array.isArray(topics) && topics.length ? topics : fallbackHelpTopics().topics;
+}
+
+function openHelpTopic(topicId = "overview") {
+  selectedHelpTopicId = topicId;
+  renderHelp(store.helpTopics || fallbackHelpTopics());
+  openPanelByName("help");
+}
+
+function renderHelp(data) {
+  const topics = helpTopics();
+  const topic = topics.find((item) => item.id === selectedHelpTopicId) || topics[0];
+  selectedHelpTopicId = topic.id;
+  setText("help-count", `${topics.length} topics`);
+  const recovery = store.recoveryState?.next_recovery || store.recoveryState?.next_action || null;
+  target("help").innerHTML = `
+    <div class="help-layout">
+      <div class="help-topic-list" aria-label="Help topics">
+        ${topics.map((item) => `<button type="button" class="help-topic ${item.id === topic.id ? "is-selected" : ""}" data-help-topic="${escapeHtml(item.id)}"><strong>${escapeHtml(item.title || pretty(item.id))}</strong><span>${escapeHtml(item.summary || "Open this guide topic.")}</span></button>`).join("")}
+      </div>
+      <article class="help-reader">
+        <span class="eyebrow">Contextual help</span>
+        <h3>${escapeHtml(topic.title || "Operator guide")}</h3>
+        <p>${escapeHtml(topic.summary || "No summary was reported for this topic yet.")}</p>
+        ${Array.isArray(topic.actions) && topic.actions.length ? `<ul class="compact-list">${topic.actions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+        ${recovery ? `<div class="recovery-callout"><strong>${escapeHtml(recovery.label || "Suggested recovery")}</strong><span>${escapeHtml(recovery.reason || recovery.summary || "Review the suggested recovery path before retrying.")}</span></div>` : ""}
+        <div class="help-actions">
+          <button type="button" class="primary-action" data-guided-panel="${escapeHtml(topic.panel || "guided")}">Open related panel</button>
+          <button type="button" class="secondary-action" data-guided-panel="health">Health notes</button>
+          <button type="button" class="secondary-action" data-guided-panel="logs">Evidence queue</button>
+        </div>
+      </article>
+    </div>`;
+  for (const button of document.querySelectorAll("[data-help-topic]")) {
+    button.addEventListener("click", () => openHelpTopic(button.dataset.helpTopic));
+  }
+  bindGuidedJourneyControls();
+}
+
+function serviceLogOperationId(service) {
+  const key = serviceLifecycleKey(service);
+  const pods = collectLogPods(store.logs || {});
+  if (!pods.length) return null;
+  const aliases = {
+    ssc: ["ssc"],
+    lim: ["lim"],
+    mysql: ["mysql"],
+    postgresql: ["postgresql", "postgres"],
+    scsast: ["sast", "scsast", "scancentral"],
+    "scdast-core": ["dast", "scdast"],
+    "scdast-scanner": ["scanner", "dast"],
+  };
+  const candidates = aliases[key] || [key].filter(Boolean);
+  const match = pods.find((pod) => candidates.some((candidate) => [pod.name, pod.step_label, pod.step_id].join(" ").toLowerCase().includes(candidate)));
+  return match?.operation_id || null;
+}
+
+function bindServiceControls() {
+  for (const button of document.querySelectorAll("[data-service-log]")) {
+    button.addEventListener("click", () => {
+      openLogWorkspace(button.dataset.serviceLog, "recent");
+      openPanelByName("logs");
+    });
+  }
+  for (const button of document.querySelectorAll("[data-service-help]")) {
+    button.addEventListener("click", () => openHelpTopic(button.dataset.serviceHelp || "service-health"));
+  }
 }
 
 function renderSummary() {
@@ -570,6 +787,8 @@ async function submitReadOnlyOperation(operationId) {
     logRequestsInFlight.delete(operationId);
     if (store.logs) renderLogs(store.logs);
     if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
+    renderHelp(store.helpTopics || fallbackHelpTopics());
+    renderCockpitIntro();
   }
 }
 
@@ -616,8 +835,10 @@ function renderRoutes() {
           ${checkPill(service, "ingress")}
         </div>
         ${renderServiceHint(service, lifecycle)}
+        ${renderServiceActions(service)}
       </li>`;
     }).join("")}</ul>`;
+    bindServiceControls();
     return;
   }
   const routes = collectRoutes();
@@ -636,8 +857,10 @@ function renderRoutes() {
         ${pill(route.tls_secret ? "tls" : "tls missing")}
         ${pill(route.endpoints_ready ? "endpoints ready" : "endpoints pending")}
       </div>
+      <div class="service-actions"><button type="button" class="secondary-action" data-service-help="service-health">Explain status</button></div>
     </li>`;
   }).join("")}</ul>`;
+  bindServiceControls();
 }
 
 function serviceState(service) {
@@ -800,6 +1023,16 @@ function renderServiceHint(service, lifecycle) {
   const hint = (service.hints || [])[0];
   if (!hint) return "";
   return `<div class="row-note">${escapeHtml(hint.message || "Health check needs attention.")}</div>`;
+}
+
+function renderServiceActions(service) {
+  const logOperationId = serviceLogOperationId(service);
+  const state = serviceState(service);
+  const topic = state === "up" ? "service-health" : state === "degraded" ? "recovery" : state === "down" ? "recovery" : "service-health";
+  return `<div class="service-actions">
+    ${logOperationId ? `<button type="button" class="secondary-action" data-service-log="${escapeHtml(logOperationId)}">Open logs</button>` : `<button type="button" class="secondary-action" data-guided-panel="logs">Evidence queue</button>`}
+    <button type="button" class="secondary-action" data-service-help="${escapeHtml(topic)}">Explain status</button>
+  </div>`;
 }
 
 function renderCertificates(data) {
@@ -982,6 +1215,8 @@ async function submitLifecycleAction(action, payload, confirmed = false) {
   } finally {
     lifecycleSubmitting = false;
     if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
+    renderHelp(store.helpTopics || fallbackHelpTopics());
+    renderCockpitIntro();
   }
 }
 
@@ -1135,6 +1370,20 @@ async function loadPanel(key, path, render) {
   }
 }
 
+async function loadOptionalPanel(key, path, render, fallback) {
+  try {
+    const data = await loadJson(path);
+    store[key] = data;
+    render(data);
+    return true;
+  } catch (error) {
+    const data = typeof fallback === "function" ? fallback() : fallback;
+    store[key] = data;
+    render(data);
+    return true;
+  }
+}
+
 async function refreshConsole(options = {}) {
   if (refreshInFlight) {
     if (!options.force) return false;
@@ -1161,6 +1410,8 @@ async function refreshConsole(options = {}) {
       loadPanel("lifecycleActions", "/api/lifecycle/actions", renderLifecycleActions),
       loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit),
       loadPanel("operationJobs", "/api/operations/jobs", () => {}),
+      loadOptionalPanel("helpTopics", "/api/help/topics", renderHelp, fallbackHelpTopics),
+      loadOptionalPanel("recoveryState", "/api/recovery/state", () => renderHelp(store.helpTopics || fallbackHelpTopics()), () => ({})),
     ]);
 
     renderSummary();
@@ -1168,6 +1419,8 @@ async function refreshConsole(options = {}) {
     renderRoutes();
     if (store.logs) renderLogs(store.logs);
     if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
+    renderHelp(store.helpTopics || fallbackHelpTopics());
+    renderCockpitIntro();
 
     const loaded = results.filter(Boolean).length;
     if (loaded === results.length) {
@@ -1192,5 +1445,8 @@ function scheduleRefresh() {
 }
 
 setupThemeSwitch();
+setupIntroControls();
 setupPanelFocus();
+renderHelp(fallbackHelpTopics());
+renderCockpitIntro();
 scheduleRefresh();

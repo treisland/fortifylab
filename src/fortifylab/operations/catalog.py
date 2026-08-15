@@ -30,6 +30,8 @@ class OperationSpec:
     impact: OperationImpact = OperationImpact.MUTATION
     warning: str = ""
     confirmation_phrase: str | None = None
+    conflict_group: str = ""
+    resource_scope: tuple[str, ...] = ()
 
     @property
     def mutates(self) -> bool:
@@ -74,7 +76,14 @@ class OperationCatalog:
         raise ValueError(f"Unsupported operation: {operation_id}")
 
     def certs(self) -> OperationSpec:
-        return OperationSpec("certs.generate", "Generate TLS certificates", OperationKind.CERTIFICATE, self._script("scripts/create-certs.sh"))
+        return OperationSpec(
+            "certs.generate",
+            "Generate TLS certificates",
+            OperationKind.CERTIFICATE,
+            self._script("scripts/create-certs.sh"),
+            conflict_group="tls",
+            resource_scope=("certificates", "ingress"),
+        )
 
     def secrets(self) -> OperationSpec:
         return OperationSpec(
@@ -84,6 +93,8 @@ class OperationCatalog:
             self._script("scripts/create-secrets.sh"),
             warning="May rotate SSC secret.key and should be used deliberately.",
             confirmation_phrase="REFRESH SECRETS",
+            conflict_group="secrets",
+            resource_scope=("secrets", "namespace:fortify"),
         )
 
     def app(self, app_id: str, action: str) -> OperationSpec:
@@ -109,6 +120,8 @@ class OperationCatalog:
             self._script(script.format(action=action)),
             impact=impact,
             confirmation_phrase=phrase,
+            conflict_group=f"app:{app_id}",
+            resource_scope=(f"app:{app_id}", "namespace:fortify"),
         )
 
     def cluster(self, action: str) -> OperationSpec:
@@ -121,13 +134,23 @@ class OperationCatalog:
             ("microk8s", action),
             impact=OperationImpact.MUTATION,
             warning="Cluster lifecycle affects every Fortify Lab service but does not delete persistent data.",
+            conflict_group="cluster",
+            resource_scope=("cluster", "namespace:fortify"),
         )
 
     def logs(self, pod: str, *, follow: bool) -> OperationSpec:
         command = ("microk8s", "kubectl", "-n", "fortify", "logs", pod)
         if follow:
             command = (*command, "-f")
-        return OperationSpec(f"logs.{pod}", f"View logs for {pod}", OperationKind.LOGS, command, impact=OperationImpact.READ_ONLY)
+        return OperationSpec(
+            f"logs.{pod}",
+            f"View logs for {pod}",
+            OperationKind.LOGS,
+            command,
+            impact=OperationImpact.READ_ONLY,
+            conflict_group="read-only",
+            resource_scope=(f"pod:{pod}",),
+        )
 
     def lifecycle_plan(self, action: str, apps: tuple[str, ...]) -> tuple[OperationSpec, ...]:
         ordered = apps if action == "start" else tuple(reversed(apps))
@@ -142,7 +165,15 @@ class OperationCatalog:
         if topic not in allowed:
             raise ValueError(f"Unsupported runbook topic: {topic}")
         path = allowed[topic]
-        return OperationSpec("runbook.safe-preview", f"Preview runbook {topic}", OperationKind.RUNBOOK, ("sed", "-n", "1,160p", path), impact=OperationImpact.READ_ONLY)
+        return OperationSpec(
+            "runbook.safe-preview",
+            f"Preview runbook {topic}",
+            OperationKind.RUNBOOK,
+            ("sed", "-n", "1,160p", path),
+            impact=OperationImpact.READ_ONLY,
+            conflict_group="read-only",
+            resource_scope=("docs",),
+        )
 
     def _script(self, relative: str) -> tuple[str, ...]:
         prefix = f"{self.repo_root}/" if self.repo_root != "." else "./"

@@ -80,6 +80,94 @@ class SupportInspector:
             "tool_warnings": tuple(dict.fromkeys(warnings)),
         }
 
+
+    def support_bundle_preview(
+        self,
+        snapshot: LiveDeploymentSnapshot,
+        *,
+        config: dict[str, Any],
+        health: dict[str, Any],
+        routes: dict[str, Any],
+        certificates: dict[str, Any],
+        audit: dict[str, Any],
+        diagnostics: dict[str, Any],
+        logs: dict[str, Any],
+    ) -> dict[str, Any]:
+        events = sum(len(step.events) for step in snapshot.steps)
+        pods = sum(len(step.pods) for step in snapshot.steps)
+        log_targets = logs.get("options") or []
+        return {
+            "version": 1,
+            "mode": "preview",
+            "namespace": snapshot.namespace,
+            "profile": snapshot.profile,
+            "generated_at": snapshot.generated_at,
+            "export_endpoint": None,
+            "redaction": {
+                "enabled": True,
+                "policy": "Secrets, private keys, licenses, credential values, and raw mutating commands are excluded or summarized.",
+            },
+            "sections": [
+                {
+                    "id": "configuration",
+                    "label": "Configuration summary",
+                    "included": True,
+                    "items": len(config.get("sections", [])),
+                    "notes": ["Section names and validation issues only; secret values are never exported."],
+                },
+                {
+                    "id": "action_audit",
+                    "label": "Action audit",
+                    "included": True,
+                    "items": len(audit.get("entries", [])),
+                    "notes": ["Audit messages are redacted and command output is summarized."],
+                },
+                {
+                    "id": "service_health",
+                    "label": "Service health",
+                    "included": True,
+                    "items": len(health.get("services", [])),
+                    "notes": ["DNS, TLS, HTTP, ingress, and backend readiness states."],
+                },
+                {
+                    "id": "routes_certificates",
+                    "label": "Routes and certificates",
+                    "included": True,
+                    "items": len(routes.get("routes", [])) + len(certificates.get("inventory", [])),
+                    "notes": ["Certificate metadata is included; private keys are not."],
+                },
+                {
+                    "id": "events",
+                    "label": "Kubernetes events",
+                    "included": True,
+                    "items": events,
+                    "notes": ["Recent event summaries from live deployment probes."],
+                },
+                {
+                    "id": "logs",
+                    "label": "Selected logs",
+                    "included": bool(log_targets),
+                    "items": len(log_targets),
+                    "notes": ["Preview lists selectable log targets; full export is a future follow-up."],
+                },
+                {
+                    "id": "diagnostics",
+                    "label": "Diagnostics findings",
+                    "included": True,
+                    "items": len(diagnostics.get("findings", [])),
+                    "notes": ["Findings include next inspection hints, not secret values."],
+                },
+            ],
+            "summary": {
+                "steps": len(snapshot.steps),
+                "pods": pods,
+                "events": events,
+                "services": len(health.get("services", [])),
+                "audit_entries": len(audit.get("entries", [])),
+                "diagnostic_findings": len(diagnostics.get("findings", [])),
+            },
+        }
+
     def _certificate_inventory(self, payload: object, referenced: list[str]) -> list[dict[str, Any]]:
         items = payload.get("items", []) if isinstance(payload, dict) else []
         by_name = {item.get("metadata", {}).get("name", ""): item for item in items}
