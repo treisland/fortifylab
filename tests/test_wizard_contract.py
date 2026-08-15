@@ -409,6 +409,11 @@ exit 1
         self.assertIn("Tools and FCLI readiness", wizard)
         self.assertIn("fcli_tools_menu()", wizard)
         self.assertIn("fcli_install_or_update()", wizard)
+        self.assertIn("fcli_configure_lab_trust()", wizard)
+        self.assertIn("Configure fcli trust for lab TLS", wizard)
+        self.assertIn("FCLI_TRUSTSTORE", wizard)
+        self.assertIn("FCLI_TRUSTSTORE_TYPE", wizard)
+        self.assertIn("FCLI_TRUSTSTORE_PWD", wizard)
         self.assertIn("FCLI missing; recommended", wizard)
         self.assertIn("does not block infrastructure deployment", wizard)
         preflight = wizard.split("preflight_check()", 1)[1].split("deploy_step()", 1)[0]
@@ -453,6 +458,64 @@ exit 1
             )
             self.assertIn(f"PATH={bin_dir}:/usr/bin:/bin", output)
             self.assertIn("PROFILE_COUNT=1", output)
+
+
+    def test_fcli_lab_trust_handoff_is_current_session_and_persistent_without_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            certs = home / "fortify" / "certs"
+            profile = home / ".bashrc"
+            truststore = certs / "truststore"
+            certs.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text("# existing profile\n", encoding="utf-8")
+            truststore.write_text("fake-jks-for-contract-test\n", encoding="utf-8")
+            command = r'''
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_HOME_K8S="$PWD"
+                export FORTIFY_CERTS="$3"
+                export TRUSTSTORE="$4"
+                export DEFAULT_PASS="contract-secret"
+                export FORTIFY_FCLI_PROFILE_FILE="$5"
+                source "$1"
+                fcli_export_lab_trust "$TRUSTSTORE"
+                fcli_export_lab_trust "$TRUSTSTORE"
+                fcli_persist_lab_trust_hints "$TRUSTSTORE"
+                fcli_persist_lab_trust_hints "$TRUSTSTORE"
+                printf 'TRUSTSTORE=%s\\n' "$FCLI_TRUSTSTORE"
+                printf 'TRUSTSTORE_TYPE=%s\\n' "$FCLI_TRUSTSTORE_TYPE"
+                printf 'TRUSTSTORE_PWD_SET=%s\\n' "$([ -n "${FCLI_TRUSTSTORE_PWD:-}" ] && printf yes || printf no)"
+                printf 'PROFILE_TRUST_COUNT=%s\\n' "$(grep -cF "$TRUSTSTORE" "$FORTIFY_FCLI_PROFILE_FILE")"
+                printf 'PROFILE_TYPE_COUNT=%s\\n' "$(grep -cF 'export FCLI_TRUSTSTORE_TYPE="JKS"' "$FORTIFY_FCLI_PROFILE_FILE")"
+                if grep -F 'FCLI_TRUSTSTORE_PWD' "$FORTIFY_FCLI_PROFILE_FILE" >/dev/null; then
+                    printf 'PROFILE_SECRET=present\\n'
+                else
+                    printf 'PROFILE_SECRET=absent\\n'
+                fi
+            '''
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-trust-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(certs),
+                    str(truststore),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn(f"TRUSTSTORE={truststore}", output)
+            self.assertIn("TRUSTSTORE_TYPE=JKS", output)
+            self.assertIn("TRUSTSTORE_PWD_SET=yes", output)
+            self.assertIn("PROFILE_TRUST_COUNT=1", output)
+            self.assertIn("PROFILE_TYPE_COUNT=1", output)
+            self.assertIn("PROFILE_SECRET=absent", output)
+            self.assertNotIn("contract-secret", profile.read_text(encoding="utf-8"))
 
     def test_fcli_command_templates_are_secret_safe(self) -> None:
         command = """

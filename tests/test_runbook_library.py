@@ -151,7 +151,16 @@ class RunbookLibraryTests(unittest.TestCase):
         docs = (ROOT / "docs" / "runbooks" / "fcli.md").read_text(encoding="utf-8")
         expected_files = (
             official / "inspect-fcli-foundation.sh",
+            official / "configure-lab-trust.sh",
+            official / "ssc-token-guidance.sh",
             official / "local-ssc-login-discovery.sh",
+            official / "local-ssc-create-appversion.sh",
+            official / "local-ssc-upload-fpr.sh",
+            official / "local-ssc-policy-check.sh",
+            official / "local-ssc-appversion-summary.sh",
+            official / "local-ssc-session-doctor.sh",
+            official / "local-ssc-inventory.sh",
+            official / "local-ssc-logout-cleanup.sh",
             fod / "00-fod-env-session-check.sh",
             fod / "20-package-and-upload.sh",
             fod / "50-release-summary.sh",
@@ -163,8 +172,92 @@ class RunbookLibraryTests(unittest.TestCase):
                 self.assertIn("# domain:", text)
         self.assertIn("official [fcli v3 documentation]", docs.lower())
         self.assertIn("Local SSC", docs)
+        self.assertIn("configure-lab-trust.sh", docs)
+        self.assertIn("ssc-token-guidance.sh", docs)
+        self.assertIn("trust -> token guidance -> login", docs)
         self.assertIn("FoD", docs)
         self.assertIn("external SaaS", (fod / "README.md").read_text(encoding="utf-8"))
+
+    def test_local_ssc_fcli_runbooks_have_bounded_mutation_contracts(self) -> None:
+        official = ROOT / "runbooks" / "official" / "fcli"
+        create = (official / "local-ssc-create-appversion.sh").read_text(encoding="utf-8")
+        upload = (official / "local-ssc-upload-fpr.sh").read_text(encoding="utf-8")
+        policy = (official / "local-ssc-policy-check.sh").read_text(encoding="utf-8")
+        summary = (official / "local-ssc-appversion-summary.sh").read_text(encoding="utf-8")
+        common = (official / "ssc-common.bash").read_text(encoding="utf-8")
+
+        for text in (create, upload, policy, summary):
+            with self.subTest(runbook=text.splitlines()[2]):
+                self.assertIn("# domain: Local lab: SSC", text)
+                self.assertIn("default: fortifylab", text)
+                self.assertIn("ssc_require_fcli", text)
+                self.assertIn("ssc_require_command_help", text)
+                self.assertIn("--ssc-session", text)
+                self.assertNotIn("TOKEN", text)
+                self.assertNotIn("SECRET", text)
+
+        self.assertIn("CONFIRM_LOCAL_SSC_CREATE", create)
+        self.assertIn("Creation skipped", create)
+        self.assertIn("--skip-if-exists", create)
+        self.assertIn("--auto-required-attrs", create)
+        self.assertIn("CONFIRM_LOCAL_SSC_UPLOAD", upload)
+        self.assertIn("Upload skipped", upload)
+        self.assertIn('[[ ! -f "$FPR_FILE" ]]', upload)
+        self.assertIn('[[ ! -r "$FPR_FILE" ]]', upload)
+        self.assertIn("*.fpr|*.FPR", upload)
+        self.assertIn("check-policy", policy)
+        self.assertIn("appversion-summary", summary)
+        self.assertIn("${SESSION_NAME:-fortifylab}", common)
+
+    def test_local_ssc_trust_and_token_guidance_are_secret_safe(self) -> None:
+        official = ROOT / "runbooks" / "official" / "fcli"
+        trust = (official / "configure-lab-trust.sh").read_text(encoding="utf-8")
+        token = (official / "ssc-token-guidance.sh").read_text(encoding="utf-8")
+        login = (official / "local-ssc-login-discovery.sh").read_text(encoding="utf-8")
+
+        self.assertIn("# domain: Local lab: SSC", trust)
+        self.assertIn("# category: FCLI trust", trust)
+        self.assertIn("FCLI_TRUSTSTORE", trust)
+        self.assertIn("FCLI_TRUSTSTORE_TYPE", trust)
+        self.assertIn("<DEFAULT_PASS from your private .env>", trust)
+        self.assertNotIn('export FCLI_TRUSTSTORE_PWD="$DEFAULT_PASS"', trust)
+        self.assertIn("# category: FCLI authentication", token)
+        self.assertIn("unset $TOKEN_ENV_VAR", token)
+        self.assertIn("Never store SSC token values", token)
+        self.assertIn("PKIX", login)
+        self.assertIn("Configure fcli trust for lab TLS", login)
+
+    def test_official_fcli_runbooks_are_shell_syntax_valid(self) -> None:
+        scripts = sorted((ROOT / "runbooks" / "official" / "fcli").glob("*.sh"))
+        scripts.append(ROOT / "runbooks" / "official" / "fcli" / "ssc-common.bash")
+        for script in scripts:
+            with self.subTest(script=script.name):
+                result = subprocess.run(
+                    ["bash", "-n", str(script)],
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_local_ssc_fcli_runbooks_are_bounded_and_runtime_checked(self) -> None:
+        official = ROOT / "runbooks" / "official" / "fcli"
+        expected = {
+            "local-ssc-session-doctor.sh",
+            "local-ssc-inventory.sh",
+            "local-ssc-logout-cleanup.sh",
+        }
+        for filename in expected:
+            with self.subTest(filename=filename):
+                text = (official / filename).read_text(encoding="utf-8")
+                self.assertIn("# domain: Local lab: SSC", text)
+                self.assertIn("# requires: bash", text)
+                self.assertNotIn("# requires: fcli", text)
+                self.assertIn("default: fortifylab", text)
+                self.assertIn("resolve_fcli_bin", text)
+                self.assertIn("--help", text)
+                self.assertIn("No token values", text)
 
     def test_validation_reports_missing_metadata_and_required_tools(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

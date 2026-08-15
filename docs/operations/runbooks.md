@@ -116,9 +116,12 @@ before uploading a scan.
 ## Official fcli runbooks
 
 Fortify Lab-maintained fcli runbooks are under `runbooks/official/fcli/`. They
-cover local operator foundation checks and SSC-first discovery helpers. See the
-[fcli runbook notes](../runbooks/fcli.md) for scope, environment defaults, and
-the local SSC/FoD boundary.
+cover local operator foundation checks, fcli lab TLS trust, SSC token guidance,
+SSC-first discovery helpers, application-version creation, FPR upload, policy
+checks, issue summaries, and session cleanup.
+Create/upload runbooks require explicit confirmation parameters before changing
+local SSC state. See the [fcli runbook notes](../runbooks/fcli.md) for scope,
+environment defaults, and the local SSC/FoD boundary.
 
 ## Safety
 

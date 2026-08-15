@@ -95,7 +95,16 @@ if [ -n "${SC_SAST_URL:-}" ]; then
     login_cmd+=(--sc-sast-url "$SC_SAST_URL")
 fi
 echo "Logging in to local SSC with token from $TOKEN_ENV_VAR..."
-FCLI_DEFAULT_SSC_TOKEN="$token_value" "${login_cmd[@]}" >/dev/null
+if ! FCLI_DEFAULT_SSC_TOKEN="$token_value" "${login_cmd[@]}" >/dev/null; then
+    rc=$?
+    echo
+    echo "Login failed. If the fcli output mentions PKIX or certificate validation, configure lab TLS trust first:"
+    echo "  Tools and FCLI readiness -> Configure fcli trust for lab TLS"
+    echo "  Runbook Library -> Local lab: SSC -> Configure fcli lab TLS trust"
+    echo
+    echo "The token value was not printed by this runbook."
+    exit "$rc"
+fi
 echo "Login complete. Token values were not printed."
 echo
 
