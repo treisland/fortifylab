@@ -27,6 +27,7 @@ def cockpit_state_payload(
     logs: dict[str, Any],
     config: dict[str, Any],
     support_bundle: dict[str, Any] | None = None,
+    pipeline: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     recovery = recovery_suggestions_payload(
         snapshot_payload=deployment_status,
@@ -62,6 +63,7 @@ def cockpit_state_payload(
         },
         "guide": guide,
         "journey": journey,
+        "pipeline": pipeline or {},
         "deployment": deployment_status,
         "configuration": config,
         "services": services,

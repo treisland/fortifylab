@@ -14,6 +14,7 @@ from fortifylab.status import LiveDeploymentSnapshot, LiveState, LiveStatusPolle
 from fortifylab.tui.profiles import LOG_SCOPES, build_profile
 from fortifylab.web.cockpit import cockpit_state_payload
 from fortifylab.web.help import help_topic_payload, help_topics_payload
+from fortifylab.web.pipeline import guided_pipeline_payload
 from fortifylab.web.recovery import recovery_suggestions_payload
 from fortifylab.web.security import ActionSecurityMode
 from fortifylab.web.support import SupportInspector
@@ -125,6 +126,14 @@ class WebConsoleApp:
             return 200, {"security": self.action_security_payload(), "action": preview.to_dict()}
         if path == "/api/operations":
             return 200, {"operations": self.operation_jobs.operation_payloads()}
+        if path == "/api/jobs":
+            return 200, self.operation_jobs.control_plane_payload()
+        if path.startswith("/api/jobs/"):
+            job_id = path.rsplit("/", 1)[-1]
+            job = self.operation_jobs.get_job(job_id)
+            if job is None:
+                return 404, {"error": "not found"}
+            return 200, {"job": job.to_api_dict(), "capabilities": self.operation_jobs.control_plane_payload()["capabilities"]}
         if path == "/api/operations/jobs":
             return 200, {"jobs": [job.to_api_dict() for job in self.operation_jobs.list_jobs()]}
         if path.startswith("/api/operations/jobs/"):
@@ -142,6 +151,8 @@ class WebConsoleApp:
             return 200, payload
         if path == "/api/deployment/guide":
             return 200, self.guided_deployment_payload(self._snapshot())
+        if path == "/api/pipeline/guided":
+            return 200, self.guided_pipeline_payload(self._snapshot())
         if path == "/api/guided/journey":
             return 200, self.guided_journey_payload()
         if path == "/api/deployment/diagnostics":
@@ -165,7 +176,7 @@ class WebConsoleApp:
         return 404, {"error": "not found"}
 
     def api_mutation_response(self, path: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        if path == "/api/operations/jobs":
+        if path in {"/api/operations/jobs", "/api/jobs"}:
             try:
                 request = OperationJobRequest.from_payload(payload)
                 spec = self.operation_jobs.catalog.get(request.operation_id)
@@ -321,6 +332,7 @@ class WebConsoleApp:
         certificates = support.certificate_payload(snapshot)
         diagnostics = self.deployment_diagnostics_payload(snapshot)
         service_health = self.service_health_payload(snapshot)
+        jobs_payload = self.operation_jobs.control_plane_payload()
         return cockpit_state_payload(
             snapshot=snapshot,
             deployment_status=deployment_status,
@@ -332,13 +344,20 @@ class WebConsoleApp:
             certificates=certificates,
             security=self.security_posture_payload(),
             lifecycle=self.lifecycle_actions_payload(snapshot),
-            jobs={"jobs": [job.to_api_dict() for job in self.operation_jobs.list_jobs()]},
+            jobs=jobs_payload,
             audit=self.lifecycle_audit_payload(),
             diagnostics=diagnostics,
             support_bundle=self.support_bundle_payload(),
             logs=self.deployment_logs_payload(snapshot),
             config=self.configuration_payload(),
+            pipeline=self.guided_pipeline_payload(snapshot, guide=guide, jobs=jobs_payload),
         )
+
+    def guided_pipeline_payload(self, snapshot: LiveDeploymentSnapshot | None = None, *, guide: dict[str, Any] | None = None, jobs: dict[str, Any] | None = None) -> dict[str, Any]:
+        snapshot = snapshot or self._snapshot()
+        guide = guide or self.guided_deployment_payload(snapshot)
+        jobs = jobs or self.operation_jobs.control_plane_payload()
+        return guided_pipeline_payload(guide, snapshot, jobs)
 
     def recovery_state_payload(self) -> dict[str, Any]:
         snapshot = self._snapshot()

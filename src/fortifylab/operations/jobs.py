@@ -24,6 +24,22 @@ class OperationJobStatus(str, Enum):
     REJECTED = "rejected"
 
 
+JOB_CONTROL_PLANE_VERSION = 1
+JOB_STATE_VOCABULARY = ("queued", "running", "waiting", "blocked", "failed", "complete", "canceled", "rejected")
+JOB_INTENT_TYPES = (
+    "guided_deploy",
+    "guided_step",
+    "lifecycle",
+    "config_repair",
+    "certificates",
+    "secrets",
+    "diagnostics",
+    "health_probe",
+    "logs",
+    "runbook",
+)
+
+
 @dataclass(frozen=True)
 class OperationAuditEntry:
     audit_id: str
@@ -211,6 +227,19 @@ class OperationJobManager:
     def operation_payloads(self) -> list[dict[str, Any]]:
         return [operation_spec_payload(spec) for spec in self.catalog.list()]
 
+    def control_plane_payload(self) -> dict[str, Any]:
+        jobs = [job.to_api_dict() for job in self.list_jobs()]
+        active_jobs = [job for job in jobs if job.get("status") in {"queued", "running", "waiting"}]
+        return {
+            "version": JOB_CONTROL_PLANE_VERSION,
+            "contract": "typed-intent-preview",
+            "jobs": jobs,
+            "active_jobs": active_jobs,
+            "events": [entry.to_api_dict() for entry in self.audit_entries()],
+            "capabilities": job_control_plane_capabilities(self.operation_payloads()),
+            "redaction": "Secrets, credentials, private keys, licenses, and raw mutating commands are not returned.",
+        }
+
     def _run_job(self, job_id: str, spec: OperationSpec, request: OperationJobRequest) -> None:
         with self._lock:
             current = self._jobs[job_id]
@@ -356,22 +385,26 @@ def operation_execution_payload(execution: OperationExecution | None) -> dict[st
 
 def operation_job_payload(job: OperationJob) -> dict[str, Any]:
     execution = operation_execution_payload(job.execution)
+    status = job.status.value
     return {
         "job_id": job.job_id,
         "operation_id": job.operation_id,
+        "intent": intent_for_operation_id(job.operation_id),
+        "scope": scope_for_operation_id(job.operation_id),
         "action_label": job.action_label or humanize_operation_id(job.operation_id),
         "resource": job.resource_label or resource_from_operation_id(job.operation_id),
         "kind": job.kind,
         "impact": job.impact,
         "operator": redact_text(job.operator),
         "execute": job.execute,
-        "status": job.status.value,
+        "status": status,
         "requested_at": job.requested_at,
         "started_at": job.started_at,
         "ended_at": job.ended_at,
         "duplicate_of": job.duplicate_of,
         "message": summarize_output(job.message),
         "execution": execution,
+        "controls": job_controls(status),
         "summary": job_summary(job, execution),
         "audit": [entry.to_api_dict() for entry in job.audit],
     }
@@ -405,6 +438,81 @@ def resource_from_operation_id(operation_id: str) -> str:
         return "Runbook"
     return operation_id
 
+
+
+
+def intent_for_operation_id(operation_id: str) -> str:
+    if operation_id.startswith("app.") or operation_id.startswith("cluster."):
+        return "lifecycle"
+    if operation_id.startswith("certs."):
+        return "certificates"
+    if operation_id.startswith("secrets."):
+        return "secrets"
+    if operation_id.startswith("logs."):
+        return "logs"
+    if operation_id.startswith("runbook."):
+        return "runbook"
+    return "diagnostics"
+
+
+def scope_for_operation_id(operation_id: str) -> str:
+    parts = operation_id.split(".")
+    if operation_id.startswith("app.") and len(parts) >= 2:
+        return f"service:{parts[1]}"
+    if operation_id.startswith("cluster."):
+        return "cluster"
+    if operation_id.startswith("certs."):
+        return "certificates"
+    if operation_id.startswith("secrets."):
+        return "secrets"
+    if operation_id.startswith("logs.") and len(parts) >= 2:
+        return f"logs:{parts[1]}"
+    if operation_id.startswith("runbook."):
+        return "runbook"
+    return "lab"
+
+
+def job_controls(status: str) -> dict[str, Any]:
+    terminal = status in {"complete", "failed", "rejected", "canceled"}
+    return {
+        "retry": status in {"failed", "rejected"},
+        "cancel": status in {"queued", "running", "waiting"},
+        "pause": False,
+        "resume": False,
+        "view_logs": True,
+        "view_audit": True,
+        "terminal": terminal,
+    }
+
+
+def job_control_plane_capabilities(operations: list[dict[str, Any]]) -> dict[str, Any]:
+    intents = sorted({intent_for_operation_id(str(operation.get("id") or "")) for operation in operations} | set(JOB_INTENT_TYPES))
+    scopes = sorted({scope_for_operation_id(str(operation.get("id") or "")) for operation in operations})
+    return {
+        "states": list(JOB_STATE_VOCABULARY),
+        "intents": intents,
+        "scopes": scopes,
+        "submission": {
+            "endpoint": "/api/jobs",
+            "method": "POST",
+            "accepts": ["operation_id", "execute", "confirmation", "source"],
+            "typed_intents": "planned",
+        },
+        "events": {
+            "endpoint": "/api/jobs",
+            "transport": "polling",
+            "streaming": "planned",
+        },
+        "locks": {
+            "enforced_by": "backend",
+            "conflict_policy": "resource-scope",
+        },
+        "reconnect": {
+            "stable_job_ids": True,
+            "list_endpoint": "/api/jobs",
+            "detail_endpoint": "/api/jobs/{job_id}",
+        },
+    }
 
 def humanize_operation_id(operation_id: str) -> str:
     parts = operation_id.split(".")

@@ -65,7 +65,7 @@ class PythonWebConsoleTests(unittest.TestCase):
         content_type, html = WebConsoleApp(WebConsoleConfig()).static_asset("index.html")
 
         self.assertEqual(content_type, "text/html")
-        for expected in ('class="app-shell"', 'class="nav-rail"', 'data-workspace-link="dashboard"', 'data-workspace-link="guided"', 'data-workspace-link="services"', 'data-workspace-link="logs"', 'data-workspace-link="lifecycle"', 'data-workspace-link="configuration"', 'data-workspace-link="certificates"', 'data-workspace-link="diagnostics"', 'data-workspace-link="audit"', 'data-workspace-link="docs"', 'data-workspace="dashboard"', 'Operator dashboard', 'Resource links', 'id="back-to-top"', 'id="cockpit-intro"', 'id="open-intro"', 'data-panel="guided"', 'data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"', 'data-panel="lifecycle"', 'data-panel="security"', 'data-panel="audit"', 'data-panel="help"'):
+        for expected in ('class="app-shell"', 'class="nav-rail"', 'data-workspace-link="dashboard"', 'data-workspace-link="guided"', 'data-workspace-link="services"', 'data-workspace-link="logs"', 'data-workspace-link="lifecycle"', 'data-workspace-link="configuration"', 'data-workspace-link="certificates"', 'data-workspace-link="diagnostics"', 'data-workspace-link="audit"', 'data-workspace-link="docs"', 'data-workspace="dashboard"', 'Operator dashboard', 'Resource links', 'id="back-to-top"', 'id="cockpit-intro"', 'id="open-intro"', 'data-panel="guided"', 'data-panel="pipeline"', 'data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"', 'data-panel="lifecycle"', 'data-panel="security"', 'data-panel="audit"', 'data-panel="help"'):
             self.assertIn(expected, html)
         for expected in ('data-theme-choice="system"', 'data-theme-choice="light"', 'data-theme-choice="dark"'):
             self.assertIn(expected, html)
@@ -73,7 +73,10 @@ class PythonWebConsoleTests(unittest.TestCase):
         _, script = WebConsoleApp(WebConsoleConfig()).static_asset("main.js")
         _, styles = WebConsoleApp(WebConsoleConfig()).static_asset("styles.css")
         self.assertIn("/api/guided/journey", script)
+        self.assertIn("/api/pipeline/guided", script)
+        self.assertIn("/api/jobs", script)
         self.assertIn("renderGuidedJourney", script)
+        self.assertIn("renderPipeline", script)
         self.assertIn("Next best action", script)
         self.assertIn("fortifylab.operatorIntro", script)
         self.assertIn("renderCockpitIntro", script)
@@ -83,6 +86,7 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("setupIntroControls", script)
         self.assertIn("data-tour-action", script)
         self.assertIn("data-guided-panel", script)
+        self.assertIn("data-pipeline-panel", script)
         self.assertIn("/api/services/health", script)
         self.assertIn("/api/security/posture", script)
         self.assertIn("/api/lifecycle/actions", script)
@@ -163,6 +167,9 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("action failed", styles)
         self.assertIn("guided-journey-panel", styles)
         self.assertIn("guided-checks", styles)
+        self.assertIn("pipeline-panel", styles)
+        self.assertIn("pipelinePulse", styles)
+        self.assertIn("prefers-reduced-motion", styles)
         self.assertIn("cockpit-intro-panel", styles)
         self.assertIn("intro-steps", styles)
         self.assertIn("guide-open-button", styles)
@@ -291,6 +298,31 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["data"]["job"]["execute"])
 
+    def test_jobs_control_plane_api_reports_capabilities_and_redacted_jobs(self) -> None:
+        manager = OperationJobManager(runner=OperationRunner(lambda command: CommandResult(command, 0, "done", "", 0.01)))
+        app = WebConsoleApp(WebConsoleConfig(), operation_jobs=manager)
+
+        create_status, created = app.api_mutation_envelope("/api/jobs", {"operation_id": "logs.ssc-webapp-0"})
+        job = wait_for_web_job(manager, created["data"]["job"]["job_id"])
+        status, payload = app.api_envelope("/api/jobs")
+        detail_status, detail = app.api_envelope(f"/api/jobs/{job.job_id}")
+
+        self.assertEqual(create_status, 202)
+        self.assertEqual(status, 200)
+        data = payload["data"]
+        self.assertEqual(data["version"], 1)
+        self.assertEqual(data["contract"], "typed-intent-preview")
+        self.assertIn("guided_deploy", data["capabilities"]["intents"])
+        self.assertIn("waiting", data["capabilities"]["states"])
+        self.assertEqual(data["capabilities"]["submission"]["endpoint"], "/api/jobs")
+        self.assertEqual(data["jobs"][0]["intent"], "logs")
+        self.assertEqual(data["jobs"][0]["scope"], "logs:ssc-webapp-0")
+        self.assertTrue(data["jobs"][0]["controls"]["view_audit"])
+        self.assertEqual(detail_status, 200)
+        self.assertEqual(detail["data"]["job"]["job_id"], job.job_id)
+        self.assertNotIn("./apps", str(data))
+        self.assertNotIn("password", str(data).lower())
+
     def test_mutating_web_execution_requires_enable_actions(self) -> None:
         app = WebConsoleApp(WebConsoleConfig())
 
@@ -315,7 +347,7 @@ class PythonWebConsoleTests(unittest.TestCase):
     def test_api_endpoints_cover_status_config_routes_certificates(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller(), url_health_checker=FakeURLHealthChecker())
 
-        for path in ("/api/status", "/api/cockpit/state", "/api/help/topics", "/api/help/topics/networking/tls", "/api/config", "/api/routes", "/api/certificates", "/api/services", "/api/services/health", "/api/security/posture", "/api/lifecycle/actions", "/api/lifecycle/audit", "/api/deployment/status", "/api/deployment/guide", "/api/guided/journey", "/api/deployment/diagnostics", "/api/deployment/logs"):
+        for path in ("/api/status", "/api/cockpit/state", "/api/help/topics", "/api/help/topics/networking/tls", "/api/config", "/api/routes", "/api/certificates", "/api/services", "/api/services/health", "/api/security/posture", "/api/lifecycle/actions", "/api/lifecycle/audit", "/api/jobs", "/api/deployment/status", "/api/deployment/guide", "/api/pipeline/guided", "/api/guided/journey", "/api/deployment/diagnostics", "/api/deployment/logs"):
             with self.subTest(path=path):
                 status, payload = app.api_envelope(path)
                 self.assertEqual(status, 200)
@@ -438,6 +470,23 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(by_id["secrets"]["state"], "pending")
         self.assertEqual(by_id["mysql"]["state"], "in_progress")
 
+    def test_guided_pipeline_api_reports_live_stage_contract(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeMysqlDeployingPoller())
+
+        status, payload = app.api_envelope("/api/pipeline/guided")
+
+        self.assertEqual(status, 200)
+        data = payload["data"]
+        self.assertEqual(data["kind"], "guided-deployment")
+        self.assertEqual(data["controls"]["jobs_endpoint"], "/api/jobs")
+        self.assertEqual(data["controls"]["reduced_motion"], "supported")
+        self.assertEqual(data["active_stage_id"], "mysql")
+        stages = {stage["id"]: stage for stage in data["stages"]}
+        self.assertEqual(stages["prereqs"]["state"], "pending")
+        self.assertEqual(stages["mysql"]["state"], "in_progress")
+        self.assertIn("view-logs", stages["mysql"]["actions"])
+        self.assertEqual(data["state_sources"]["deployment"], "live-first")
+
     def test_deployment_diagnostics_are_contextual_and_redacted(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller())
         _, payload = app.api_envelope("/api/deployment/diagnostics")
@@ -538,6 +587,7 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("certificates", data)
         self.assertIn("lifecycle", data)
         self.assertIn("jobs", data)
+        self.assertIn("pipeline", data)
         self.assertIn("audit", data)
         self.assertIn("logs", data)
         suggestion_ids = {item["id"] for item in data["recovery"]["suggestions"]}

@@ -74,6 +74,86 @@ When a check fails, prefer plain causes such as "Traefik default certificate,"
   and guided steps. Link to durable docs instead of copying long runbooks into
   the UI.
 
+## Animated pipeline pattern
+
+Animated pipelines may be used for activities where the operator benefits from
+seeing a workflow move through stages, such as guided deployment, pre-flight,
+TLS setup, secret creation, service startup, first scan, support bundle export,
+teardown, bring-up, and upgrade.
+
+Pipelines are a visual layer over backend job state. They must not invent a
+separate execution model or imply progress that the job control plane has not
+reported.
+
+Use stages such as:
+
+- configure;
+- pre-flight;
+- TLS;
+- secrets;
+- databases;
+- SSC;
+- LIM;
+- SAST;
+- DAST;
+- verify;
+- launch.
+
+Stage state should use the shared job vocabulary where possible:
+
+- queued;
+- running;
+- waiting;
+- blocked;
+- failed;
+- complete;
+- canceled.
+
+Each stage should make its current meaning clear with a label, state, elapsed
+time or last update when available, findings count, verification result, and
+short current action. Do not rely on color or animation alone.
+
+### Pipeline interaction
+
+Pipeline stages should be clickable when they have useful context. Click-through
+targets may include:
+
+- related logs;
+- findings and diagnostics;
+- recovery suggestions;
+- job events and audit details;
+- retry, repair, pause, resume, or continue actions advertised by the backend.
+
+The selected stage should keep operator context visible. Opening logs or
+diagnostics from a stage should make it clear which job, service, step, and
+scope the operator is inspecting.
+
+### Motion rules
+
+Motion should communicate state, not decorate the page.
+
+- Use subtle flow, pulse, shimmer, or progress transitions only on the active
+  stage or connecting path.
+- Use calm completion transitions such as a check state or settled accent.
+- Use warning and failure state changes that are noticeable without flashing.
+- Keep animation short, predictable, and non-blocking.
+- Preserve layout dimensions while stages update so the pipeline does not jump.
+- Respect prefers-reduced-motion by disabling flowing, pulsing, shimmer, and
+  smooth transition effects while keeping static state changes visible.
+
+### Pipeline anti-patterns
+
+- Do not show a pipeline as "running" when the backend job is disconnected or
+  stale without labeling that state.
+- Do not animate every stage at once.
+- Do not use celebratory, game-like, or decorative motion in the operator
+  console.
+- Do not hide failures behind a generic progress bar.
+- Do not make logs, findings, or recovery harder to reach than they are from
+  the timeline or service cards.
+- Do not use a pipeline as the only representation of deployment state; keep a
+  textual timeline or detail view available for accessibility and scanning.
+
 ## Back to top
 
 Long pages such as Dashboard, Logs, Audit, Diagnostics, and Docs may use a

@@ -109,6 +109,7 @@ nav:
       - Modular Bash architecture: development/modular-bash-architecture.md
       - Phase 3 Python migration: development/phase-3-python-migration.md
       - Web console design pattern: development/web-console-design-pattern.md
+      - Job control plane: development/job-control-plane.md
       - Phase 3 promotion gates: development/phase-3-promotion-gates.md
       - Phase 3 preview release notes: releases/phase-3-preview.md
       - Phase 4 preview release notes: releases/phase-4-preview.md

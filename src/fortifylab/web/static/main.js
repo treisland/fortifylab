@@ -61,6 +61,7 @@ const store = {
   lifecycleAudit: null,
   operationJobs: null,
   guidedJourney: null,
+  pipeline: null,
   helpTopics: null,
   recoveryState: null,
 };
@@ -630,8 +631,8 @@ function renderSummary() {
 }
 
 function activeJob() {
-  const jobs = store.operationJobs?.jobs || [];
-  return jobs.find((job) => ["queued", "running"].includes(job.status)) || null;
+  const jobs = store.operationJobs?.active_jobs || store.operationJobs?.jobs || [];
+  return jobs.find((job) => ["queued", "running", "waiting"].includes(job.status)) || null;
 }
 
 function renderDashboard() {
@@ -751,6 +752,46 @@ function renderDashboardRecovery() {
     ${entries.length ? `<ul class="card-list">${entries.map((entry) => `<li class="card-row"><div class="row-main"><strong>${escapeHtml(entry.action_label || friendlyAuditAction(entry.action, entry.operation_id))}</strong>${pill(entry.status || entry.state || "unknown")}</div><div class="row-note">${escapeHtml(entry.summary || entry.message || entry.timestamp || "Recent activity")}</div></li>`).join("")}</ul>` : ""}
     <div class="dashboard-actions"><button type="button" class="secondary-action" data-open-workspace="diagnostics">Diagnostics</button><button type="button" class="secondary-action" data-open-workspace="audit">Audit</button></div>` : empty("No recovery suggestions or recent audit entries yet.");
   bindWorkspaceLinks();
+}
+
+function renderPipeline(data) {
+  const stages = data?.stages || [];
+  const progress = data?.progress || {};
+  setText("pipeline-progress", stages.length ? `${progress.percent || 0}%` : "Waiting");
+  target("pipeline").innerHTML = stages.length ? `
+    <div class="pipeline-strip" style="--pipeline-progress: ${Number(progress.percent || 0)}%">
+      <div class="pipeline-track" aria-hidden="true"><span></span></div>
+      <ol class="pipeline-stages" aria-label="Guided deployment stages">
+        ${stages.map(renderPipelineStage).join("")}
+      </ol>
+    </div>
+    <div class="pipeline-footer">
+      <span>${escapeHtml(progress.complete || 0)} of ${escapeHtml(progress.total || stages.length)} stages complete</span>
+      <button type="button" class="secondary-action" data-open-workspace="logs">Open logs</button>
+      <button type="button" class="secondary-action" data-open-workspace="diagnostics">Diagnostics</button>
+    </div>` : empty("Pipeline stages will appear when the guided profile is available.");
+  bindPipelineControls();
+  bindWorkspaceLinks();
+}
+
+function renderPipelineStage(stage) {
+  const active = store.pipeline?.active_stage_id === stage.id;
+  const actions = stage.actions || [];
+  const panel = actions.includes("view-diagnostics") ? "diagnostics" : actions.includes("view-logs") ? "logs" : "guided";
+  return `<li class="pipeline-stage is-${escapeHtml(stage.state || "pending")} ${active ? "is-active" : ""}">
+    <button type="button" data-pipeline-panel="${escapeHtml(panel)}" aria-label="Open ${escapeHtml(stage.label || "stage")}">
+      <span class="pipeline-node">${escapeHtml(stage.index || "")}</span>
+      <strong>${escapeHtml(stage.label || stage.id || "Stage")}</strong>
+      <small>${escapeHtml(stage.detail || "Waiting for live evidence.")}</small>
+      <em>${escapeHtml((stage.pods || []).length)} pods · ${escapeHtml(stage.finding_count || 0)} findings</em>
+    </button>
+  </li>`;
+}
+
+function bindPipelineControls() {
+  for (const button of document.querySelectorAll("[data-pipeline-panel]")) {
+    button.addEventListener("click", () => setWorkspace(button.dataset.pipelinePanel || "guided"));
+  }
 }
 
 function renderDeployment(data) {
@@ -1590,7 +1631,7 @@ async function loadPanel(key, path, render) {
       renderLifecycleAudit({ entries: [], placeholder: "Lifecycle audit endpoint is not available yet." });
       return true;
     }
-    const panelMap = { config: "configuration", diagnostics: "health", deploymentStatus: "workspace", guide: "deployment", guidedJourney: "guided", status: "summary-state", routes: "routes", securityPosture: "security" };
+    const panelMap = { config: "configuration", diagnostics: "health", deploymentStatus: "workspace", guide: "deployment", pipeline: "pipeline", guidedJourney: "guided", status: "summary-state", routes: "routes", securityPosture: "security" };
     fail(panelMap[key] || key, error);
     return false;
   }
@@ -1625,6 +1666,7 @@ async function refreshConsole(options = {}) {
       loadPanel("guidedJourney", "/api/guided/journey", renderGuidedJourney),
       loadPanel("deploymentStatus", "/api/deployment/status", () => {}),
       loadPanel("guide", "/api/deployment/guide", renderDeployment),
+      loadPanel("pipeline", "/api/pipeline/guided", renderPipeline),
       loadPanel("config", "/api/config", renderConfiguration),
       loadPanel("diagnostics", "/api/deployment/diagnostics", renderDiagnostics),
       loadPanel("logs", "/api/deployment/logs", renderLogs),
@@ -1635,12 +1677,13 @@ async function refreshConsole(options = {}) {
       loadPanel("securityPosture", "/api/security/posture", renderSecurityPosture),
       loadPanel("lifecycleActions", "/api/lifecycle/actions", renderLifecycleActions),
       loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit),
-      loadPanel("operationJobs", "/api/operations/jobs", () => {}),
+      loadPanel("operationJobs", "/api/jobs", () => {}),
       loadOptionalPanel("helpTopics", "/api/help/topics", renderHelp, fallbackHelpTopics),
       loadOptionalPanel("recoveryState", "/api/recovery/state", () => renderHelp(store.helpTopics || fallbackHelpTopics()), () => ({})),
     ]);
 
     renderSummary();
+    if (store.pipeline) renderPipeline(store.pipeline);
     renderWorkspace();
     renderRoutes();
     if (store.logs) renderLogs(store.logs);
