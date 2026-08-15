@@ -17,9 +17,7 @@ manual recovery over unattended production automation.
 
 ## Branching model
 
-`integration/phase-3` is the active Python migration runway. It starts from
-`integration/phase-2` and includes the full Phase 2 stack. Feature branches for
-Phase 3 should target `integration/phase-3`.
+`integration/cli-phases-2.7-3.6` is the active CLI-focused Python migration runway. It starts from current `dev`, restores the accepted Phase 2 stack, and includes Phase 3.0 through Phase 3.6 only.
 
 `dev` and `main` stay untouched until manual testing accepts the integrated
 Phase 3 branch.
@@ -27,7 +25,7 @@ Phase 3 branch.
 Promotion flow:
 
 ```text
-agent/phase-3.x-* -> integration/phase-3 -> dev -> main
+agent/phase-3.x-* -> integration/cli-phases-2.7-3.6 -> dev -> main
 ```
 
 ## Runtime direction
@@ -44,8 +42,7 @@ Preferred order:
 5. Python configuration engine.
 6. Python diagnostics engine.
 7. Python replacement of deployment operations.
-8. Remote LAN companion web console.
-9. Packaging and upgrade hardening.
+8. Packaging and upgrade hardening after the CLI/TUI path is stable.
 
 ## Guided TUI prototype
 
@@ -109,16 +106,16 @@ step, auto-advance preference, diagnostics paths, and wizard log references.
 Forbidden local state includes credentials, decoded Secrets, licenses, registry
 tokens, private TLS keys, database exports, and raw application logs.
 
-## Web console posture
+## CLI/TUI posture
 
-The companion web console is a later Phase 3 deliverable after the Python core is
-solid. Remote LAN access is allowed only through explicit operator enablement,
-with a generated access token and clear lab-network warnings. The console must
-not show secret values by default.
+Fortify Lab remains a CLI/TUI-first operator. The Python runtime should improve
+guided deployment, configuration, diagnostics, runbooks, and operation commands
+without becoming a replacement for Kubernetes-native operator consoles. Browser-based
+Fortify Lab management is out of scope for this Phase 3 integration.
 
 ## Manual test gates
 
-Before promoting `integration/phase-3` to `dev`, manually test at least:
+Before promoting `integration/cli-phases-2.7-3.6` to `dev`, manually test at least:
 
 - guided deployment profile selection;
 - smooth wait-screen behavior and auto-advance takeover;

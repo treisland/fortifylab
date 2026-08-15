@@ -19,7 +19,7 @@ single binary.
 
 Fortify Lab will migrate its application runtime to Python during Phase 3.
 Python is the accepted implementation language for the new core engine, CLI,
-guided TUI, diagnostics, configuration engine, and later companion web console.
+guided TUI, diagnostics, configuration engine, and operation command layer.
 
 The repository remains clone-and-run in Phase 3. Packaging formats such as
 `pipx`, `.deb`, containers, or single-file binaries are deferred until the
@@ -38,8 +38,8 @@ place where application logic lives.
   behind Python commands.
 - Tests must cover both the compatibility wrappers and the Python behavior they
   call.
-- The companion web console waits until the Python core is solid enough to avoid
-  duplicating shell behavior.
+- Fortify Lab remains CLI/TUI-focused; full visual cluster management stays with
+  Kubernetes-native tools such as the Kubernetes Dashboard or Rancher.
 
 ## Alternatives considered
 
@@ -79,17 +79,17 @@ contents, registry tokens, TLS private keys, or raw application logs.
 
 ## Integration runway
 
-Phase 3 implementation PRs target `integration/phase-3`. That branch was created
-from `integration/phase-2` so Python migration work includes all accepted Phase
+Phase 3 implementation PRs target `integration/cli-phases-2.7-3.6`. That branch was created
+from current `dev` and integrates accepted Phase 2 and Phase 3.0-3.6 work so Python migration work includes all accepted Phase
 2 behavior without touching `dev` or `main`.
 
 Promotion sequence:
 
-1. Merge Phase 3 feature PRs into `integration/phase-3`.
+1. Merge Phase 3 feature PRs into `integration/cli-phases-2.7-3.6`.
 2. Manually test customer demo and workshop/classroom scenarios from
-   `integration/phase-3`.
-3. Open a PR from `integration/phase-3` to `dev` only after manual validation.
+   `integration/cli-phases-2.7-3.6`.
+3. Open a PR from `integration/cli-phases-2.7-3.6` to `dev` only after manual validation.
 4. Promote `dev` to `main` after a second acceptance pass.
 
-Failed Phase 3 slices should be reverted or amended on `integration/phase-3`.
+Failed Phase 3 slices should be reverted or amended on `integration/cli-phases-2.7-3.6`.
 Do not repair the integration branch by pushing directly to `dev` or `main`.

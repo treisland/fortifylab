@@ -46,8 +46,8 @@ class Phase3ArchitectureTests(unittest.TestCase):
     def test_phase3_integration_runway_avoids_dev_and_main_until_manual_acceptance(self) -> None:
         text = ADR.read_text(encoding="utf-8") + GUIDE.read_text(encoding="utf-8")
         for phrase in (
-            "integration/phase-3",
-            "integration/phase-2",
+            "integration/cli-phases-2.7-3.6",
+            "Phase 3.0-3.6",
             "customer demo",
             "workshop/classroom",
             "dev",
@@ -61,7 +61,8 @@ class Phase3ArchitectureTests(unittest.TestCase):
         guide = GUIDE.read_text(encoding="utf-8")
         self.assertIn("Phase 3 Python migration: development/phase-3-python-migration.md", nav)
         self.assertIn("guided deployment profile selection", guide)
-        self.assertIn("Remote LAN access", guide)
+        self.assertIn("CLI/TUI-first operator", guide)
+        self.assertIn("Fortify Lab management is out of scope", guide)
 
 
 if __name__ == "__main__":
