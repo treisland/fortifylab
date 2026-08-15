@@ -9,6 +9,8 @@ import unittest
 import subprocess
 from pathlib import Path
 
+from tests.wizard_source import read_wizard_source
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,8 +21,25 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn('FORTIFY_SSC_CHART_VERSION="26.2.0-1"', environment)
         self.assertIn('FORTIFY_SCSAST_CHART_VERSION="26.2.0-1"', environment)
 
+    def test_wizard_entrypoint_loads_modules_explicitly(self) -> None:
+        entrypoint = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        module_dir = ROOT / "scripts" / "wizard"
+        expected_modules = (
+            "env.sh",
+            "app-registry.sh",
+            "operations.sh",
+            "guided.sh",
+            "runbooks.sh",
+            "menu.sh",
+        )
+        self.assertIn("source_wizard_module()", entrypoint)
+        for module in expected_modules:
+            self.assertTrue((module_dir / module).exists(), module)
+            self.assertIn(f"source_wizard_module {module}", entrypoint)
+        self.assertLess(len(entrypoint.splitlines()), 250)
+
     def test_dependency_waits_abort_the_deployment(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         for gate in ("mysql", "postgresql", "ssc", "lim"):
             self.assertIn(f"{gate}_ready()", wizard)
         for probe in (
@@ -37,7 +56,7 @@ class WizardContractTests(unittest.TestCase):
         self.assertNotIn('"pod/$pod" || true', wizard)
 
     def test_fresh_install_refuses_existing_managed_releases(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         self.assertIn("fresh_deployment_guard()", wizard)
         self.assertIn("Managed releases already exist", wizard)
         self.assertIn("Resume or repair deployment", wizard)
@@ -56,7 +75,7 @@ class WizardContractTests(unittest.TestCase):
         self.assertFalse(any(path.startswith("apps/sonatype/") for path in tracked))
 
     def test_credentials_are_not_printed_or_passed_to_helm(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         sast = (ROOT / "apps/scsast/start.sh").read_text(encoding="utf-8")
         app_credentials = wizard.split("show_app_creds()", 1)[1].split(
             "# License menu", 1
@@ -191,7 +210,7 @@ class WizardContractTests(unittest.TestCase):
             self.assertIn("fortify_ensure_coredns_lab_hosts", script, relative)
 
     def test_wizard_dns_uses_shared_coredns_helper(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         helper = (ROOT / "scripts/lib/coredns-lab-hosts.sh").read_text(encoding="utf-8")
         self.assertIn("scripts/lib/coredns-lab-hosts.sh", wizard)
         self.assertIn("fortify_ensure_coredns_lab_hosts || return 1", wizard)
@@ -199,7 +218,7 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn("ScanCentral SAST workers call", wizard)
 
     def test_guided_status_surfaces_endpoint_and_hostname_detail(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         self.assertIn("guided_component_endpoint_detail", wizard)
         self.assertIn("health_http_detail", wizard)
         self.assertIn("FORTIFY_HEALTH_HTTP_MAX_TIME=3", wizard)
@@ -220,7 +239,7 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn("TRAEFIK DEFAULT CERT", create_secrets)
 
     def test_registry_credentials_refresh_before_image_pull_steps(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         create_secrets = (ROOT / "scripts" / "create-secrets.sh").read_text(encoding="utf-8")
         helper = (ROOT / "scripts" / "lib" / "registry-credentials.sh").read_text(encoding="utf-8")
         self.assertIn('source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"', wizard)
@@ -358,7 +377,7 @@ exit 1
 
 
     def test_fcli_tools_menu_is_warning_only_and_version_pinned(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         environment = (ROOT / ".env.example").read_text(encoding="utf-8")
         self.assertIn('FORTIFY_RECOMMENDED_FCLI_VERSION="3.23.3"', environment)
         self.assertIn('FORTIFY_FCLI_INSTALL_DIR="$HOME/fortify/tools/bin"', environment)
@@ -397,7 +416,7 @@ exit 1
         self.assertNotIn("actual-fod-secret", output)
 
     def test_sample_apps_have_isolated_lifecycle_contracts(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         environment = (ROOT / ".env.example").read_text(encoding="utf-8")
         hosts = (ROOT / "scripts" / "lib" / "coredns-lab-hosts.sh").read_text(encoding="utf-8")
         for expected in (

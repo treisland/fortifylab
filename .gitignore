@@ -43,3 +43,6 @@ apps/scdast/core/DefaultData.zip
 
 # Local/scratch test values
 apps/scdast/scanner/values_test.yaml
+# Local/private runbooks
+runbooks/local/*
+!runbooks/local/README.md

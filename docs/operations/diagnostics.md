@@ -27,6 +27,7 @@ Every archive contains exactly:
 
 - `README.txt`: lab-use warning, UTC creation time, included evidence, and exclusions;
 - `deployment-plan.txt`: dependency order and preview-only statement;
+- `cluster-profile.txt`: selected advanced cluster profile, expected kube context, SSH host label, storage class, and ingress mode;
 - `doctor-summary.txt`: compact read-only health summary ordered by dependency;
 - `network-diagnostics.txt`: host resolution, CoreDNS drift status, ingress class,
   service endpoint, and HTTP status-only checks;

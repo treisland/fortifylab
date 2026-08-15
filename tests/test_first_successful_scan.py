@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE = ROOT / "docs" / "operations" / "first-scan.md"
 SAMPLE = ROOT / "docs" / "examples" / "sast" / "SyntheticGreeting.java"
+EXAMPLE_GENERATOR = ROOT / "docs" / "examples" / "first-scan" / "generate-first-scan-scripts.sh"
 
 
 class FirstSuccessfulScanDocumentationTests(unittest.TestCase):
@@ -51,6 +52,30 @@ class FirstSuccessfulScanDocumentationTests(unittest.TestCase):
         self.assertIn("`Running` pod", self.guide)
         self.assertIn("Zero findings are acceptable", self.guide)
         self.assertIn("no SSC-visible record is not success", self.guide)
+
+    def test_includes_placeholder_command_handoff_examples(self):
+        self.assertIn("docs/examples/first-scan", self.guide)
+        self.assertIn("first-sast-scan.sh", self.guide)
+        self.assertIn("first-dast-scan.sh", self.guide)
+        self.assertIn("SSC as the primary result destination", self.guide)
+        self.assertIn("FoD only", self.guide)
+        self.assertIn("Sample applications", self.guide)
+        self.assertIn("JUICE_SHOP_URL", self.guide)
+        generator = EXAMPLE_GENERATOR.read_text(encoding="utf-8")
+        for placeholder in (
+            "SSC_URL",
+            "SCSAST_CTRL_URL",
+            "SSC_CITOKEN",
+            "SCSAST_CLIENT_AUTH_TOKEN",
+            "AUTHORIZED_DAST_URL",
+            "DAST_AUTHORIZATION_NOTE",
+        ):
+            self.assertIn(placeholder, generator)
+        self.assertIn("FoD is optional", generator)
+        self.assertIn("JUICE_SHOP_URL", generator)
+        self.assertIn("AUTHORIZED_DAST_URL:=${JUICE_SHOP_URL:-}", generator)
+        self.assertNotIn("SSC_CITOKEN=", generator)
+        self.assertNotIn("SCSAST_CLIENT_AUTH_TOKEN=", generator)
 
     def test_links_failure_boundaries_to_troubleshooting(self):
         self.assertGreaterEqual(self.guide.count("troubleshooting.md#"), 10)
