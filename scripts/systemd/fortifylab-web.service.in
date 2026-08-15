@@ -1,0 +1,19 @@
+[Unit]
+Description=FortifyLab Web Console
+Documentation=https://treisland.github.io/fortifylab/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/fortifylab
+Environment=FORTIFY_HOME_K8S=%h/fortifylab
+EnvironmentFile=-%h/fortifylab/.env
+ExecStart=%h/fortifylab/scripts/fortifylab-web-service.sh
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

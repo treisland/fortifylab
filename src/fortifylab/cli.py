@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import sys
 import time
 
@@ -81,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--port", type=int, default=8765, help="web console port")
             sub.add_argument("--allow-lan", action="store_true", help="allow LAN binding when an access token is configured")
             sub.add_argument("--token", help="web console access token")
+            sub.add_argument("--token-file", help="read the web console access token from this file")
+            sub.add_argument("--tls-cert", help="PEM certificate for HTTPS serving")
+            sub.add_argument("--tls-key", help="PEM private key for HTTPS serving")
+            sub.add_argument("--lab-host", help="public lab console hostname, such as lab.example.internal")
+            sub.add_argument("--lab-url", help="public lab console URL shown in status output")
             sub.add_argument("--enable-actions", action="store_true", help="enable web action execution previews")
             web_subparsers = sub.add_subparsers(dest="web_command", metavar="WEB_COMMAND")
             serve = web_subparsers.add_parser("serve", help="serve the companion web console", description="serve the companion web console")
@@ -88,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
             serve.add_argument("--port", type=int, default=8765, help="web console port")
             serve.add_argument("--allow-lan", action="store_true", help="allow LAN binding when an access token is configured")
             serve.add_argument("--token", help="web console access token")
+            serve.add_argument("--token-file", help="read the web console access token from this file")
+            serve.add_argument("--tls-cert", help="PEM certificate for HTTPS serving")
+            serve.add_argument("--tls-key", help="PEM private key for HTTPS serving")
+            serve.add_argument("--lab-host", help="public lab console hostname, such as lab.example.internal")
+            serve.add_argument("--lab-url", help="public lab console URL shown in status output")
             serve.add_argument("--enable-actions", action="store_true", help="enable web action execution previews")
             serve.add_argument("--once", action="store_true", help="serve one request for smoke tests")
         if name == "tui":
@@ -97,6 +108,39 @@ def build_parser() -> argparse.ArgumentParser:
                 help="render a deterministic guided deployment prototype screen",
             )
     return parser
+
+
+def _read_token_file(path: str | None) -> tuple[str | None, str | None]:
+    if not path:
+        return None, None
+    token_path = Path(path).expanduser()
+    try:
+        token = token_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        return None, f"Could not read web console token file: {exc}"
+    if not token:
+        return None, f"Web console token file is empty: {token_path}"
+    return token, None
+
+
+def _web_config_from_args(args: argparse.Namespace) -> tuple[WebConsoleConfig | None, str | None]:
+    file_token, token_error = _read_token_file(getattr(args, "token_file", None))
+    if token_error:
+        return None, token_error
+    token = getattr(args, "token", None) or file_token
+    tls_cert = Path(args.tls_cert).expanduser() if getattr(args, "tls_cert", None) else None
+    tls_key = Path(args.tls_key).expanduser() if getattr(args, "tls_key", None) else None
+    return WebConsoleConfig(
+        bind_host=args.bind,
+        port=args.port,
+        allow_lan=args.allow_lan,
+        access_token=token,
+        enable_actions=args.enable_actions,
+        tls_cert=tls_cert,
+        tls_key=tls_key,
+        lab_host=getattr(args, "lab_host", None),
+        lab_url=getattr(args, "lab_url", None),
+    ), None
 
 
 def adapter_step_ids() -> set[str]:
@@ -221,10 +265,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{index}. {step.step_id}: {' '.join(step.command)} (depends on: {deps})")
         return 0
     if args.command == "web" and getattr(args, "web_command", None) == "serve":
-        config = WebConsoleConfig(bind_host=args.bind, port=args.port, allow_lan=args.allow_lan, access_token=args.token, enable_actions=args.enable_actions)
+        config, error = _web_config_from_args(args)
+        if error:
+            print(error)
+            return 1
         return serve_web_console(config, once=args.once)
     if args.command == "web" and args.check:
-        config = WebConsoleConfig(bind_host=args.bind, port=args.port, allow_lan=args.allow_lan, access_token=args.token, enable_actions=args.enable_actions)
+        config, error = _web_config_from_args(args)
+        if error:
+            print(error)
+            return 1
         issues = config.validate()
         if issues:
             for issue in issues:

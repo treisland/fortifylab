@@ -24,6 +24,10 @@ class WebConsoleConfig:
     allow_lan: bool = False
     env_file: Path | None = None
     enable_actions: bool = False
+    tls_cert: Path | None = None
+    tls_key: Path | None = None
+    lab_host: str | None = None
+    lab_url: str | None = None
 
     def validate(self) -> tuple[str, ...]:
         issues: list[str] = []
@@ -31,7 +35,23 @@ class WebConsoleConfig:
             issues.append("LAN access requires an access token.")
         if self.bind_host not in ("127.0.0.1", "localhost") and not self.allow_lan:
             issues.append("Non-local bind requires allow_lan=True.")
+        if bool(self.tls_cert) != bool(self.tls_key):
+            issues.append("TLS serving requires both tls_cert and tls_key.")
+        if self.tls_cert and not self.tls_cert.is_file():
+            issues.append(f"TLS certificate file not found: {self.tls_cert}")
+        if self.tls_key and not self.tls_key.is_file():
+            issues.append(f"TLS private key file not found: {self.tls_key}")
         return tuple(issues)
+
+    def tls_enabled(self) -> bool:
+        return bool(self.tls_cert and self.tls_key)
+
+    def public_url(self) -> str:
+        if self.lab_url:
+            return self.lab_url
+        scheme = "https" if self.tls_enabled() else "http"
+        host = self.lab_host or self.bind_host
+        return f"{scheme}://{host}:{self.port}"
 
 
 class WebConsoleApp:
@@ -179,9 +199,13 @@ class WebConsoleApp:
         return {
             "console": {
                 "bind_host": self.config.bind_host,
+                "public_url": self.config.public_url(),
                 "local_only": self.is_local_only(),
                 "lan_access": self.config.allow_lan,
                 "token_required": bool(self.config.access_token),
+                "tls_enabled": self.config.tls_enabled(),
+                "tls_cert_configured": bool(self.config.tls_cert),
+                "tls_key_configured": bool(self.config.tls_key),
             },
             "actions": self.action_security_payload(),
             "boundaries": [

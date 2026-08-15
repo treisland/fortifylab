@@ -22,7 +22,8 @@ fortify_tls_lab_hosts() {
         "${LIM:-lim.${DOMAIN:?DOMAIN is required}}" \
         "${SCSAST:-sast.${DOMAIN:?DOMAIN is required}}" \
         "${SCDAST:-dast.${DOMAIN:?DOMAIN is required}}" \
-        "dashboard.${DOMAIN:?DOMAIN is required}" |
+        "dashboard.${DOMAIN:?DOMAIN is required}" \
+        "${LAB_HOST:-lab.${DOMAIN:?DOMAIN is required}}" |
         awk 'NF && !seen[$0]++'
 }
 
