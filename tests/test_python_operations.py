@@ -119,6 +119,15 @@ class PythonOperationsTests(unittest.TestCase):
         self.assertFalse(job.execution.executed if job.execution else True)
         self.assertIn("Dry run", job.message)
         self.assertEqual([entry.action for entry in job.audit], ["job.queued", "job.started", "job.finished"])
+        payload = job.to_api_dict()
+        self.assertEqual(payload["action_label"], "Stop ssc")
+        self.assertEqual(payload["resource"], "ssc")
+        self.assertEqual(payload["operator"], "web console")
+        self.assertIn("Stop ssc", payload["summary"]["title"])
+        self.assertNotIn("command_preview", payload)
+        self.assertIn("Stop ssc", payload["audit"][0]["action_label"])
+        self.assertEqual(payload["audit"][0]["resource"], "ssc")
+        self.assertIn("Stop ssc", payload["audit"][0]["summary"])
 
     def test_job_manager_prevents_duplicate_active_operation(self) -> None:
         release = threading.Event()

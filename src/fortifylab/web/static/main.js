@@ -7,6 +7,7 @@ let focusedPlaceholder = null;
 let selectedLifecycleActionId = null;
 let lifecycleSubmitting = false;
 let panelFocusClosing = false;
+let confirmingLifecycleActionId = null;
 const expandedLogIds = new Set();
 let followedLogActionId = null;
 let logFollowTimer = null;
@@ -449,9 +450,11 @@ function renderRoutes() {
     setText("launchpad-count", `${health.length} services`);
     target("routes").innerHTML = `<ul class="service-grid">${health.map((service) => {
       const state = serviceState(service);
-      const history = uptimeHistory(state, service.service_id);
+      const lifecycle = lifecycleHintForService(service);
+      const displayState = lifecycle?.state || state;
+      const history = uptimeHistory(displayState, service.service_id);
       return `<li class="service-card">
-        <div class="row-main"><strong>${escapeHtml(service.label || service.service_id || "Service")}</strong>${pill(state)}</div>
+        <div class="row-main"><strong>${escapeHtml(service.label || service.service_id || "Service")}</strong>${pill(displayState)}</div>
         ${service.url ? `<a href="${escapeHtml(service.url)}" target="_blank" rel="noreferrer">${escapeHtml(service.url)}</a>` : `<span class="row-note">No URL reported.</span>`}
         <div class="uptime-strip" aria-label="${escapeHtml(service.label || service.service_id || "Service")} health history">${history.map((entry) => `<span data-state="${escapeHtml(entry)}"></span>`).join("")}</div>
         <div class="service-meta">
@@ -460,7 +463,7 @@ function renderRoutes() {
           ${checkPill(service, "tls")}
           ${checkPill(service, "ingress")}
         </div>
-        ${renderServiceHint(service)}
+        ${renderServiceHint(service, lifecycle)}
       </li>`;
     }).join("")}</ul>`;
     return;
@@ -494,6 +497,136 @@ function serviceState(service) {
   return "unknown";
 }
 
+function lifecycleHintForService(service) {
+  const key = serviceLifecycleKey(service);
+  if (!key) return null;
+  const record = latestLifecycleRecordForKey(key);
+  if (!record) return null;
+  const status = String(record.status || record.state || "").toLowerCase();
+  const action = record.lifecycle_action;
+  const complete = status === "complete";
+  if (["failed", "rejected"].includes(status)) {
+    return {
+      state: "action failed",
+      title: "Recent lifecycle action failed",
+      message: `${record.label} did not complete. Review Action Audit before retrying.`,
+    };
+  }
+  if (["queued", "running"].includes(status)) {
+    return {
+      state: "changing",
+      title: "Lifecycle action in progress",
+      message: `${record.label} is ${status}. Service health will refresh when the action finishes.`,
+    };
+  }
+  if (complete && action === "destroy") {
+    return {
+      state: "expected-not-deployed",
+      title: "Intentionally destroyed",
+      message: `${record.resourceLabel} was destroyed from lifecycle controls. Start it again to recreate the deployment.`,
+    };
+  }
+  if (complete && action === "stop") {
+    return {
+      state: "expected-stopped",
+      title: key === "cluster" ? "Lab intentionally stopped" : "Intentionally stopped",
+      message: `${record.resourceLabel} was stopped from lifecycle controls. Start it again when you are ready.`,
+    };
+  }
+  if (complete && action === "start") {
+    return {
+      state: null,
+      title: "Recently started",
+      message: `${record.resourceLabel} was started from lifecycle controls. Monitoring is verifying readiness.`,
+    };
+  }
+  return null;
+}
+
+function serviceLifecycleKey(service) {
+  const values = [
+    service.service_id,
+    service.label,
+    service.host,
+    service.url,
+    Object.values(service.checks || {}).map((check) => check.message || "").join(" "),
+  ].join(" ").toLowerCase();
+  const aliases = [
+    ["ssc", ["ssc", "software security center", "ssc-webapp"]],
+    ["lim", ["lim", "license and infrastructure manager"]],
+    ["mysql", ["mysql"]],
+    ["postgresql", ["postgresql", "postgres"]],
+    ["scsast", ["scsast", "scancentral sast", "sast controller"]],
+    ["scdast-core", ["scdast-core", "scancentral dast", "dast core", "dast"]],
+    ["scdast-scanner", ["scdast-scanner", "dast scanner"]],
+  ];
+  const match = aliases.find(([, names]) => names.some((name) => values.includes(name)));
+  return match ? match[0] : null;
+}
+
+function latestLifecycleRecordForKey(key) {
+  const records = lifecycleRecords()
+    .filter((record) => recordMatchesLifecycleKey(record, key) || recordMatchesLifecycleKey(record, "cluster"))
+    .sort((left, right) => lifecycleRecordTime(right) - lifecycleRecordTime(left));
+  return records[0] || null;
+}
+
+function lifecycleRecords() {
+  const jobs = (store.operationJobs?.jobs || []).map((job) => lifecycleRecordFromJob(job));
+  const audit = (store.lifecycleAudit?.entries || []).map((entry) => lifecycleRecordFromAudit(entry));
+  return [...jobs, ...audit].filter(Boolean);
+}
+
+function lifecycleRecordFromJob(job) {
+  const parsed = parseLifecycleOperation(job.operation_id);
+  if (!parsed) return null;
+  return {
+    ...parsed,
+    status: job.status,
+    timestamp: job.finished_at || job.started_at || job.created_at || job.timestamp,
+    label: job.action_label || friendlyLifecycleLabel(parsed),
+    resourceLabel: job.resource || parsed.resourceLabel,
+  };
+}
+
+function lifecycleRecordFromAudit(entry) {
+  const parsed = parseLifecycleOperation(entry.operation_id);
+  if (!parsed) return null;
+  return {
+    ...parsed,
+    status: entry.status || entry.state,
+    timestamp: entry.timestamp,
+    label: entry.action_label || friendlyLifecycleLabel(parsed),
+    resourceLabel: entry.resource || parsed.resourceLabel,
+  };
+}
+
+function parseLifecycleOperation(operationId) {
+  const parts = String(operationId || "").split(".");
+  if (parts[0] === "app" && parts.length >= 3) {
+    return { scope: "application", resourceKey: parts[1], lifecycle_action: parts[2], resourceLabel: pretty(parts[1]) };
+  }
+  if (parts[0] === "cluster" && parts.length >= 2) {
+    return { scope: "cluster", resourceKey: "cluster", lifecycle_action: parts[1], resourceLabel: "MicroK8s cluster" };
+  }
+  return null;
+}
+
+function recordMatchesLifecycleKey(record, key) {
+  if (!record) return false;
+  if (key === "cluster") return record.resourceKey === "cluster";
+  return record.resourceKey === key;
+}
+
+function lifecycleRecordTime(record) {
+  const time = Date.parse(record?.timestamp || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+function friendlyLifecycleLabel(record) {
+  return `${pretty(record.lifecycle_action || "Lifecycle")} ${record.resourceLabel || "resource"}`;
+}
+
 function checkPill(service, key) {
   const check = service.checks?.[key];
   if (!check) return pill(`${key} unknown`);
@@ -508,7 +641,10 @@ function uptimeHistory(state, seed) {
   return base;
 }
 
-function renderServiceHint(service) {
+function renderServiceHint(service, lifecycle) {
+  if (lifecycle) {
+    return `<div class="service-lifecycle-note"><strong>${escapeHtml(lifecycle.title)}</strong><span>${escapeHtml(lifecycle.message)}</span></div>`;
+  }
   const hint = (service.hints || [])[0];
   if (!hint) return "";
   return `<div class="row-note">${escapeHtml(hint.message || "Health check needs attention.")}</div>`;
@@ -608,8 +744,10 @@ function renderConfirmationControl(action) {
   if (!confirmation.required) {
     return `<div class="confirmation-note">No typed confirmation required.</div>`;
   }
-  const inputId = `confirm-${domId(action.id)}`;
-  return `<label class="confirmation-label" for="${escapeHtml(inputId)}">Required phrase</label><input id="${escapeHtml(inputId)}" data-confirmation-for="${escapeHtml(action.id)}" type="text" placeholder="${escapeHtml(confirmation.phrase || "Enter confirmation phrase")}" autocomplete="off">`;
+  if (confirmingLifecycleActionId !== action.id) {
+    return `<div class="confirmation-note guarded-note">Destructive action. Review impact before continuing.</div>`;
+  }
+  return renderGuardedConfirmation(action);
 }
 
 function actionCanRun(action) {
@@ -620,23 +758,54 @@ function renderActionButton(action, payload) {
   if (!actionCanRun(action)) {
     return `<button type="button" class="disabled-action" disabled>${payload.execute_endpoint ? "Execution unavailable" : "Preview only"}</button>`;
   }
+  if (action.confirmation?.required) {
+    if (confirmingLifecycleActionId === action.id) return "";
+    return `<button type="button" class="secondary-action guarded-action" data-open-lifecycle-confirmation="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>Review ${escapeHtml(action.label || "destructive action")}</button>`;
+  }
   const label = action.mutates ? `Run ${action.label || "action"}` : action.kind === "logs" ? "View logs" : `Run ${action.label || "read-only action"}`;
   return `<button type="button" class="primary-action" data-run-lifecycle-action="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>${escapeHtml(label)}</button>`;
 }
 
-async function waitForJob(jobId) {
+function mergeOperationJob(job) {
+  if (!job) return null;
+  const existingJobs = store.operationJobs?.jobs || [];
+  store.operationJobs = { jobs: [job, ...existingJobs.filter((item) => item.job_id !== job.job_id)] };
+  return job;
+}
+
+function isTerminalJob(job) {
+  return Boolean(job && !["queued", "running"].includes(job.status));
+}
+
+async function waitForJob(jobId, options = {}) {
   if (!jobId) return null;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  const attempts = options.attempts ?? 120;
+  const delayMs = options.delayMs ?? 1000;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     const data = await loadJson(`/api/operations/jobs/${encodeURIComponent(jobId)}`);
     const job = data.job;
-    if (job && !["queued", "running"].includes(job.status)) return job;
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    if (job) {
+      mergeOperationJob(job);
+      if (typeof options.onUpdate === "function") options.onUpdate(job);
+      if (isTerminalJob(job)) return job;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
   }
-  return null;
+  return latestJobById(jobId);
 }
-async function submitLifecycleAction(action, payload) {
-  const confirmation = confirmationValueFor(action.id);
+function latestJobById(jobId) {
+  const jobs = store.operationJobs?.jobs || [];
+  return jobs.find((job) => job.job_id === jobId) || null;
+}
+
+async function refreshOperationSurface() {
+  await refreshConsole({ force: true });
+}
+
+async function submitLifecycleAction(action, payload, confirmed = false) {
+  const confirmation = confirmationValueFor(action, confirmed);
   lifecycleSubmitting = true;
+  confirmingLifecycleActionId = null;
   renderLifecycleActions(store.lifecycleActions);
   try {
     const jobPayload = await postJson(payload.execute_endpoint || "/api/operations/jobs", {
@@ -644,20 +813,47 @@ async function submitLifecycleAction(action, payload) {
       execute: Boolean(action.mutates && action.execution_enabled),
       confirmation,
     });
-    const finishedJob = await waitForJob(jobPayload.job?.job_id);
-    const job = finishedJob || jobPayload.job;
-    const existingJobs = store.operationJobs?.jobs || [];
-    store.operationJobs = { jobs: [job, ...existingJobs.filter((item) => item.job_id !== job.job_id)] };
+    const queuedJob = mergeOperationJob(jobPayload.job);
+    renderLifecycleActions(store.lifecycleActions);
     await loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit);
+    const finishedJob = await waitForJob(queuedJob?.job_id, {
+      onUpdate: () => {
+        if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
+      },
+    });
+    mergeOperationJob(finishedJob || queuedJob);
+    await refreshOperationSurface();
   } catch (error) {
-    store.operationJobs = { jobs: [{ operation_id: action.id, status: "failed", message: error.message }] };
+    mergeOperationJob({ operation_id: action.id, status: "failed", message: error.message });
+    await loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit);
+    await refreshOperationSurface();
   } finally {
     lifecycleSubmitting = false;
-    renderLifecycleActions(store.lifecycleActions);
+    if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
   }
 }
 
 function bindLifecycleControls(payload) {
+  for (const openButton of document.querySelectorAll("[data-open-lifecycle-confirmation]")) {
+    openButton.addEventListener("click", () => {
+      confirmingLifecycleActionId = openButton.dataset.openLifecycleConfirmation;
+      renderLifecycleActions(store.lifecycleActions);
+    });
+  }
+  for (const cancelButton of document.querySelectorAll("[data-cancel-lifecycle-confirmation]")) {
+    cancelButton.addEventListener("click", () => {
+      if (confirmingLifecycleActionId === cancelButton.dataset.cancelLifecycleConfirmation) {
+        confirmingLifecycleActionId = null;
+      }
+      renderLifecycleActions(store.lifecycleActions);
+    });
+  }
+  for (const confirmButton of document.querySelectorAll("[data-confirm-lifecycle-action]")) {
+    confirmButton.addEventListener("click", () => {
+      const action = (payload.actions || []).find((item) => item.id === confirmButton.dataset.confirmLifecycleAction);
+      if (action && actionCanRun(action)) submitLifecycleAction(action, payload, true);
+    });
+  }
   for (const runButton of document.querySelectorAll("[data-run-lifecycle-action]")) {
     runButton.addEventListener("click", () => {
       const action = (payload.actions || []).find((item) => item.id === runButton.dataset.runLifecycleAction);
@@ -670,7 +866,8 @@ function renderActionPreview(action, payload) {
   const confirmation = action.confirmation || {};
   const latestJob = latestJobForAction(action.id);
   const resource = action.resource || {};
-  return `<article class="action-card ${action.impact === "destructive" ? "is-destructive" : ""}">
+  const confirming = confirmation.required && confirmingLifecycleActionId === action.id;
+  return `<article class="action-card ${action.impact === "destructive" ? "is-destructive" : ""} ${confirming ? "is-confirming" : ""}">
     <div class="action-card-top">
       <div>
         <h4>${escapeHtml(action.label || action.id || "Lifecycle action")}</h4>
@@ -682,37 +879,86 @@ function renderActionPreview(action, payload) {
     ${renderConfirmationControl(action)}
     <div class="action-footer">
       ${renderActionButton(action, payload)}
-      ${latestJob ? `<span class="inline-job-state">${escapeHtml(pretty(latestJob.status || "submitted"))}</span>` : ""}
+      ${latestJob ? `<span class="inline-job-state" data-state="${escapeHtml(latestJob.status || "submitted")}">${escapeHtml(jobStatusLabel(latestJob))}</span>` : ""}
     </div>
     ${latestJob ? `<div class="inline-job-message">${escapeHtml(jobDisplayMessage(latestJob))}</div>` : ""}
   </article>`;
 }
 
-function confirmationValueFor(actionId) {
-  for (const input of document.querySelectorAll("[data-confirmation-for]")) {
-    if (input.dataset.confirmationFor === actionId) return input.value || null;
-  }
-  return null;
+function renderGuardedConfirmation(action) {
+  const label = action.label || "destructive action";
+  const resource = action.resource?.label || action.resource?.id || "this resource";
+  const warning = action.warning || "This can remove deployed resources and may delete data. Use it only when you intend to rebuild or recover the service.";
+  return `<div class="guarded-confirmation" role="group" aria-label="Confirm ${escapeHtml(label)}">
+    <div>
+      <strong>Confirm ${escapeHtml(label)}</strong>
+      <p>${escapeHtml(warning)}</p>
+      <span>Target: ${escapeHtml(resource)}</span>
+    </div>
+    <div class="guarded-actions">
+      <button type="button" class="secondary-action" data-cancel-lifecycle-confirmation="${escapeHtml(action.id)}">Cancel</button>
+      <button type="button" class="danger-action" data-confirm-lifecycle-action="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>Confirm</button>
+    </div>
+  </div>`;
+}
+
+function confirmationValueFor(action, confirmed) {
+  const confirmation = action.confirmation || {};
+  if (!confirmation.required) return null;
+  return confirmed ? confirmation.phrase || null : null;
 }
 
 function domId(value) {
   return String(value || "action").replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
+function jobStatusLabel(job) {
+  const status = String(job?.status || "submitted");
+  const labels = { queued: "Queued", running: "Running", complete: "Complete", failed: "Failed", rejected: "Rejected" };
+  return labels[status] || pretty(status);
+}
+
 function jobDisplayMessage(job) {
-  const message = job.execution?.detail || job.message || "Action submitted.";
+  const statusMessages = {
+    queued: "Operation queued and waiting to start.",
+    running: "Operation is running. Live status will refresh when it finishes.",
+    complete: "Operation completed. Live status has been refreshed.",
+    failed: "Operation failed. Review the audit entry and logs for details.",
+    rejected: "Operation was rejected before execution.",
+  };
+  const message = job.execution?.detail || job.message || statusMessages[job.status] || "Operation submitted.";
   return message.replace(/(?:\.\/)?(?:apps|scripts)\/[^\s'"]+/g, "[operation]");
 }
 function renderLifecycleAudit(data) {
   const entries = data.entries || [];
   setText("audit-count", `${entries.length} entries`);
   target("audit").innerHTML = entries.length
-    ? `<ul class="card-list">${entries.slice(0, 6).map((entry) => `
-        <li class="card-row">
-          <div class="row-main"><strong>${escapeHtml(entry.action || "Lifecycle action")}</strong>${pill(entry.state || "unknown")}</div>
-          <div class="row-note">${escapeHtml(entry.timestamp || "time unavailable")} · ${escapeHtml(entry.operator || "operator unknown")}</div>
-        </li>`).join("")}</ul>`
+    ? `<ul class="card-list audit-list">${entries.slice(0, 6).map((entry) => {
+        const title = entry.action_label || friendlyAuditAction(entry.action, entry.operation_id);
+        const resource = entry.resource ? ` · ${entry.resource}` : "";
+        const duration = formatDuration(entry.duration_seconds);
+        const meta = [entry.timestamp || "time unavailable", entry.operator || "web console", duration].filter(Boolean).join(" · ");
+        const detail = entry.summary || entry.message || "No execution summary reported.";
+        return `
+        <li class="card-row audit-row">
+          <div class="row-main"><strong>${escapeHtml(title)}</strong>${pill(entry.status || entry.state || "unknown")}</div>
+          <div class="row-note">${escapeHtml(meta)}${escapeHtml(resource)}</div>
+          <div class="row-note">${escapeHtml(detail)}</div>
+        </li>`;
+      }).join("")}</ul>`
     : empty(data.placeholder || "No lifecycle audit entries have been recorded yet.");
+}
+
+function friendlyAuditAction(action, operationId) {
+  if (operationId) return pretty(operationId.replace(/^app\./, "").replace(/\./g, " "));
+  return pretty(String(action || "Lifecycle action").replace(/^job\./, ""));
+}
+
+function formatDuration(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) return "";
+  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
+  return `${seconds.toFixed(1)}s`;
 }
 
 async function loadPanel(key, path, render) {
@@ -737,8 +983,14 @@ async function loadPanel(key, path, render) {
   }
 }
 
-async function refreshConsole() {
-  if (refreshInFlight) return;
+async function refreshConsole(options = {}) {
+  if (refreshInFlight) {
+    if (!options.force) return false;
+    for (let attempt = 0; attempt < 20 && refreshInFlight; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+    if (refreshInFlight) return false;
+  }
   refreshInFlight = true;
   try {
     const results = await Promise.all([
@@ -775,6 +1027,7 @@ async function refreshConsole() {
       state.textContent = "Needs attention";
       state.dataset.state = "error";
     }
+    return loaded === results.length;
   } finally {
     refreshInFlight = false;
   }

@@ -32,6 +32,10 @@ class OperationAuditEntry:
     action: str
     status: str
     message: str
+    action_label: str = ""
+    resource_label: str = ""
+    operator: str = "web console"
+    duration_seconds: float | None = None
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     detail: dict[str, Any] = field(default_factory=dict)
 
@@ -41,8 +45,19 @@ class OperationAuditEntry:
             "job_id": self.job_id,
             "operation_id": self.operation_id,
             "action": self.action,
+            "action_label": self.action_label or humanize_operation_id(self.operation_id),
+            "resource": self.resource_label or resource_from_operation_id(self.operation_id),
             "status": self.status,
+            "state": self.status,
             "message": redact_text(self.message),
+            "operator": redact_text(self.operator),
+            "duration_seconds": self.duration_seconds,
+            "summary": audit_summary(
+                action_label=self.action_label or humanize_operation_id(self.operation_id),
+                status=self.status,
+                message=self.message,
+                duration_seconds=self.duration_seconds,
+            ),
             "timestamp": self.timestamp,
             "detail": _redacted_payload(self.detail),
         }
@@ -53,6 +68,11 @@ class OperationJob:
     job_id: str
     operation_id: str
     command: tuple[str, ...]
+    action_label: str = ""
+    resource_label: str = ""
+    kind: str = ""
+    impact: str = ""
+    operator: str = "web console"
     execute: bool = False
     status: OperationJobStatus = OperationJobStatus.QUEUED
     requested_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -80,6 +100,7 @@ class OperationJobRequest:
     operation_id: str
     execute: bool = False
     confirmation: str | None = None
+    source: str = "web console"
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "OperationJobRequest":
@@ -90,6 +111,7 @@ class OperationJobRequest:
             operation_id=operation_id,
             execute=bool(payload.get("execute", False)),
             confirmation=str(payload["confirmation"]) if payload.get("confirmation") is not None else None,
+            source=str(payload.get("source") or "web console").strip()[:80] or "web console",
         )
 
 
@@ -126,10 +148,15 @@ class OperationJobManager:
                 job_id=f"opjob-{uuid4().hex[:12]}",
                 operation_id=spec.operation_id,
                 command=spec.command,
+                action_label=spec.label,
+                resource_label=resource_label(spec),
+                kind=spec.kind.value,
+                impact=spec.impact.value,
+                operator=request.source,
                 execute=request.execute,
                 message="Operation job queued.",
             )
-            job = self._record_locked(job, "job.queued", job.status.value, "Operation job queued.", {"execute": request.execute})
+            job = self._record_locked(job, "job.queued", job.status.value, f"{spec.label} queued.", {"execute": request.execute})
             self._jobs[job.job_id] = job
             self._prune_locked()
 
@@ -155,8 +182,8 @@ class OperationJobManager:
     def _run_job(self, job_id: str, spec: OperationSpec, request: OperationJobRequest) -> None:
         with self._lock:
             current = self._jobs[job_id]
-            current = replace(current, status=OperationJobStatus.RUNNING, started_at=_now(), message="Operation job running.")
-            self._jobs[job_id] = self._record_locked(current, "job.started", current.status.value, "Operation job started.", {"execute": request.execute})
+            current = replace(current, status=OperationJobStatus.RUNNING, started_at=_now(), message=f"{spec.label} running.")
+            self._jobs[job_id] = self._record_locked(current, "job.started", current.status.value, f"{spec.label} started.", {"execute": request.execute})
 
         execution = self.runner.run(spec, execute=request.execute, confirmation=request.confirmation)
         status = OperationJobStatus.COMPLETE if execution.ok else OperationJobStatus.FAILED
@@ -177,6 +204,7 @@ class OperationJobManager:
                     "returncode": execution.returncode,
                     "timed_out": execution.timed_out,
                     "log_file": execution.log_file,
+                    "duration_seconds": execution.duration_seconds,
                 },
             )
 
@@ -194,6 +222,10 @@ class OperationJobManager:
             action=action,
             status=status,
             message=summarize_output(message),
+            action_label=job.action_label,
+            resource_label=job.resource_label,
+            operator=job.operator,
+            duration_seconds=job.execution.duration_seconds if job.execution else None,
             detail=detail,
         )
         self._audit.append(entry)
@@ -245,10 +277,15 @@ def operation_execution_payload(execution: OperationExecution | None) -> dict[st
 
 
 def operation_job_payload(job: OperationJob) -> dict[str, Any]:
+    execution = operation_execution_payload(job.execution)
     return {
         "job_id": job.job_id,
         "operation_id": job.operation_id,
-        "command_preview": list(job.command),
+        "action_label": job.action_label or humanize_operation_id(job.operation_id),
+        "resource": job.resource_label or resource_from_operation_id(job.operation_id),
+        "kind": job.kind,
+        "impact": job.impact,
+        "operator": redact_text(job.operator),
         "execute": job.execute,
         "status": job.status.value,
         "requested_at": job.requested_at,
@@ -256,7 +293,8 @@ def operation_job_payload(job: OperationJob) -> dict[str, Any]:
         "ended_at": job.ended_at,
         "duplicate_of": job.duplicate_of,
         "message": summarize_output(job.message),
-        "execution": operation_execution_payload(job.execution),
+        "execution": execution,
+        "summary": job_summary(job, execution),
         "audit": [entry.to_api_dict() for entry in job.audit],
     }
 
@@ -267,3 +305,55 @@ def _now() -> str:
 
 def _redacted_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: redact_text(str(value)) if isinstance(value, str) else value for key, value in payload.items()}
+
+
+def resource_label(spec: OperationSpec) -> str:
+    return resource_from_operation_id(spec.operation_id)
+
+
+def resource_from_operation_id(operation_id: str) -> str:
+    parts = operation_id.split(".")
+    if operation_id.startswith("app.") and len(parts) >= 3:
+        return parts[1]
+    if operation_id.startswith("cluster."):
+        return "MicroK8s cluster"
+    if operation_id.startswith("logs.") and len(parts) >= 2:
+        return parts[1]
+    if operation_id.startswith("certs."):
+        return "TLS certificates"
+    if operation_id.startswith("secrets."):
+        return "Kubernetes Secrets"
+    if operation_id.startswith("runbook."):
+        return "Runbook"
+    return operation_id
+
+
+def humanize_operation_id(operation_id: str) -> str:
+    parts = operation_id.split(".")
+    if operation_id.startswith("app.") and len(parts) == 3:
+        return f"{parts[2].title()} {parts[1]}"
+    if operation_id.startswith("cluster.") and len(parts) == 2:
+        return f"{parts[1].title()} MicroK8s cluster"
+    if operation_id.startswith("logs.") and len(parts) == 2:
+        return f"View logs for {parts[1]}"
+    return operation_id.replace(".", " ").replace("-", " ").title()
+
+
+def audit_summary(*, action_label: str, status: str, message: str, duration_seconds: float | None) -> str:
+    duration = f" in {duration_seconds:.2f}s" if duration_seconds is not None else ""
+    detail = summarize_output(message, limit=180)
+    if detail:
+        return f"{action_label} {status}{duration}: {detail}"
+    return f"{action_label} {status}{duration}."
+
+
+def job_summary(job: OperationJob, execution: dict[str, Any] | None) -> dict[str, Any]:
+    duration = execution["duration_seconds"] if execution else None
+    return {
+        "title": job.action_label or humanize_operation_id(job.operation_id),
+        "resource": job.resource_label or resource_from_operation_id(job.operation_id),
+        "result": job.status.value,
+        "operator": redact_text(job.operator),
+        "duration_seconds": duration,
+        "detail": summarize_output(job.message, limit=240),
+    }
