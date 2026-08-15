@@ -93,6 +93,7 @@ nav:
       - First scan: operations/first-scan.md
       - First-scan command examples: examples/first-scan/README.md
       - Runbook Library: operations/runbooks.md
+      - FCLI runbooks: runbooks/fcli.md
   - Configuration:
       - Overview: configuration/index.md
       - Secrets and licenses: operations/secrets-and-licenses.md

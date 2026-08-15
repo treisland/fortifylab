@@ -1739,13 +1739,65 @@ versions_menu() {
     press_any
 }
 
+fcli_path_entry_present() {
+    local target="$1"
+    case ":$PATH:" in
+        *":$target:"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+fcli_export_current_path() {
+    local target="${1:-$FORTIFY_FCLI_INSTALL_DIR}"
+    [ -d "$target" ] || return 1
+    if fcli_path_entry_present "$target"; then
+        return 0
+    fi
+    export PATH="$target:$PATH"
+}
+
+fcli_shell_profile_path() {
+    if [ -n "${FORTIFY_FCLI_PROFILE_FILE:-}" ]; then
+        printf '%s\n' "$FORTIFY_FCLI_PROFILE_FILE"
+    elif [ -f "$HOME/.bashrc" ] || [ "${SHELL##*/}" = bash ]; then
+        printf '%s/.bashrc\n' "$HOME"
+    else
+        printf '%s/.profile\n' "$HOME"
+    fi
+}
+
+fcli_profile_has_path() {
+    local profile="$1" target="${2:-$FORTIFY_FCLI_INSTALL_DIR}"
+    [ -f "$profile" ] || return 1
+    grep -F "$target" "$profile" >/dev/null 2>&1
+}
+
+fcli_persist_path() {
+    local target="${1:-$FORTIFY_FCLI_INSTALL_DIR}" profile
+    profile="$(fcli_shell_profile_path)"
+    mkdir -p "$(dirname "$profile")" || return 1
+    if fcli_profile_has_path "$profile" "$target"; then
+        return 0
+    fi
+    {
+        printf '\n# FortifyLab tools\n'
+        printf 'export PATH="%s:$PATH"\n' "$target"
+    } >> "$profile"
+}
+
 fcli_path() {
-    command -v fcli 2>/dev/null
+    command -v fcli 2>/dev/null && return 0
+    if [ -x "$FORTIFY_FCLI_INSTALL_DIR/fcli" ]; then
+        printf '%s\n' "$FORTIFY_FCLI_INSTALL_DIR/fcli"
+        return 0
+    fi
+    return 1
 }
 
 fcli_installed_version() {
-    command -v fcli >/dev/null 2>&1 || return 1
-    fcli --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1
+    local path
+    path="$(fcli_path)" || return 1
+    "$path" --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1
 }
 
 fcli_status_line() {
