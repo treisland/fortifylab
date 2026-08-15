@@ -2,6 +2,7 @@
 # fortifylab-runbook: true
 # name: Example runbook
 # description: Explain what this runbook does and when a Solutions Engineer should use it.
+# domain: General
 # category: Examples
 # risk: low
 # order: 100

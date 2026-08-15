@@ -105,6 +105,67 @@ class RunbookLibraryTests(unittest.TestCase):
             self.assertNotIn("not-listed", result.stdout)
             self.assertLess(result.stdout.index("Official First"), result.stdout.index("Training Later"))
 
+
+    def test_runbook_domains_are_first_level_menu_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runbook_root = Path(directory)
+            self.make_runbook(
+                runbook_root,
+                "official/ssc-login.sh",
+                """
+                #!/usr/bin/env bash
+                # fortifylab-runbook: true
+                # name: SSC Login
+                # description: Local SSC login runbook.
+                # domain: Local lab: SSC
+                # category: Sessions
+                # risk: low
+                # order: 10
+                echo ssc
+                """,
+            )
+            self.make_runbook(
+                runbook_root,
+                "training/fod-login.sh",
+                """
+                #!/usr/bin/env bash
+                # fortifylab-runbook: true
+                # name: FoD Login
+                # description: FoD SaaS login runbook.
+                # domain: Fortify on Demand
+                # category: Sessions
+                # risk: low
+                # order: 20
+                echo fod
+                """,
+            )
+            result = self.run_wizard_functions("runbooks_menu", runbook_root=runbook_root, user_input="b\n")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Local lab: SSC", result.stdout)
+            self.assertIn("Fortify on Demand", result.stdout)
+
+
+    def test_fcli_operator_runbooks_are_documented_and_separated(self) -> None:
+        official = ROOT / "runbooks" / "official" / "fcli"
+        fod = ROOT / "runbooks" / "training" / "fcli-fod"
+        docs = (ROOT / "docs" / "runbooks" / "fcli.md").read_text(encoding="utf-8")
+        expected_files = (
+            official / "inspect-fcli-foundation.sh",
+            official / "local-ssc-login-discovery.sh",
+            fod / "00-fod-env-session-check.sh",
+            fod / "20-package-and-upload.sh",
+            fod / "50-release-summary.sh",
+        )
+        for path in expected_files:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("fortifylab-runbook: true", text)
+                self.assertIn("# domain:", text)
+        self.assertIn("official [fcli v3 documentation]", docs.lower())
+        self.assertIn("Local SSC", docs)
+        self.assertIn("FoD", docs)
+        self.assertIn("external SaaS", (fod / "README.md").read_text(encoding="utf-8"))
+
     def test_validation_reports_missing_metadata_and_required_tools(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runbook_root = Path(directory)

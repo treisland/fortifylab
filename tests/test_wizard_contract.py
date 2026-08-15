@@ -414,6 +414,46 @@ exit 1
         preflight = wizard.split("preflight_check()", 1)[1].split("deploy_step()", 1)[0]
         self.assertNotIn("fcli", preflight.lower())
 
+
+    def test_fcli_path_handoff_is_current_session_and_persistent_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            bin_dir = home / "fortify" / "tools" / "bin"
+            profile = home / ".bashrc"
+            bin_dir.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text("# existing profile\n", encoding="utf-8")
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_FCLI_INSTALL_DIR="$3"
+                export FORTIFY_FCLI_PROFILE_FILE="$4"
+                export PATH=/usr/bin:/bin
+                source "$1"
+                fcli_export_current_path "$FORTIFY_FCLI_INSTALL_DIR"
+                fcli_export_current_path "$FORTIFY_FCLI_INSTALL_DIR"
+                fcli_persist_path "$FORTIFY_FCLI_INSTALL_DIR"
+                fcli_persist_path "$FORTIFY_FCLI_INSTALL_DIR"
+                printf 'PATH=%s\n' "$PATH"
+                printf 'PROFILE_COUNT=%s\n' "$(grep -cF "$FORTIFY_FCLI_INSTALL_DIR" "$FORTIFY_FCLI_PROFILE_FILE")"
+            """
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-path-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(bin_dir),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn(f"PATH={bin_dir}:/usr/bin:/bin", output)
+            self.assertIn("PROFILE_COUNT=1", output)
+
     def test_fcli_command_templates_are_secret_safe(self) -> None:
         command = """
             export WIZARD_NOMAIN=1 NO_COLOR=1

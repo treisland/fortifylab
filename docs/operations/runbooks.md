@@ -104,6 +104,22 @@ walk students through the generated file.
 This keeps the class synchronized without pasting long commands from slides or
 searching old notes during a live demo.
 
+## Example: FoD fcli workshop flow
+
+`runbooks/training/fcli-fod/` contains bounded Bash runbooks for a FoD
+workshop-inspired fcli sequence: environment/session check, release and
+entitlement guidance, package/upload, wait/status, policy check, and release
+summary. FoD is external SaaS, so the runbooks report only whether
+`FCLI_DEFAULT_*` and `FOD_*` variables are set and require explicit confirmation
+before uploading a scan.
+
+## Official fcli runbooks
+
+Fortify Lab-maintained fcli runbooks are under `runbooks/official/fcli/`. They
+cover local operator foundation checks and SSC-first discovery helpers. See the
+[fcli runbook notes](../runbooks/fcli.md) for scope, environment defaults, and
+the local SSC/FoD boundary.
+
 ## Safety
 
 Do not hard-code secrets or customer data. Use parameters, `.env` defaults, or

@@ -2,6 +2,7 @@
 # fortifylab-runbook: true
 # name: Show resolved lab URLs
 # description: Prints the FortifyLab URLs currently derived from .env without showing credentials.
+# domain: General diagnostics
 # category: Diagnostics
 # risk: low
 # order: 10

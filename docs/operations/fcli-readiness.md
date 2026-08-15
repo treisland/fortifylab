@@ -41,8 +41,17 @@ shape of a later `sc-sast scan start` command against a prebuilt package or MBS
 file. They intentionally do not create sample applications, package source, or submit a first scan. Use the [first-scan walkthrough](first-scan.md) when you are
 ready for that separate lifecycle.
 
+For repeatable operator checks, use the official Fortify Lab fcli runbooks in
+`runbooks/official/fcli/` or read the [fcli runbook notes](../runbooks/fcli.md).
+Those runbooks follow the official [fcli v3 documentation](https://fortify.github.io/fcli/v3/)
+and keep local SSC login separate from FoD commands.
+
 ## FoD optional path
 
 Fortify on Demand examples are included only as optional command shapes. Keep
 FoD tenant, client ID, and client secret values outside this repository and log
 out of the session when finished.
+
+For classroom or workshop practice, use the FoD fcli training runbooks in
+`runbooks/training/fcli-fod/`. They keep FoD as an explicit external-SaaS
+boundary and avoid printing configured secret values.

@@ -16,6 +16,7 @@ RUNBOOK_PARSE_ERRORS=()
 RUNBOOK_NAME=""
 RUNBOOK_DESCRIPTION=""
 RUNBOOK_CATEGORY="General"
+RUNBOOK_DOMAIN="General"
 RUNBOOK_RISK=""
 RUNBOOK_ORDER="1000"
 RUNBOOK_REQUIRES=""
@@ -67,6 +68,7 @@ runbook_reset_metadata() {
     RUNBOOK_NAME=""
     RUNBOOK_DESCRIPTION=""
     RUNBOOK_CATEGORY="General"
+    RUNBOOK_DOMAIN="General"
     RUNBOOK_RISK=""
     RUNBOOK_ORDER="1000"
     RUNBOOK_REQUIRES=""
@@ -81,6 +83,7 @@ runbook_metadata_set() {
         name) RUNBOOK_NAME="$value" ;;
         description) RUNBOOK_DESCRIPTION="$value" ;;
         category) RUNBOOK_CATEGORY="$value" ;;
+        domain) RUNBOOK_DOMAIN="$value" ;;
         risk) RUNBOOK_RISK="$value" ;;
         order) RUNBOOK_ORDER="$value" ;;
         requires) RUNBOOK_REQUIRES="$value" ;;
@@ -198,17 +201,17 @@ runbook_discover_files() {
 }
 
 runbook_discover_records() {
-    local file source rank name category risk order description
+    local file source rank name domain category risk order description
     while IFS= read -r file; do
         [ -n "$file" ] || continue
         runbook_parse_file "$file"
         [ "$RUNBOOK_MARKER" = "true" ] || continue
         source="$(runbook_source_label_for_path "$file")"
         rank="$(runbook_source_rank_for_label "$source")"
-        name="${RUNBOOK_NAME:-$(basename "$file")}" category="${RUNBOOK_CATEGORY:-General}"
+        name="${RUNBOOK_NAME:-$(basename "$file")}" domain="${RUNBOOK_DOMAIN:-General}" category="${RUNBOOK_CATEGORY:-General}"
         risk="${RUNBOOK_RISK:-unknown}" order="${RUNBOOK_ORDER:-1000}" description="$RUNBOOK_DESCRIPTION"
-        printf '%s\t%s\t%06d\t%s\t%s\t%s\t%s\t%s\n' "$rank" "$source" "$order" "$category" "$name" "$risk" "$file" "$description"
-    done < <(runbook_discover_files) | sort -t "$TAB" -k1,1n -k4,4f -k3,3n -k5,5f -k7,7f
+        printf '%s\t%s\t%06d\t%s\t%s\t%s\t%s\t%s\t%s\n' "$rank" "$source" "$order" "$domain" "$category" "$name" "$risk" "$file" "$description"
+    done < <(runbook_discover_files) | sort -t "$TAB" -k4,4f -k1,1n -k5,5f -k3,3n -k6,6f -k8,8f
 }
 
 runbook_param_default_value() {
@@ -255,6 +258,7 @@ runbook_required_params_missing() {
 runbook_print_metadata() {
     local file="$1" source missing_tools
     source="$(runbook_source_label_for_path "$file")"
+    printf 'Domain:   %s\n' "${RUNBOOK_DOMAIN:-General}"
     printf 'Category: %s\n' "${RUNBOOK_CATEGORY:-General}"
     printf 'Risk:     %s\n' "${RUNBOOK_RISK:-unknown}"
     printf 'Type:     %s\n' "${RUNBOOK_TYPE:-script}"
@@ -525,19 +529,15 @@ EOF
     press_any
 }
 
-runbooks_menu() {
-    local records=() files=() record choice number=0 rank source order category name risk file description last_source="" last_category=""
+runbook_domain_menu() {
+    local selected_domain="$1" records=() files=() record choice number=0 rank source order domain category name risk file description last_source="" last_category=""
     while true; do
-        records=(); files=(); number=0; last_source=""; last_category=""
-        title "Runbook Library"
-        cat <<'EOF'
-Reusable scripts for demos, fixes, diagnostics, and customer workflows.
-Runbooks must opt in with metadata before they appear here.
-EOF
-        echo
+        files=(); number=0; last_source=""; last_category=""
+        title "$selected_domain Runbooks"
         while IFS= read -r record; do
             [ -n "$record" ] || continue
-            IFS="$TAB" read -r rank source order category name risk file description <<< "$record"
+            IFS="$TAB" read -r rank source order domain category name risk file description <<< "$record"
+            [ "$domain" = "$selected_domain" ] || continue
             if [ "$source" != "$last_source" ]; then
                 section "$source runbooks"
                 last_source="$source"
@@ -551,17 +551,13 @@ EOF
             files[$number]="$file"
             printf '    %2d. %-34s %s%s%s\n' "$number" "$name" "$DIM" "$risk" "$RESET"
         done < <(runbook_discover_records)
-        [ "$number" -gt 0 ] || note "No runbooks found. Copy the template into runbooks/local or runbooks/training to get started."
+        [ "$number" -gt 0 ] || note "No runbooks found for $selected_domain."
         echo
-        echo "   v. Validate runbooks"
-        echo "   t. Templates and authoring help"
         echo "   b. Back"
         echo "   q. Quit"
         echo
         ask choice "Select a runbook:"
         case "$choice" in
-            [Vv]) runbook_validate_all ;;
-            [Tt]) runbook_authoring_help ;;
             [Bb]) return 0 ;;
             [Qq]) clear; exit 0 ;;
             ''|*[!0-9]*) error "Select a runbook number shown above."; sleep 1 ;;
@@ -571,6 +567,65 @@ EOF
                     sleep 1
                 else
                     runbook_detail_menu "${files[$choice]}"
+                fi
+                ;;
+        esac
+    done
+}
+
+runbooks_menu() {
+    local domains=() counts=() record choice rank source order domain category name risk file description idx found
+    while true; do
+        domains=(); counts=()
+        title "Runbook Library"
+        cat <<'EOF'
+Reusable scripts for demos, fixes, diagnostics, and customer workflows.
+Choose a domain first so local SSC, ScanCentral, FoD, CI/CD, and private runbooks stay separate.
+EOF
+        echo
+        while IFS= read -r record; do
+            [ -n "$record" ] || continue
+            IFS="$TAB" read -r rank source order domain category name risk file description <<< "$record"
+            found=0
+            for idx in "${!domains[@]}"; do
+                if [ "${domains[$idx]}" = "$domain" ]; then
+                    counts[$idx]=$((counts[$idx] + 1))
+                    found=1
+                    break
+                fi
+            done
+            if [ "$found" -eq 0 ]; then
+                domains+=("$domain")
+                counts+=(1)
+            fi
+        done < <(runbook_discover_records)
+        if [ "${#domains[@]}" -eq 0 ]; then
+            note "No runbooks found. Copy the template into runbooks/local or runbooks/training to get started."
+        else
+            section "Runbook domains"
+            for idx in "${!domains[@]}"; do
+                printf '  %2d. %-34s %s%d runbook(s)%s\n' "$((idx + 1))" "${domains[$idx]}" "$DIM" "${counts[$idx]}" "$RESET"
+            done
+        fi
+        echo
+        echo "   v. Validate runbooks"
+        echo "   t. Templates and authoring help"
+        echo "   b. Back"
+        echo "   q. Quit"
+        echo
+        ask choice "Select a domain:"
+        case "$choice" in
+            [Vv]) runbook_validate_all ;;
+            [Tt]) runbook_authoring_help ;;
+            [Bb]) return 0 ;;
+            [Qq]) clear; exit 0 ;;
+            ''|*[!0-9]*) error "Select a domain number shown above."; sleep 1 ;;
+            *)
+                if [ "$choice" -lt 1 ] || [ "$choice" -gt "${#domains[@]}" ]; then
+                    error "Select a domain number shown above."
+                    sleep 1
+                else
+                    runbook_domain_menu "${domains[$((choice - 1))]}"
                 fi
                 ;;
         esac

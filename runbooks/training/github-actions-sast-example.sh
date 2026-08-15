@@ -2,6 +2,7 @@
 # fortifylab-runbook: true
 # name: Generate GitHub Actions SAST example
 # description: Creates a sample GitHub Actions workflow that demonstrates FCLI and ScanCentral SAST integration.
+# domain: CI/CD examples
 # category: CI/CD Examples
 # risk: low
 # order: 20
