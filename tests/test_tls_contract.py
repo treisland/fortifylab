@@ -78,7 +78,7 @@ class TlsContractTests(unittest.TestCase):
             tmpdir = Path(tmp)
             cert, key = self.make_cert(
                 tmpdir,
-                "DNS:ssc.example.test,DNS:sast.example.test,DNS:dast.example.test,DNS:lim.example.test,DNS:dashboard.example.test",
+                "DNS:ssc.example.test,DNS:sast.example.test,DNS:dast.example.test,DNS:lim.example.test,DNS:dashboard.example.test,DNS:lab.example.test",
             )
             other_key = tmpdir / "other.key"
             subprocess.run(
