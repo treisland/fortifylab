@@ -2,6 +2,33 @@ const token = new URLSearchParams(window.location.search).get("token");
 const refreshIntervalMs = 5000;
 const themeStorageKey = "fortifylab.theme";
 const introStorageKey = "fortifylab.operatorIntro";
+const defaultWorkspace = "dashboard";
+const workspaceLabels = {
+  dashboard: "Dashboard",
+  guided: "Guided Deploy",
+  services: "Services",
+  logs: "Logs",
+  lifecycle: "Lifecycle",
+  configuration: "Configuration",
+  certificates: "Certificates",
+  diagnostics: "Diagnostics",
+  audit: "Audit",
+  docs: "Docs",
+};
+const panelWorkspaceMap = {
+  guided: "guided",
+  deployment: "guided",
+  workspace: "guided",
+  routes: "services",
+  logs: "logs",
+  lifecycle: "lifecycle",
+  configuration: "configuration",
+  certificates: "certificates",
+  health: "diagnostics",
+  security: "diagnostics",
+  audit: "audit",
+  help: "docs",
+};
 let refreshInFlight = false;
 let focusedPanel = null;
 let focusedPlaceholder = null;
@@ -11,6 +38,7 @@ let panelFocusClosing = false;
 let confirmingLifecycleActionId = null;
 let logWorkspace = { open: false, operationId: null, mode: "recent", tail: "120" };
 let selectedHelpTopicId = "overview";
+let activeWorkspace = defaultWorkspace;
 let followedLogActionId = null;
 let logFollowTimer = null;
 const logRequestsInFlight = new Set();
@@ -184,6 +212,61 @@ function setText(name, value) {
   if (node) node.textContent = value;
 }
 
+function workspaceFromHash() {
+  const value = String(window.location.hash || "").replace(/^#/, "");
+  return Object.prototype.hasOwnProperty.call(workspaceLabels, value) ? value : defaultWorkspace;
+}
+
+function setWorkspace(workspace, options = {}) {
+  const next = Object.prototype.hasOwnProperty.call(workspaceLabels, workspace) ? workspace : defaultWorkspace;
+  activeWorkspace = next;
+  for (const page of document.querySelectorAll("[data-workspace]")) {
+    const selected = page.dataset.workspace === next;
+    page.classList.toggle("is-active", selected);
+    page.hidden = !selected;
+  }
+  for (const link of document.querySelectorAll("[data-workspace-link]")) {
+    const selected = link.dataset.workspaceLink === next;
+    link.classList.toggle("is-active", selected);
+    link.setAttribute("aria-current", selected ? "page" : "false");
+  }
+  setText("current-workspace", workspaceLabels[next]);
+  if (options.updateHash !== false && window.location.hash !== `#${next}`) {
+    window.history.replaceState(null, "", `#${next}`);
+  }
+  if (options.scroll !== false) scrollToTop();
+}
+
+function setupWorkspaceNavigation() {
+  for (const link of document.querySelectorAll("[data-workspace-link]")) {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      setWorkspace(link.dataset.workspaceLink || defaultWorkspace);
+    });
+  }
+  window.addEventListener("hashchange", () => setWorkspace(workspaceFromHash(), { updateHash: false }));
+  setWorkspace(workspaceFromHash(), { updateHash: false, scroll: false });
+}
+
+function preferredScrollBehavior() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
+function scrollToTop() {
+  document.querySelector("#top")?.scrollIntoView({ behavior: preferredScrollBehavior(), block: "start" });
+}
+
+function setupBackToTop() {
+  const button = document.querySelector("#back-to-top");
+  if (!button) return;
+  const update = () => {
+    button.classList.toggle("is-visible", window.scrollY > 420);
+  };
+  button.addEventListener("click", scrollToTop);
+  window.addEventListener("scroll", update, { passive: true });
+  update();
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -254,6 +337,8 @@ function renderRefreshCadence() {
 }
 
 function openPanelByName(panelName) {
+  const workspace = panelWorkspaceMap[panelName];
+  if (workspace) setWorkspace(workspace);
   const panel = Array.from(document.querySelectorAll("[data-panel]")).find((item) => item.dataset.panel === panelName);
   if (panel) openFocusedPanel(panel);
 }
@@ -261,6 +346,12 @@ function openPanelByName(panelName) {
 function bindGuidedJourneyControls() {
   for (const button of document.querySelectorAll("[data-guided-panel]")) {
     button.addEventListener("click", () => openPanelByName(button.dataset.guidedPanel));
+  }
+}
+
+function bindWorkspaceLinks() {
+  for (const button of document.querySelectorAll("[data-open-workspace]")) {
+    button.addEventListener("click", () => setWorkspace(button.dataset.openWorkspace || defaultWorkspace));
   }
 }
 
@@ -507,12 +598,16 @@ function bindServiceControls() {
   for (const button of document.querySelectorAll("[data-service-log]")) {
     button.addEventListener("click", () => {
       openLogWorkspace(button.dataset.serviceLog, "recent");
-      openPanelByName("logs");
+      setWorkspace("logs");
     });
+  }
+  for (const button of document.querySelectorAll("[data-service-diagnose]")) {
+    button.addEventListener("click", () => setWorkspace("diagnostics"));
   }
   for (const button of document.querySelectorAll("[data-service-help]")) {
     button.addEventListener("click", () => openHelpTopic(button.dataset.serviceHelp || "service-health"));
   }
+  bindWorkspaceLinks();
 }
 
 function renderSummary() {
@@ -520,13 +615,142 @@ function renderSummary() {
   const deployment = store.deploymentStatus || {};
   const guide = store.guide || {};
   const stateValue = deployment.overall_state || guide.overall_state || statusData.mode || "unknown";
+  const profile = deployment.profile || guide.profile || "pending";
+  const namespace = deployment.namespace || "not reported";
   setText("summary-state", pretty(stateValue));
-  setText("summary-profile", deployment.profile || guide.profile || "pending");
-  setText("summary-namespace", deployment.namespace || "not reported");
+  setText("summary-profile", profile);
+  setText("summary-namespace", namespace);
   setText("summary-operations", String((statusData.operations || []).length));
+  setText("top-profile", profile);
+  setText("top-namespace", namespace);
+  setText("top-active-job", activeJob()?.action_label || activeJob()?.operation_id || "None");
   const posture = store.securityPosture?.actions;
   setText("summary-security", posture ? pretty(posture.mode) : "preview");
   renderRefreshCadence();
+}
+
+function activeJob() {
+  const jobs = store.operationJobs?.jobs || [];
+  return jobs.find((job) => ["queued", "running"].includes(job.status)) || null;
+}
+
+function renderDashboard() {
+  renderDashboardNext();
+  renderDashboardJob();
+  renderDashboardProgress();
+  renderDashboardServices();
+  renderDashboardUptime();
+  renderDashboardRecovery();
+}
+
+function renderDashboardNext() {
+  const journey = store.guidedJourney || {};
+  const action = journey.next_action || {};
+  const stateValue = store.deploymentStatus?.overall_state || journey.state || "checking";
+  setText("dashboard-state", pretty(stateValue));
+  target("dashboard-next").innerHTML = `
+    <div class="dashboard-next-card">
+      <span class="guided-kicker">Recommended next step</span>
+      <h3>${escapeHtml(action.label || "Review guided deployment")}</h3>
+      <p>${escapeHtml(action.reason || journey.summary || "The console is gathering live state before recommending the safest next step.")}</p>
+      <div class="dashboard-actions">
+        <button type="button" class="primary-action" data-guided-panel="${escapeHtml(action.panel || "guided")}">${escapeHtml(action.label || "Open guided path")}</button>
+        <button type="button" class="secondary-action" data-open-workspace="diagnostics">Review diagnostics</button>
+      </div>
+    </div>`;
+  bindGuidedJourneyControls();
+  bindWorkspaceLinks();
+}
+
+function renderDashboardJob() {
+  const job = activeJob() || (store.operationJobs?.jobs || [])[0];
+  setText("dashboard-job-state", job ? jobStatusLabel(job) : "None");
+  target("dashboard-job").innerHTML = job ? `
+    <div class="job-summary">
+      <strong>${escapeHtml(job.action_label || friendlyAuditAction(null, job.operation_id))}</strong>
+      ${pill(job.status || "unknown")}
+      <p>${escapeHtml(jobDisplayMessage(job))}</p>
+      <button type="button" class="secondary-action" data-open-workspace="audit">Open audit</button>
+    </div>` : empty("No lifecycle or evidence job is running right now.");
+  bindWorkspaceLinks();
+}
+
+function renderDashboardProgress() {
+  const steps = allSteps();
+  const complete = steps.filter((step) => step.state === "complete").length;
+  setText("dashboard-progress-count", `${complete} / ${steps.length}`);
+  target("dashboard-progress").innerHTML = steps.length ? `
+    <ol class="mini-timeline">
+      ${steps.slice(0, 6).map((step) => `<li><span>${escapeHtml(step.index || "-")}</span><strong>${escapeHtml(step.label || step.step_id || "Step")}</strong>${pill(step.state)}</li>`).join("")}
+    </ol>
+    <button type="button" class="secondary-action" data-open-workspace="guided">Open full timeline</button>` : empty("No guided deployment steps reported yet.");
+  bindWorkspaceLinks();
+}
+
+function dashboardServiceList() {
+  const health = store.serviceHealth?.services || [];
+  if (health.length) return health;
+  return collectRoutes().map((route) => ({
+    service_id: route.service_name || route.step_id || route.host,
+    label: route.step_label || route.service_name || route.host || "Service",
+    url: route.host ? `https://${route.host}` : "",
+    checks: {
+      ingress: { state: route.ingress_present ? "ok" : "blocked" },
+      tls: { state: route.tls_secret ? "ok" : "warning" },
+      http: { state: route.endpoints_ready ? "ok" : "warning" },
+    },
+  }));
+}
+
+function renderDashboardServices() {
+  const services = dashboardServiceList();
+  setText("dashboard-service-count", `${services.length} services`);
+  target("dashboard-services").innerHTML = services.length ? `<ul class="resource-link-grid">${services.map(renderDashboardServiceCard).join("")}</ul>` : empty("Service links will appear when routes or health checks are reported.");
+  bindServiceControls();
+}
+
+function renderDashboardServiceCard(service) {
+  const state = serviceState(service);
+  const logOperationId = serviceLogOperationId(service);
+  const topic = state === "up" ? "service-health" : "recovery";
+  return `<li class="resource-link-card">
+    <div class="row-main"><strong>${escapeHtml(service.label || service.service_id || "Service")}</strong>${pill(state)}</div>
+    ${service.url ? `<a href="${escapeHtml(service.url)}" target="_blank" rel="noreferrer">${escapeHtml(service.url)}</a>` : `<span class="row-note">No URL reported.</span>`}
+    <div class="service-meta">${checkPill(service, "dns")}${checkPill(service, "tls")}${checkPill(service, "http")}${checkPill(service, "ingress")}</div>
+    <div class="service-actions">
+      ${service.url ? `<a class="primary-action" href="${escapeHtml(service.url)}" target="_blank" rel="noreferrer">Open</a>` : ""}
+      ${logOperationId ? `<button type="button" class="secondary-action" data-service-log="${escapeHtml(logOperationId)}">Logs</button>` : `<button type="button" class="secondary-action" data-open-workspace="logs">Logs</button>`}
+      <button type="button" class="secondary-action" data-service-diagnose="${escapeHtml(service.service_id || "service")}">Diagnose</button>
+      <button type="button" class="secondary-action" data-service-help="${escapeHtml(topic)}">Help</button>
+    </div>
+  </li>`;
+}
+
+function renderDashboardUptime() {
+  const services = dashboardServiceList();
+  const counts = services.reduce((acc, service) => { acc[serviceState(service)] = (acc[serviceState(service)] || 0) + 1; return acc; }, {});
+  setText("dashboard-uptime-count", services.length ? `${counts.up || 0}/${services.length} up` : "Waiting");
+  target("dashboard-uptime").innerHTML = services.length ? `
+    <div class="uptime-summary-grid">
+      <div>${pill("up")}<strong>${counts.up || 0}</strong><span>healthy</span></div>
+      <div>${pill("degraded")}<strong>${counts.degraded || 0}</strong><span>degraded</span></div>
+      <div>${pill("down")}<strong>${counts.down || 0}</strong><span>down</span></div>
+      <div>${pill("unknown")}<strong>${counts.unknown || 0}</strong><span>unknown</span></div>
+    </div>
+    <button type="button" class="secondary-action" data-open-workspace="services">Open services</button>` : empty("Waiting for service health checks.");
+  bindWorkspaceLinks();
+}
+
+function renderDashboardRecovery() {
+  const recovery = store.recoveryState?.next_recovery || store.recoveryState?.next_action || null;
+  const entries = (store.lifecycleAudit?.entries || []).slice(0, 3);
+  const total = (recovery ? 1 : 0) + entries.length;
+  setText("dashboard-recovery-count", `${total} items`);
+  target("dashboard-recovery").innerHTML = total ? `
+    ${recovery ? `<div class="recovery-callout"><strong>${escapeHtml(recovery.label || "Suggested recovery")}</strong><span>${escapeHtml(recovery.reason || recovery.summary || "Review diagnostics before retrying.")}</span></div>` : ""}
+    ${entries.length ? `<ul class="card-list">${entries.map((entry) => `<li class="card-row"><div class="row-main"><strong>${escapeHtml(entry.action_label || friendlyAuditAction(entry.action, entry.operation_id))}</strong>${pill(entry.status || entry.state || "unknown")}</div><div class="row-note">${escapeHtml(entry.summary || entry.message || entry.timestamp || "Recent activity")}</div></li>`).join("")}</ul>` : ""}
+    <div class="dashboard-actions"><button type="button" class="secondary-action" data-open-workspace="diagnostics">Diagnostics</button><button type="button" class="secondary-action" data-open-workspace="audit">Audit</button></div>` : empty("No recovery suggestions or recent audit entries yet.");
+  bindWorkspaceLinks();
 }
 
 function renderDeployment(data) {
@@ -540,7 +764,7 @@ function renderDeployment(data) {
           <div class="step-body">
             <div class="step-title"><strong>${escapeHtml(step.label || step.step_id || "Deployment step")}</strong>${pill(step.state)}</div>
             <div class="step-detail">${escapeHtml(step.detail || "Waiting for live detail.")}</div>
-            <div class="step-meta">${escapeHtml((step.pods || []).length)} pods · ${escapeHtml(step.hint_count || 0)} hints</div>
+            <div class="step-meta">${escapeHtml((step.pods || []).length)} pods · ${escapeHtml(step.hint_count || 0)} findings</div>
           </div>
         </li>`).join("")}</ol>`
     : empty("No guided deployment steps reported.");
@@ -571,7 +795,7 @@ function renderWorkspace() {
       <div class="metric-grid">
         <div class="metric"><span>Pods</span><strong>${relatedPods.length}</strong></div>
         <div class="metric"><span>Routes</span><strong>${relatedRoutes.length}</strong></div>
-        <div class="metric"><span>Hints</span><strong>${relatedHints.length}</strong></div>
+        <div class="metric"><span>Findings</span><strong>${relatedHints.length}</strong></div>
         <div class="metric"><span>Elapsed</span><strong>${escapeHtml(step.elapsed_seconds || 0)}s</strong></div>
       </div>
       ${renderPodList(relatedPods)}
@@ -1030,8 +1254,10 @@ function renderServiceActions(service) {
   const state = serviceState(service);
   const topic = state === "up" ? "service-health" : state === "degraded" ? "recovery" : state === "down" ? "recovery" : "service-health";
   return `<div class="service-actions">
-    ${logOperationId ? `<button type="button" class="secondary-action" data-service-log="${escapeHtml(logOperationId)}">Open logs</button>` : `<button type="button" class="secondary-action" data-guided-panel="logs">Evidence queue</button>`}
-    <button type="button" class="secondary-action" data-service-help="${escapeHtml(topic)}">Explain status</button>
+    ${service.url ? `<a class="primary-action" href="${escapeHtml(service.url)}" target="_blank" rel="noreferrer">Open</a>` : ""}
+    ${logOperationId ? `<button type="button" class="secondary-action" data-service-log="${escapeHtml(logOperationId)}">Logs</button>` : `<button type="button" class="secondary-action" data-open-workspace="logs">Logs</button>`}
+    <button type="button" class="secondary-action" data-service-diagnose="${escapeHtml(service.service_id || "service")}">Diagnose</button>
+    <button type="button" class="secondary-action" data-service-help="${escapeHtml(topic)}">Help</button>
   </div>`;
 }
 
@@ -1421,6 +1647,7 @@ async function refreshConsole(options = {}) {
     if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
     renderHelp(store.helpTopics || fallbackHelpTopics());
     renderCockpitIntro();
+    renderDashboard();
 
     const loaded = results.filter(Boolean).length;
     if (loaded === results.length) {
@@ -1445,8 +1672,11 @@ function scheduleRefresh() {
 }
 
 setupThemeSwitch();
+setupWorkspaceNavigation();
+setupBackToTop();
 setupIntroControls();
 setupPanelFocus();
 renderHelp(fallbackHelpTopics());
 renderCockpitIntro();
+renderDashboard();
 scheduleRefresh();

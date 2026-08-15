@@ -7,76 +7,164 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar">
-      <div class="brand-block">
-        <span class="eyebrow">Remote LAN operator view</span>
-        <h1>Fortify Lab Console</h1>
-        <p>Deployment control, evidence, and service readiness in one working surface.</p>
-      </div>
-      <div class="topbar-actions">
-        <button type="button" id="open-intro" class="guide-open-button">Guide</button>
-        <div class="theme-switch" aria-label="Theme">
-          <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
-          <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
-          <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+  <div class="app-shell">
+    <aside class="nav-rail" aria-label="Primary navigation">
+      <a class="nav-brand" href="#dashboard" aria-label="Fortify Lab dashboard">
+        <span>FL</span>
+        <strong>FortifyLab</strong>
+      </a>
+      <nav class="workspace-nav">
+        <a href="#dashboard" data-workspace-link="dashboard">Dashboard</a>
+        <a href="#guided" data-workspace-link="guided">Guided Deploy</a>
+        <a href="#services" data-workspace-link="services">Services</a>
+        <a href="#logs" data-workspace-link="logs">Logs</a>
+        <a href="#lifecycle" data-workspace-link="lifecycle">Lifecycle</a>
+        <a href="#configuration" data-workspace-link="configuration">Configuration</a>
+        <a href="#certificates" data-workspace-link="certificates">Certificates</a>
+        <a href="#diagnostics" data-workspace-link="diagnostics">Diagnostics</a>
+        <a href="#audit" data-workspace-link="audit">Audit</a>
+        <a href="#docs" data-workspace-link="docs">Docs</a>
+      </nav>
+    </aside>
+
+    <main class="shell" id="top">
+      <header class="topbar">
+        <div class="brand-block">
+          <span class="eyebrow">Remote LAN operator view</span>
+          <h1>Fortify Lab Console</h1>
+          <p>Deployment control, evidence, and service readiness in one working surface.</p>
         </div>
-        <span id="connection-state" class="status">Connecting</span>
-        <span id="last-updated" class="timestamp">Waiting for data</span>
-      </div>
-    </header>
-
-    <section id="cockpit-intro" class="cockpit-intro-panel" aria-live="polite"></section>
-
-    <section class="guided-journey-panel" data-panel="guided">
-      <div class="panel-heading">
-        <span>Guided path</span>
-        <strong data-content="guided-state">Checking</strong>
-      </div>
-      <div data-content="guided" class="loading">Finding the next best step...</div>
-    </section>
-
-    <section class="summary-strip" aria-label="Deployment summary">
-      <article class="summary-card">
-        <span>Overall</span>
-        <strong data-content="summary-state">Unknown</strong>
-      </article>
-      <article class="summary-card">
-        <span>Profile</span>
-        <strong data-content="summary-profile">Waiting</strong>
-      </article>
-      <article class="summary-card">
-        <span>Namespace</span>
-        <strong data-content="summary-namespace">Pending</strong>
-      </article>
-      <article class="summary-card">
-        <span>Operations</span>
-        <strong data-content="summary-operations">0</strong>
-      </article>
-      <article class="summary-card">
-        <span>Security</span>
-        <strong data-content="summary-security">Checking</strong>
-      </article>
-    </section>
-
-    <section class="console-grid">
-      <aside class="timeline-column" data-panel="deployment">
-        <div class="panel-heading">
-          <span>Guided timeline</span>
-          <strong data-content="timeline-progress">0 / 0</strong>
-        </div>
-        <div data-content="deployment" class="loading">Loading deployment status...</div>
-      </aside>
-
-      <section class="workspace-column" aria-label="Active workspace">
-        <article class="workspace-panel" data-panel="workspace">
-          <div class="panel-heading">
-            <span>Active workspace</span>
-            <strong data-content="workspace-state">Standby</strong>
+        <div class="topbar-actions">
+          <div class="context-strip" aria-label="Current console context">
+            <span>Workspace <strong data-content="current-workspace">Dashboard</strong></span>
+            <span>Profile <strong data-content="top-profile">Waiting</strong></span>
+            <span>Namespace <strong data-content="top-namespace">Pending</strong></span>
+            <span>Active job <strong data-content="top-active-job">None</strong></span>
           </div>
-          <div data-content="workspace" class="loading">Building operator workspace...</div>
-        </article>
+          <div class="topbar-control-row">
+            <button type="button" id="open-intro" class="guide-open-button">Guide</button>
+            <div class="theme-switch" aria-label="Theme">
+              <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
+              <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+              <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+            </div>
+            <span id="connection-state" class="status">Connecting</span>
+          </div>
+          <span id="last-updated" class="timestamp">Waiting for data</span>
+        </div>
+      </header>
 
+      <section id="cockpit-intro" class="cockpit-intro-panel" aria-live="polite"></section>
+
+      <section class="workspace-page is-active" data-workspace="dashboard" aria-label="Dashboard workspace">
+        <div class="workspace-page-heading">
+          <div>
+            <span class="eyebrow">Dashboard</span>
+            <h2>Operator dashboard</h2>
+            <p>Live status, next action, resource links, and recovery signals for the lab.</p>
+          </div>
+          <a href="#guided" class="primary-action">Open guided deploy</a>
+        </div>
+        <section class="dashboard-grid">
+          <article class="dashboard-hero" data-panel="dashboard-next">
+            <div class="panel-heading">
+              <span>Next best action</span>
+              <strong data-content="dashboard-state">Checking</strong>
+            </div>
+            <div data-content="dashboard-next" class="loading">Preparing the recommended path...</div>
+          </article>
+          <article class="dashboard-card" data-panel="dashboard-job">
+            <div class="panel-heading">
+              <span>Active job</span>
+              <strong data-content="dashboard-job-state">None</strong>
+            </div>
+            <div data-content="dashboard-job" class="loading">Checking operation jobs...</div>
+          </article>
+          <article class="dashboard-card dashboard-progress" data-panel="dashboard-progress">
+            <div class="panel-heading">
+              <span>Guided progress</span>
+              <strong data-content="dashboard-progress-count">0 / 0</strong>
+            </div>
+            <div data-content="dashboard-progress" class="loading">Loading progress...</div>
+          </article>
+          <article class="dashboard-wide" data-panel="dashboard-services">
+            <div class="panel-heading">
+              <span>Resource links</span>
+              <strong data-content="dashboard-service-count">0 services</strong>
+            </div>
+            <div data-content="dashboard-services" class="loading">Loading service links...</div>
+          </article>
+          <article class="dashboard-card" data-panel="dashboard-uptime">
+            <div class="panel-heading">
+              <span>Uptime summary</span>
+              <strong data-content="dashboard-uptime-count">Waiting</strong>
+            </div>
+            <div data-content="dashboard-uptime" class="loading">Loading service checks...</div>
+          </article>
+          <article class="dashboard-card" data-panel="dashboard-recovery">
+            <div class="panel-heading">
+              <span>Recent activity & recovery</span>
+              <strong data-content="dashboard-recovery-count">0 items</strong>
+            </div>
+            <div data-content="dashboard-recovery" class="loading">Loading recovery guidance...</div>
+          </article>
+        </section>
+      </section>
+
+      <section class="workspace-page" data-workspace="guided" aria-label="Guided deployment workspace">
+        <section class="guided-journey-panel" data-panel="guided">
+          <div class="panel-heading">
+            <span>Guided path</span>
+            <strong data-content="guided-state">Checking</strong>
+          </div>
+          <div data-content="guided" class="loading">Finding the next best step...</div>
+        </section>
+
+        <section class="summary-strip" aria-label="Deployment summary">
+          <article class="summary-card">
+            <span>Overall</span>
+            <strong data-content="summary-state">Unknown</strong>
+          </article>
+          <article class="summary-card">
+            <span>Profile</span>
+            <strong data-content="summary-profile">Waiting</strong>
+          </article>
+          <article class="summary-card">
+            <span>Namespace</span>
+            <strong data-content="summary-namespace">Pending</strong>
+          </article>
+          <article class="summary-card">
+            <span>Operations</span>
+            <strong data-content="summary-operations">0</strong>
+          </article>
+          <article class="summary-card">
+            <span>Security</span>
+            <strong data-content="summary-security">Checking</strong>
+          </article>
+        </section>
+
+        <section class="guided-workspace-grid">
+          <aside class="timeline-column" data-panel="deployment">
+            <div class="panel-heading">
+              <span>Guided timeline</span>
+              <strong data-content="timeline-progress">0 / 0</strong>
+            </div>
+            <div data-content="deployment" class="loading">Loading deployment status...</div>
+          </aside>
+
+          <section class="workspace-column" aria-label="Active workspace">
+            <article class="workspace-panel" data-panel="workspace">
+              <div class="panel-heading">
+                <span>Active workspace</span>
+                <strong data-content="workspace-state">Standby</strong>
+              </div>
+              <div data-content="workspace" class="loading">Building operator workspace...</div>
+            </article>
+          </section>
+        </section>
+      </section>
+
+      <section class="workspace-page" data-workspace="services" aria-label="Services workspace">
         <article class="launchpad-panel" data-panel="routes">
           <div class="panel-heading">
             <span>Service launchpad</span>
@@ -84,7 +172,19 @@
           </div>
           <div data-content="routes" class="loading">Loading route checks...</div>
         </article>
+      </section>
 
+      <section class="workspace-page" data-workspace="logs" aria-label="Logs workspace">
+        <article class="side-panel" data-panel="logs">
+          <div class="panel-heading">
+            <span>Evidence queue</span>
+            <strong data-content="logs-count">0 pods</strong>
+          </div>
+          <div data-content="logs" class="loading">Loading log options...</div>
+        </article>
+      </section>
+
+      <section class="workspace-page" data-workspace="lifecycle" aria-label="Lifecycle workspace">
         <article class="lifecycle-panel" data-panel="lifecycle">
           <div class="panel-heading">
             <span>Lifecycle controls</span>
@@ -94,15 +194,7 @@
         </article>
       </section>
 
-      <aside class="evidence-column" aria-label="Evidence and health">
-        <article class="side-panel" data-panel="logs">
-          <div class="panel-heading">
-            <span>Evidence queue</span>
-            <strong data-content="logs-count">0 pods</strong>
-          </div>
-          <div data-content="logs" class="loading">Loading log options...</div>
-        </article>
-
+      <section class="workspace-page" data-workspace="configuration" aria-label="Configuration workspace">
         <article class="side-panel" data-panel="configuration">
           <div class="panel-heading">
             <span>Configuration</span>
@@ -110,7 +202,9 @@
           </div>
           <div data-content="configuration" class="loading">Loading configuration summary...</div>
         </article>
+      </section>
 
+      <section class="workspace-page" data-workspace="certificates" aria-label="Certificates workspace">
         <article class="side-panel" data-panel="certificates">
           <div class="panel-heading">
             <span>Certificates</span>
@@ -118,7 +212,9 @@
           </div>
           <div data-content="certificates" class="loading">Loading certificate summary...</div>
         </article>
+      </section>
 
+      <section class="workspace-page split-workspace" data-workspace="diagnostics" aria-label="Diagnostics workspace">
         <article class="side-panel" data-panel="health">
           <div class="panel-heading">
             <span>Health notes</span>
@@ -126,15 +222,6 @@
           </div>
           <div data-content="health" class="loading">Loading diagnostics...</div>
         </article>
-
-        <article class="side-panel" data-panel="help">
-          <div class="panel-heading">
-            <span>Operator guide</span>
-            <strong data-content="help-count">Ready</strong>
-          </div>
-          <div data-content="help" class="loading">Loading contextual help...</div>
-        </article>
-
         <article class="side-panel" data-panel="security">
           <div class="panel-heading">
             <span>Security posture</span>
@@ -142,7 +229,9 @@
           </div>
           <div data-content="security" class="loading">Loading access posture...</div>
         </article>
+      </section>
 
+      <section class="workspace-page" data-workspace="audit" aria-label="Audit workspace">
         <article class="side-panel" data-panel="audit">
           <div class="panel-heading">
             <span>Action audit</span>
@@ -150,9 +239,21 @@
           </div>
           <div data-content="audit" class="loading">Loading lifecycle audit...</div>
         </article>
-      </aside>
-    </section>
-  </main>
+      </section>
+
+      <section class="workspace-page" data-workspace="docs" aria-label="Docs workspace">
+        <article class="side-panel" data-panel="help">
+          <div class="panel-heading">
+            <span>Operator guide</span>
+            <strong data-content="help-count">Ready</strong>
+          </div>
+          <div data-content="help" class="loading">Loading contextual help...</div>
+        </article>
+      </section>
+
+      <button type="button" id="back-to-top" class="back-to-top" aria-label="Back to top">Back to top</button>
+    </main>
+  </div>
   <script src="main.js"></script>
 </body>
 </html>
