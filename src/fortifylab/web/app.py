@@ -125,6 +125,8 @@ class WebConsoleApp:
             return 200, payload
         if path == "/api/deployment/guide":
             return 200, self.guided_deployment_payload(self._snapshot())
+        if path == "/api/guided/journey":
+            return 200, self.guided_journey_payload()
         if path == "/api/deployment/diagnostics":
             return 200, self.deployment_diagnostics_payload(self._snapshot())
         if path == "/api/deployment/logs":
@@ -139,7 +141,7 @@ class WebConsoleApp:
             payload["findings"] = list(route_findings(()))
             return 200, payload
         if path == "/api/config":
-            return 200, {"sections": ["identity", "urls", "versions", "credentials"], "secrets_redacted": True}
+            return 200, self.configuration_payload()
         if path == "/api/certificates":
             snapshot = self._snapshot()
             return 200, self._support_inspector(snapshot).certificate_payload(snapshot)
@@ -291,6 +293,72 @@ class WebConsoleApp:
             })
         return {"profile": snapshot.profile, "overall_state": snapshot.overall_state.value, "steps": steps}
 
+
+    def guided_journey_payload(self) -> dict[str, Any]:
+        snapshot = self._snapshot()
+        guide = self.guided_deployment_payload(snapshot)
+        config = self.configuration_payload()
+        certificates = self._support_inspector(snapshot).certificate_payload(snapshot)
+        health = self.service_health_payload()
+        diagnostics = self.deployment_diagnostics_payload(snapshot)
+        steps = guide.get("steps", [])
+        incomplete = [step for step in steps if step.get("state") != "complete"]
+        blocked = [step for step in steps if step.get("state") in {"blocked", "failed"}]
+        active = next((step for step in steps if step.get("state") == "in_progress"), None)
+        next_step = blocked[0] if blocked else active or (incomplete[0] if incomplete else None)
+        cert_ready = _certificates_ready(certificates)
+        services = health.get("services", [])
+        service_counts = _service_health_counts(services)
+        config_ready = bool(config.get("env_file", {}).get("present")) and not config.get("issues")
+        journey_state = _journey_state(config_ready, cert_ready, guide.get("overall_state"), service_counts, blocked)
+        action = _guided_next_action(next_step, config_ready, cert_ready, diagnostics, service_counts)
+        return {
+            "state": journey_state,
+            "summary": _guided_summary(journey_state, next_step),
+            "next_action": action,
+            "onboarding": {
+                "env_file": config["env_file"],
+                "configuration_ready": config_ready,
+                "certificates_ready": cert_ready,
+                "root_ca": certificates.get("root_ca"),
+                "service_urls_reported": len([service for service in services if service.get("url")]),
+            },
+            "deployment": {
+                "profile": guide.get("profile"),
+                "overall_state": guide.get("overall_state"),
+                "next_step": next_step,
+                "complete_steps": len([step for step in steps if step.get("state") == "complete"]),
+                "total_steps": len(steps),
+            },
+            "monitoring": {
+                "services": service_counts,
+                "diagnostic_findings": len(diagnostics.get("findings", [])),
+                "tool_warnings": len(diagnostics.get("tool_warnings", [])),
+            },
+            "links": [
+                {"label": "Guided timeline", "panel": "deployment"},
+                {"label": "Configuration", "panel": "configuration"},
+                {"label": "Certificates", "panel": "certificates"},
+                {"label": "Logs", "panel": "logs"},
+                {"label": "Diagnostics", "panel": "health"},
+            ],
+            "redaction": "Secrets and command paths are not returned by the guided journey API.",
+        }
+
+    def configuration_payload(self) -> dict[str, Any]:
+        env_file = self.config.env_file or Path(".env")
+        present = env_file.is_file()
+        return {
+            "sections": ["identity", "urls", "versions", "credentials"],
+            "secrets_redacted": True,
+            "env_file": {
+                "present": present,
+                "path": str(env_file),
+                "status": "found" if present else "missing",
+            },
+            "issues": () if present else ("No .env file was found for this console session.",),
+        }
+
     def deployment_diagnostics_payload(self, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
         findings = []
         for step in snapshot.steps:
@@ -433,6 +501,111 @@ def _app_id_for_step(step_id: str) -> str | None:
 def _step_has_running_workload(step: LiveStepStatus) -> bool:
     return bool(step.pods)
 
+
+
+def _certificates_ready(payload: dict[str, Any]) -> bool:
+    inventory = payload.get("inventory", [])
+    tls = next((item for item in inventory if item.get("name") == "tls"), None)
+    return bool(tls and tls.get("present") and tls.get("certificate_present") and tls.get("private_key_present"))
+
+
+def _service_health_counts(services: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {"total": len(services), "up": 0, "degraded": 0, "down": 0, "unknown": 0}
+    for service in services:
+        checks = list((service.get("checks") or {}).values())
+        if not checks:
+            counts["unknown"] += 1
+        elif any(check.get("state") == "blocked" for check in checks):
+            counts["down"] += 1
+        elif any(check.get("state") == "warning" for check in checks):
+            counts["degraded"] += 1
+        elif all(check.get("state") == "ok" for check in checks):
+            counts["up"] += 1
+        else:
+            counts["unknown"] += 1
+    return counts
+
+
+def _journey_state(config_ready: bool, cert_ready: bool, overall_state: object, service_counts: dict[str, int], blocked: list[dict[str, Any]]) -> str:
+    if not config_ready:
+        return "onboarding"
+    if not cert_ready:
+        return "certificates_needed"
+    if blocked:
+        return "blocked"
+    if overall_state == "complete" and service_counts.get("total", 0) and service_counts.get("down", 0) == 0:
+        return "ready"
+    if overall_state == "in_progress":
+        return "deploying"
+    return "continue_deployment"
+
+
+def _guided_next_action(
+    next_step: dict[str, Any] | None,
+    config_ready: bool,
+    cert_ready: bool,
+    diagnostics: dict[str, Any],
+    service_counts: dict[str, int],
+) -> dict[str, Any]:
+    if not config_ready:
+        return {
+            "label": "Review configuration",
+            "reason": "The web console cannot confirm a usable .env file yet.",
+            "panel": "configuration",
+            "kind": "onboarding",
+        }
+    if not cert_ready:
+        return {
+            "label": "Prepare TLS certificates",
+            "reason": "The lab TLS secret is not ready, so browser trust and ingress checks may fail.",
+            "panel": "certificates",
+            "kind": "onboarding",
+        }
+    if diagnostics.get("findings"):
+        finding = diagnostics["findings"][0]
+        return {
+            "label": "Open diagnostics",
+            "reason": finding.get("message") or finding.get("next_inspection") or "A deployment finding needs attention.",
+            "panel": "health",
+            "kind": "repair",
+        }
+    if next_step:
+        return {
+            "label": f"Continue: {next_step.get('label') or next_step.get('step_id')}",
+            "reason": next_step.get("detail") or "This is the next incomplete deployment step.",
+            "panel": "deployment",
+            "kind": "deployment",
+            "step_id": next_step.get("step_id"),
+        }
+    if service_counts.get("down", 0) or service_counts.get("degraded", 0):
+        return {
+            "label": "Review service health",
+            "reason": "One or more service checks need attention after deployment.",
+            "panel": "routes",
+            "kind": "monitoring",
+        }
+    return {
+        "label": "Open service launchpad",
+        "reason": "Deployment appears ready. Use the launchpad to open Fortify services and docs.",
+        "panel": "routes",
+        "kind": "launch",
+    }
+
+
+def _guided_summary(journey_state: str, next_step: dict[str, Any] | None) -> str:
+    if journey_state == "onboarding":
+        return "Finish initial setup before starting the lab deployment."
+    if journey_state == "certificates_needed":
+        return "Configuration is present; TLS material still needs attention."
+    if journey_state == "blocked":
+        label = next_step.get("label") if next_step else "deployment"
+        return f"{label} is blocked and needs operator attention."
+    if journey_state == "deploying":
+        label = next_step.get("label") if next_step else "deployment"
+        return f"{label} is in progress. You can wait, inspect logs, or open diagnostics."
+    if journey_state == "ready":
+        return "The lab is deployed and service monitoring is healthy."
+    return "Continue the guided deployment path from the next incomplete step."
 
 def _resource_for_operation(operation_id: str, snapshot: LiveDeploymentSnapshot) -> dict[str, Any]:
     if operation_id.startswith("cluster."):

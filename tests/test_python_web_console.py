@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import tempfile
 import threading
 import time
 import unittest
@@ -63,13 +65,17 @@ class PythonWebConsoleTests(unittest.TestCase):
         content_type, html = WebConsoleApp(WebConsoleConfig()).static_asset("index.html")
 
         self.assertEqual(content_type, "text/html")
-        for expected in ('data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"', 'data-panel="lifecycle"', 'data-panel="security"', 'data-panel="audit"'):
+        for expected in ('data-panel="guided"', 'data-panel="deployment"', 'data-panel="configuration"', 'data-panel="routes"', 'data-panel="certificates"', 'data-panel="lifecycle"', 'data-panel="security"', 'data-panel="audit"'):
             self.assertIn(expected, html)
         for expected in ('data-theme-choice="system"', 'data-theme-choice="light"', 'data-theme-choice="dark"'):
             self.assertIn(expected, html)
 
         _, script = WebConsoleApp(WebConsoleConfig()).static_asset("main.js")
         _, styles = WebConsoleApp(WebConsoleConfig()).static_asset("styles.css")
+        self.assertIn("/api/guided/journey", script)
+        self.assertIn("renderGuidedJourney", script)
+        self.assertIn("Next best action", script)
+        self.assertIn("data-guided-panel", script)
         self.assertIn("/api/services/health", script)
         self.assertIn("/api/security/posture", script)
         self.assertIn("/api/lifecycle/actions", script)
@@ -120,6 +126,8 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("service-lifecycle-note", styles)
         self.assertIn("expected-stopped", styles)
         self.assertIn("action failed", styles)
+        self.assertIn("guided-journey-panel", styles)
+        self.assertIn("guided-checks", styles)
         self.assertIn("lifecycle-layout", styles)
         self.assertIn("control-grid", styles)
         self.assertIn("panel-focus-button", styles)
@@ -254,12 +262,49 @@ class PythonWebConsoleTests(unittest.TestCase):
     def test_api_endpoints_cover_status_config_routes_certificates(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller(), url_health_checker=FakeURLHealthChecker())
 
-        for path in ("/api/status", "/api/config", "/api/routes", "/api/certificates", "/api/services", "/api/services/health", "/api/security/posture", "/api/lifecycle/actions", "/api/lifecycle/audit", "/api/deployment/status", "/api/deployment/guide", "/api/deployment/diagnostics", "/api/deployment/logs"):
+        for path in ("/api/status", "/api/config", "/api/routes", "/api/certificates", "/api/services", "/api/services/health", "/api/security/posture", "/api/lifecycle/actions", "/api/lifecycle/audit", "/api/deployment/status", "/api/deployment/guide", "/api/guided/journey", "/api/deployment/diagnostics", "/api/deployment/logs"):
             with self.subTest(path=path):
                 status, payload = app.api_envelope(path)
                 self.assertEqual(status, 200)
                 self.assertTrue(payload["ok"])
                 self.assertIsNone(payload["error"])
+
+
+    def test_guided_journey_api_reports_onboarding_without_secrets(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller(), support_inspector=SupportInspector(runner=fake_support_runner), url_health_checker=FakeURLHealthChecker())
+
+        status, payload = app.api_envelope("/api/guided/journey")
+
+        self.assertEqual(status, 200)
+        data = payload["data"]
+        self.assertEqual(data["state"], "onboarding")
+        self.assertEqual(data["next_action"]["panel"], "configuration")
+        self.assertFalse(data["onboarding"]["env_file"]["present"])
+        self.assertTrue(data["onboarding"]["certificates_ready"])
+        self.assertIn("deployment", data)
+        self.assertIn("monitoring", data)
+        self.assertIn("redaction", data)
+        self.assertNotIn("password", str(data).lower())
+        self.assertNotIn("./apps", str(data))
+
+    def test_guided_journey_api_points_to_diagnostics_when_configured_and_blocked(self) -> None:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as env_file:
+            env_file.write("DOMAIN=fortifydemo.local\n")
+            env_file.flush()
+            app = WebConsoleApp(
+                WebConsoleConfig(env_file=Path(env_file.name)),
+                status_poller=FakeStatusPoller(),
+                support_inspector=SupportInspector(runner=fake_support_runner),
+                url_health_checker=FakeURLHealthChecker(),
+            )
+
+            _, payload = app.api_envelope("/api/guided/journey")
+
+        data = payload["data"]
+        self.assertEqual(data["state"], "blocked")
+        self.assertEqual(data["next_action"]["panel"], "health")
+        self.assertTrue(data["onboarding"]["configuration_ready"])
+        self.assertEqual(data["deployment"]["next_step"]["step_id"], "ssc")
 
     def test_lifecycle_action_preview_is_read_only_and_redacted(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(bind_host="0.0.0.0", allow_lan=True, access_token="token"))

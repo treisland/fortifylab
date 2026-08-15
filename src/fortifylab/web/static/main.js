@@ -30,6 +30,7 @@ const store = {
   lifecycleActions: null,
   lifecycleAudit: null,
   operationJobs: null,
+  guidedJourney: null,
 };
 
 function panelTitle(panel) {
@@ -246,6 +247,55 @@ function renderRefreshCadence() {
   const generated = store.deploymentStatus?.generated_at ? new Date(store.deploymentStatus.generated_at) : new Date();
   const when = Number.isNaN(generated.valueOf()) ? "just now" : generated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   lastUpdated.textContent = `Updated ${when} · refreshes every ${Math.round(refreshIntervalMs / 1000)}s`;
+}
+
+function openPanelByName(panelName) {
+  const panel = Array.from(document.querySelectorAll("[data-panel]")).find((item) => item.dataset.panel === panelName);
+  if (panel) openFocusedPanel(panel);
+}
+
+function bindGuidedJourneyControls() {
+  for (const button of document.querySelectorAll("[data-guided-panel]")) {
+    button.addEventListener("click", () => openPanelByName(button.dataset.guidedPanel));
+  }
+}
+
+function renderGuidedJourney(data) {
+  const journey = data || {};
+  const action = journey.next_action || {};
+  const deployment = journey.deployment || {};
+  const onboarding = journey.onboarding || {};
+  const monitoring = journey.monitoring || {};
+  const serviceCounts = monitoring.services || {};
+  const links = journey.links || [];
+  setText("guided-state", pretty(journey.state || "checking"));
+  target("guided").innerHTML = `
+    <div class="guided-shell">
+      <div class="guided-primary">
+        <div>
+          <span class="guided-kicker">Next best action</span>
+          <h2>${escapeHtml(action.label || "Review lab status")}</h2>
+          <p>${escapeHtml(action.reason || journey.summary || "The console is gathering enough information to recommend the next step.")}</p>
+        </div>
+        <button type="button" class="primary-action guided-action" data-guided-panel="${escapeHtml(action.panel || "deployment")}">${escapeHtml(action.label || "Open guided timeline")}</button>
+      </div>
+      <div class="guided-checks" aria-label="Guided onboarding checkpoints">
+        ${guidedCheck("Configuration", onboarding.configuration_ready ? "ready" : "needs attention", onboarding.env_file?.present ? "Env file found" : "Env file not confirmed", "configuration")}
+        ${guidedCheck("Certificates", onboarding.certificates_ready ? "ready" : "needs attention", onboarding.root_ca ? `Root CA: ${onboarding.root_ca}` : "Root CA not reported", "certificates")}
+        ${guidedCheck("Deployment", deployment.overall_state || "pending", deployment.total_steps ? `${deployment.complete_steps || 0} of ${deployment.total_steps} steps complete` : "Waiting for profile", "deployment")}
+        ${guidedCheck("Monitoring", serviceCounts.total ? `${serviceCounts.up || 0}/${serviceCounts.total} up` : "waiting", serviceCounts.total ? `${serviceCounts.down || 0} down · ${serviceCounts.degraded || 0} degraded` : "No services reported", "routes")}
+      </div>
+      ${links.length ? `<div class="guided-links">${links.map((link) => `<button type="button" class="secondary-action" data-guided-panel="${escapeHtml(link.panel)}">${escapeHtml(link.label)}</button>`).join("")}</div>` : ""}
+    </div>`;
+  bindGuidedJourneyControls();
+}
+
+function guidedCheck(label, state, detail, panel) {
+  return `<button type="button" class="guided-check" data-guided-panel="${escapeHtml(panel)}">
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(pretty(state))}</strong>
+    <small>${escapeHtml(detail)}</small>
+  </button>`;
 }
 
 function renderSummary() {
@@ -977,7 +1027,7 @@ async function loadPanel(key, path, render) {
       renderLifecycleAudit({ entries: [], placeholder: "Lifecycle audit endpoint is not available yet." });
       return true;
     }
-    const panelMap = { config: "configuration", diagnostics: "health", deploymentStatus: "workspace", guide: "deployment", status: "summary-state", routes: "routes", securityPosture: "security" };
+    const panelMap = { config: "configuration", diagnostics: "health", deploymentStatus: "workspace", guide: "deployment", guidedJourney: "guided", status: "summary-state", routes: "routes", securityPosture: "security" };
     fail(panelMap[key] || key, error);
     return false;
   }
@@ -995,6 +1045,7 @@ async function refreshConsole(options = {}) {
   try {
     const results = await Promise.all([
       loadPanel("status", "/api/status", renderSummary),
+      loadPanel("guidedJourney", "/api/guided/journey", renderGuidedJourney),
       loadPanel("deploymentStatus", "/api/deployment/status", () => {}),
       loadPanel("guide", "/api/deployment/guide", renderDeployment),
       loadPanel("config", "/api/config", renderConfiguration),
