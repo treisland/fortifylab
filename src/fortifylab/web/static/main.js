@@ -8,7 +8,7 @@ let selectedLifecycleActionId = null;
 let lifecycleSubmitting = false;
 let panelFocusClosing = false;
 let confirmingLifecycleActionId = null;
-const expandedLogIds = new Set();
+let logWorkspace = { open: false, operationId: null, mode: "recent", tail: "120" };
 let followedLogActionId = null;
 let logFollowTimer = null;
 const logRequestsInFlight = new Set();
@@ -381,76 +381,178 @@ function renderHintList(hints) {
 }
 
 function renderLogs(data) {
-  const resources = data.resources || [];
-  const pods = resources.flatMap((resource) => (resource.pods || []).map((pod) => ({ ...pod, step_label: resource.step_label, step_state: resource.state })));
-  setText("logs-count", `${pods.length} pods`);
-  target("logs").innerHTML = pods.length
-    ? `<ul class="card-list">${pods.slice(0, 8).map((pod) => {
-        const operationId = `logs.${pod.name}`;
-        const expanded = expandedLogIds.has(operationId);
-        const following = followedLogActionId === operationId;
-        return `
-        <li class="card-row log-card ${expanded ? "is-expanded" : ""}">
-          <div class="row-main"><strong>${escapeHtml(pod.step_label || "Pod logs")}</strong><span>${escapeHtml(pod.name)}</span></div>
-          <div class="row-note">${escapeHtml(pod.phase || "unknown")} · Ready ${escapeHtml(pod.ready || "0/0")}</div>
-          <div class="log-actions">
-            <button type="button" class="secondary-action" data-log-action="${escapeHtml(operationId)}">${expanded ? "Collapse logs" : "View recent logs"}</button>
-            <button type="button" class="secondary-action" data-log-follow="${escapeHtml(operationId)}">${following ? "Stop following" : "Follow logs"}</button>
-          </div>
-          ${expanded ? renderLogOutput(operationId) : ""}
-        </li>`;
-      }).join("")}</ul>`
-    : empty("No pod log options reported yet.");
+  const pods = collectLogPods(data);
+  setText("logs-count", logWorkspace.open && logWorkspace.operationId ? "workspace open" : `${pods.length} pods`);
+  target("logs").innerHTML = `
+    ${renderLogWorkspace(pods)}
+    ${pods.length ? `<ul class="card-list compact-log-list">${pods.slice(0, 8).map(renderLogCard).join("")}</ul>` : empty("No pod log options reported yet.")}`;
   bindLogControls();
 }
 
-function renderLogOutput(operationId) {
-  const job = latestJobForAction(operationId);
+function collectLogPods(data) {
+  const resources = data?.resources || [];
+  return resources.flatMap((resource) => (resource.pods || []).map((pod) => ({
+    ...pod,
+    step_label: resource.step_label,
+    step_state: resource.state,
+    operation_id: `logs.${pod.name}`,
+  })));
+}
+
+function renderLogCard(pod) {
+  const operationId = pod.operation_id;
+  const active = logWorkspace.open && logWorkspace.operationId === operationId;
   const following = followedLogActionId === operationId;
-  if (!job) return `<div class="row-note log-placeholder">${following ? "Following logs; waiting for the first refresh." : "No log output loaded yet."}</div>`;
-  const detail = job.execution?.detail || job.message || "Log request submitted.";
-  return `<pre class="log-output">${escapeHtml(detail)}</pre>`;
+  return `<li class="card-row log-card ${active ? "is-active" : ""}">
+    <div class="row-main"><strong>${escapeHtml(pod.step_label || "Pod logs")}</strong><span>${escapeHtml(pod.name)}</span></div>
+    <div class="row-note">${escapeHtml(pod.phase || "unknown")} · Ready ${escapeHtml(pod.ready || "0/0")}</div>
+    <div class="log-actions">
+      <button type="button" class="secondary-action" data-open-log-workspace="${escapeHtml(operationId)}" data-log-mode="recent">View recent logs</button>
+      <button type="button" class="secondary-action" data-open-log-workspace="${escapeHtml(operationId)}" data-log-mode="follow">${following ? "Open following logs" : "Follow logs"}</button>
+    </div>
+  </li>`;
+}
+
+function renderLogWorkspace(pods) {
+  if (!logWorkspace.open || !logWorkspace.operationId) return "";
+  const pod = pods.find((item) => item.operation_id === logWorkspace.operationId);
+  if (!pod) {
+    stopFollowingLogs();
+    return `<section class="log-workspace"><div class="log-workspace-bar"><div><span class="eyebrow">Log workspace</span><h3>Pod no longer reported</h3></div><button type="button" class="secondary-action" data-close-log-workspace>Close</button></div><p class="row-note">The selected pod is no longer present in the latest deployment evidence.</p></section>`;
+  }
+  const following = followedLogActionId === logWorkspace.operationId;
+  const mode = following ? "follow" : logWorkspace.mode;
+  const job = latestJobForAction(logWorkspace.operationId);
+  const detail = job?.execution?.detail || job?.message || (following ? "Following logs; waiting for the first refresh." : "Open recent logs or refresh to load output.");
+  const previousSupported = Boolean(pod.previous_command);
+  return `<section class="log-workspace" aria-live="polite">
+    <div class="log-workspace-bar">
+      <div>
+        <span class="eyebrow">Log workspace</span>
+        <h3>${escapeHtml(pod.name)}</h3>
+        <p>${escapeHtml(pod.step_label || "Pod logs")} · ${escapeHtml(pod.phase || "unknown")} · Ready ${escapeHtml(pod.ready || "0/0")}</p>
+      </div>
+      <button type="button" class="secondary-action" data-close-log-workspace>Back to evidence</button>
+    </div>
+    <div class="log-toolbar" role="toolbar" aria-label="Log viewer controls">
+      <button type="button" class="secondary-action ${mode === "recent" ? "is-selected" : ""}" data-log-mode-select="recent">Recent</button>
+      <button type="button" class="secondary-action ${mode === "follow" ? "is-selected" : ""}" data-log-mode-select="follow">${following ? "Following" : "Follow"}</button>
+      <button type="button" class="secondary-action ${mode === "previous" ? "is-selected" : ""}" data-log-mode-select="previous" ${previousSupported ? "" : "disabled"}>Previous</button>
+      <label class="tail-control">Tail <select data-log-tail-size><option value="120" ${logWorkspace.tail === "120" ? "selected" : ""}>120</option><option value="250" ${logWorkspace.tail === "250" ? "selected" : ""}>250</option><option value="500" ${logWorkspace.tail === "500" ? "selected" : ""}>500</option></select></label>
+      <button type="button" class="secondary-action" data-refresh-log-workspace>Refresh</button>
+      ${following ? `<button type="button" class="secondary-action" data-pause-log-follow>Pause follow</button>` : ""}
+      <button type="button" class="secondary-action" data-copy-log-output ${job ? "" : "disabled"}>Copy</button>
+      <button type="button" class="secondary-action" data-download-log-output ${job ? "" : "disabled"}>Download</button>
+    </div>
+    ${mode === "previous" ? renderPreviousLogNotice(previousSupported) : `<pre class="log-output log-workspace-output">${escapeHtml(detail)}</pre>`}
+    <div class="row-note log-workspace-status">${escapeHtml(logWorkspaceStatusText(job, mode, logWorkspace.tail))}</div>
+  </section>`;
+}
+
+function renderPreviousLogNotice(supported) {
+  return `<div class="log-placeholder">${supported ? "Previous container logs are detected for this pod. Web execution for previous logs is not wired yet; recent and follow remain available here." : "Previous container logs are not advertised for this pod."}</div>`;
+}
+
+function logWorkspaceStatusText(job, mode, tail) {
+  if (mode === "previous") return "Previous log mode is a workspace hook until the backend exposes previous-container log execution.";
+  if (!job) return `Ready to load the most recent ${tail} log lines.`;
+  const status = jobStatusLabel(job.status || "unknown");
+  return `${status} · ${mode === "follow" ? "auto-refresh every 5s" : `tail ${tail}`}`;
+}
+
+function selectedLogOutput() {
+  const job = latestJobForAction(logWorkspace.operationId);
+  return job?.execution?.detail || job?.message || "";
 }
 
 function bindLogControls() {
-  for (const button of document.querySelectorAll("[data-log-action]")) {
-    button.addEventListener("click", () => toggleRecentLogs(button.dataset.logAction));
+  for (const button of document.querySelectorAll("[data-open-log-workspace]")) {
+    button.addEventListener("click", () => openLogWorkspace(button.dataset.openLogWorkspace, button.dataset.logMode || "recent"));
   }
-  for (const button of document.querySelectorAll("[data-log-follow]")) {
-    button.addEventListener("click", () => toggleFollowLogs(button.dataset.logFollow));
+  document.querySelector("[data-close-log-workspace]")?.addEventListener("click", closeLogWorkspace);
+  for (const button of document.querySelectorAll("[data-log-mode-select]")) {
+    button.addEventListener("click", () => setLogWorkspaceMode(button.dataset.logModeSelect));
   }
+  document.querySelector("[data-refresh-log-workspace]")?.addEventListener("click", () => refreshLogWorkspace());
+  document.querySelector("[data-pause-log-follow]")?.addEventListener("click", () => pauseLogFollow());
+  document.querySelector("[data-copy-log-output]")?.addEventListener("click", copySelectedLogOutput);
+  document.querySelector("[data-download-log-output]")?.addEventListener("click", downloadSelectedLogOutput);
+  document.querySelector("[data-log-tail-size]")?.addEventListener("change", (event) => {
+    logWorkspace = { ...logWorkspace, tail: event.target.value || "120" };
+    refreshLogWorkspace();
+  });
 }
 
-function toggleRecentLogs(operationId) {
+function openLogWorkspace(operationId, mode = "recent") {
   if (!operationId) return;
-  if (expandedLogIds.has(operationId)) {
-    expandedLogIds.delete(operationId);
+  const normalizedMode = ["recent", "follow", "previous"].includes(mode) ? mode : "recent";
+  logWorkspace = { ...logWorkspace, open: true, operationId, mode: normalizedMode };
+  if (normalizedMode === "follow") {
+    startFollowingLogs(operationId);
+  } else {
     if (followedLogActionId === operationId) stopFollowingLogs();
-    if (store.logs) renderLogs(store.logs);
-    return;
+    if (normalizedMode === "recent") submitReadOnlyOperation(operationId);
   }
-  expandedLogIds.add(operationId);
-  submitReadOnlyOperation(operationId);
+  if (store.logs) renderLogs(store.logs);
 }
 
-function toggleFollowLogs(operationId) {
-  if (!operationId) return;
-  if (followedLogActionId === operationId) {
-    stopFollowingLogs();
+function closeLogWorkspace() {
+  stopFollowingLogs();
+  logWorkspace = { ...logWorkspace, open: false, operationId: null, mode: "recent" };
+  if (store.logs) renderLogs(store.logs);
+}
+
+function setLogWorkspaceMode(mode) {
+  if (!logWorkspace.operationId) return;
+  openLogWorkspace(logWorkspace.operationId, mode);
+}
+
+function refreshLogWorkspace() {
+  if (!logWorkspace.operationId || logWorkspace.mode === "previous") {
     if (store.logs) renderLogs(store.logs);
     return;
   }
+  submitReadOnlyOperation(logWorkspace.operationId);
+}
+
+function startFollowingLogs(operationId) {
   stopFollowingLogs();
   followedLogActionId = operationId;
-  expandedLogIds.add(operationId);
   submitReadOnlyOperation(operationId);
   logFollowTimer = window.setInterval(() => submitReadOnlyOperation(operationId), refreshIntervalMs);
+}
+
+function pauseLogFollow() {
+  stopFollowingLogs();
+  logWorkspace = { ...logWorkspace, mode: "recent" };
+  if (store.logs) renderLogs(store.logs);
 }
 
 function stopFollowingLogs() {
   if (logFollowTimer) window.clearInterval(logFollowTimer);
   logFollowTimer = null;
   followedLogActionId = null;
+}
+
+async function copySelectedLogOutput() {
+  const output = selectedLogOutput();
+  if (!output || !navigator.clipboard) return;
+  await navigator.clipboard.writeText(output);
+}
+
+function downloadSelectedLogOutput() {
+  const output = selectedLogOutput();
+  if (!output) return;
+  const safeName = (logWorkspace.operationId || "logs").replace(/[^a-zA-Z0-9.-]+/g, "-");
+  const blob = new Blob([output], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeName}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function submitReadOnlyOperation(operationId) {

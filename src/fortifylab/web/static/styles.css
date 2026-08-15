@@ -947,6 +947,92 @@ p { color: var(--muted); line-height: 1.45; }
   white-space: pre-wrap;
 }
 
+.compact-log-list {
+  margin-top: 12px;
+}
+
+.log-card.is-active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line-soft));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.log-workspace {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-3) 82%, var(--accent-soft));
+}
+
+.log-workspace-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.log-workspace-bar h3 {
+  margin: 3px 0;
+  color: var(--heading);
+  font-size: 22px;
+  line-height: 1.12;
+}
+
+.log-workspace-bar p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.secondary-action.is-selected {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.tail-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tail-control select {
+  color: var(--heading);
+  background: transparent;
+  border: 0;
+  font: inherit;
+}
+
+.log-workspace-output {
+  max-height: 520px;
+  margin-top: 0;
+}
+
+.log-workspace-status {
+  padding-top: 2px;
+}
+
 .command {
   display: block;
   width: 100%;
