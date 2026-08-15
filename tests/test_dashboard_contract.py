@@ -6,6 +6,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from tests.wizard_source import read_wizard_source
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class DashboardContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        cls.wizard = read_wizard_source(ROOT)
         cls.deploy = (
             ROOT / "apps/kubernetes-dashboard/deploy.sh"
         ).read_text(encoding="utf-8")
