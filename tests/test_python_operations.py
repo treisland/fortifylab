@@ -21,8 +21,8 @@ class PythonOperationsTests(unittest.TestCase):
         self.assertIn(OperationKind.APP_LIFECYCLE, kinds)
         self.assertIn(OperationKind.LOGS, kinds)
         self.assertIn(OperationKind.RUNBOOK, kinds)
-        self.assertEqual(catalog.certs().command, ("./scripts/create-certs.sh",))
-        self.assertEqual(catalog.secrets().command, ("./scripts/create-secrets.sh",))
+        self.assertEqual(catalog.certs().command, ("bash", "./scripts/create-certs.sh"))
+        self.assertEqual(catalog.secrets().command, ("bash", "./scripts/create-secrets.sh"))
         self.assertEqual(catalog.secrets().impact, OperationImpact.MUTATION)
         self.assertIn("secret.key", catalog.secrets().warning)
 

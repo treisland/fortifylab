@@ -75,15 +75,35 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertIn("/api/lifecycle/actions", script)
         self.assertIn("/api/lifecycle/audit", script)
         self.assertIn("fallbackLifecycleActions", script)
-        self.assertIn("Execution disabled", script)
+        self.assertIn("Preview only", script)
         self.assertIn("refreshIntervalMs = 5000", script)
         self.assertIn("window.setInterval(refreshConsole, refreshIntervalMs)", script)
         self.assertIn("fortifylab.theme", script)
+        self.assertIn("setupPanelFocus", script)
+        self.assertIn("openFocusedPanel", script)
+        self.assertIn("panel-focus-overlay", script)
+        self.assertIn("closeFocusedPanel", script)
+        self.assertIn("renderActionGroups", script)
+        self.assertIn("waitForJob", script)
+        self.assertIn("postJson", script)
+        self.assertIn("data-run-lifecycle-action", script)
+        self.assertIn("View recent logs", script)
+        self.assertIn("Collapse logs", script)
+        self.assertIn("Follow logs", script)
+        self.assertIn("data-log-action", script)
+        self.assertIn("data-log-follow", script)
         self.assertIn(":root[data-theme=\"dark\"]", styles)
         self.assertIn("prefers-color-scheme: dark", styles)
         self.assertIn("uptime-strip", styles)
         self.assertIn("lifecycle-layout", styles)
-        self.assertIn("confirmation-box", styles)
+        self.assertIn("control-grid", styles)
+        self.assertIn("panel-focus-button", styles)
+        self.assertIn("is-focused-panel.lifecycle-panel", styles)
+        self.assertIn("primary-action", styles)
+        self.assertIn("action-card.is-destructive", styles)
+        self.assertIn("panel-focus-in", styles)
+        self.assertIn("inline-job-message", styles)
+        self.assertIn("log-output", styles)
 
     def test_serve_once_returns_static_index(self) -> None:
         status, headers, body = self.request_once(WebConsoleConfig(port=0), "/")
@@ -173,6 +193,27 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["data"]["job"]["execute"])
 
+    def test_mutating_web_execution_requires_enable_actions(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig())
+
+        status, payload = app.api_mutation_envelope("/api/operations/jobs", {"operation_id": "app.ssc.stop", "execute": True})
+
+        self.assertEqual(status, 403)
+        self.assertFalse(payload["ok"])
+        self.assertIn("execution is disabled", payload["error"]["message"].lower())
+
+    def test_read_only_log_action_can_create_job_without_enable_actions(self) -> None:
+        manager = OperationJobManager(runner=OperationRunner(lambda command: CommandResult(command, 0, "recent logs", "", 0.01)))
+        app = WebConsoleApp(WebConsoleConfig(), operation_jobs=manager)
+
+        status, payload = app.api_mutation_envelope("/api/operations/jobs", {"operation_id": "logs.ssc-webapp-0"})
+        job = wait_for_web_job(manager, payload["data"]["job"]["job_id"])
+
+        self.assertEqual(status, 202)
+        self.assertEqual(job.status.value, "complete")
+        self.assertTrue(job.execution.executed)
+        self.assertIn("recent logs", job.execution.stdout)
+
     def test_api_endpoints_cover_status_config_routes_certificates(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller(), url_health_checker=FakeURLHealthChecker())
 
@@ -193,12 +234,30 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertTrue(posture["data"]["actions"]["read_only"])
         self.assertTrue(posture["data"]["console"]["token_required"])
         self.assertEqual(actions["data"]["mode"], "preview_only")
-        self.assertIsNone(actions["data"]["execute_endpoint"])
+        self.assertEqual(actions["data"]["execute_endpoint"], "/api/operations/jobs")
         destroy = next(action for action in actions["data"]["actions"] if action["id"] == "app.ssc.destroy")
         self.assertEqual(destroy["confirmation"]["phrase"], "DESTROY ssc")
-        self.assertIn("./apps/ssc/destroy.sh", destroy["command_preview"])
+        self.assertNotIn("command", destroy)
+        self.assertNotIn("command_display", destroy)
+        self.assertNotIn("command_preview", destroy)
+        self.assertNotIn("./apps", str(actions))
         self.assertNotIn("password", str(actions).lower())
         self.assertEqual(audit["data"]["entries"], [])
+
+    def test_lifecycle_actions_are_dynamic_from_live_state(self) -> None:
+        app = WebConsoleApp(WebConsoleConfig(enable_actions=True), status_poller=FakeStatusPoller())
+
+        _, payload = app.api_envelope("/api/lifecycle/actions")
+        actions = {action["id"]: action for action in payload["data"]["actions"]}
+
+        self.assertIn("cluster.start", actions)
+        self.assertIn("cluster.stop", actions)
+        self.assertIn("app.ssc.stop", actions)
+        self.assertNotIn("app.ssc.start", actions)
+        self.assertIn("logs.ssc-webapp-0", actions)
+        self.assertEqual(actions["app.ssc.stop"]["resource"]["scope"], "application")
+        self.assertEqual(actions["logs.ssc-webapp-0"]["resource"]["scope"], "pod")
+        self.assertTrue(actions["app.ssc.stop"]["execution_enabled"])
 
     def test_deployment_status_api_returns_steps_and_event_timeline(self) -> None:
         status, payload = WebConsoleApp(WebConsoleConfig(), status_poller=FakeStatusPoller()).api_envelope("/api/deployment/status")
@@ -219,15 +278,15 @@ class PythonWebConsoleTests(unittest.TestCase):
         self.assertEqual(steps[0]["total"], len(steps))
         self.assertTrue(any(step["step_id"] == "ssc" and step["state"] == "blocked" for step in steps))
 
-    def test_guided_deployment_marks_prior_no_pod_steps_complete_when_later_step_is_active(self) -> None:
+    def test_guided_deployment_does_not_infer_unobserved_steps_complete(self) -> None:
         app = WebConsoleApp(WebConsoleConfig(), status_poller=FakeMysqlDeployingPoller())
         _, payload = app.api_envelope("/api/deployment/guide")
 
         steps = payload["data"]["steps"]
         by_id = {step["step_id"]: step for step in steps}
-        self.assertEqual(by_id["prereqs"]["state"], "complete")
-        self.assertEqual(by_id["inputs"]["state"], "complete")
-        self.assertEqual(by_id["secrets"]["state"], "complete")
+        self.assertEqual(by_id["prereqs"]["state"], "pending")
+        self.assertEqual(by_id["inputs"]["state"], "pending")
+        self.assertEqual(by_id["secrets"]["state"], "pending")
         self.assertEqual(by_id["mysql"]["state"], "in_progress")
 
     def test_deployment_diagnostics_are_contextual_and_redacted(self) -> None:

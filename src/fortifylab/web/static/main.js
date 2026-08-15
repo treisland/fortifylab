@@ -2,6 +2,16 @@ const token = new URLSearchParams(window.location.search).get("token");
 const refreshIntervalMs = 5000;
 const themeStorageKey = "fortifylab.theme";
 let refreshInFlight = false;
+let focusedPanel = null;
+let focusedPlaceholder = null;
+let selectedLifecycleActionId = null;
+let lifecycleSubmitting = false;
+let panelFocusClosing = false;
+const expandedLogIds = new Set();
+let followedLogActionId = null;
+let logFollowTimer = null;
+const logRequestsInFlight = new Set();
+const panelFocusAnimationMs = 180;
 const state = document.querySelector("#connection-state");
 const lastUpdated = document.querySelector("#last-updated");
 const store = {
@@ -18,7 +28,85 @@ const store = {
   securityPosture: null,
   lifecycleActions: null,
   lifecycleAudit: null,
+  operationJobs: null,
 };
+
+function panelTitle(panel) {
+  return panel.querySelector(".panel-heading span")?.textContent?.trim() || panel.dataset.panel || "Panel";
+}
+
+function closeFocusedPanel() {
+  const overlay = document.querySelector("#panel-focus-overlay");
+  if (!focusedPanel || !focusedPlaceholder) {
+    if (overlay) overlay.remove();
+    document.body.classList.remove("panel-focus-open");
+    return;
+  }
+  if (panelFocusClosing) return;
+  panelFocusClosing = true;
+  overlay?.classList.add("is-closing");
+  focusedPanel.classList.add("is-collapsing");
+  window.setTimeout(() => {
+    if (focusedPanel && focusedPlaceholder) {
+      focusedPanel.classList.remove("is-focused-panel", "is-collapsing");
+      focusedPlaceholder.replaceWith(focusedPanel);
+    }
+    focusedPanel = null;
+    focusedPlaceholder = null;
+    panelFocusClosing = false;
+    document.body.classList.remove("panel-focus-open");
+    if (overlay) overlay.remove();
+  }, panelFocusAnimationMs);
+}
+
+function openFocusedPanel(panel) {
+  if (focusedPanel === panel) {
+    closeFocusedPanel();
+    return;
+  }
+  closeFocusedPanel();
+  focusedPanel = panel;
+  focusedPlaceholder = document.createElement("div");
+  focusedPlaceholder.className = "panel-focus-placeholder";
+  panel.before(focusedPlaceholder);
+
+  const overlay = document.createElement("div");
+  overlay.id = "panel-focus-overlay";
+  overlay.className = "panel-focus-overlay";
+  const title = panelTitle(panel);
+  overlay.innerHTML = `<div class="panel-focus-shell" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)} fullscreen panel"><div class="panel-focus-bar"><div><span>Focused panel</span><strong>${escapeHtml(title)}</strong></div><button type="button" class="panel-focus-close" aria-label="Collapse fullscreen panel">Collapse</button></div><div class="panel-focus-stage"></div></div>`;
+  document.body.appendChild(overlay);
+  panel.classList.add("is-focused-panel");
+  overlay.querySelector(".panel-focus-stage").appendChild(panel);
+  overlay.querySelector(".panel-focus-close").addEventListener("click", closeFocusedPanel);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closeFocusedPanel();
+  });
+  overlay.querySelector(".panel-focus-close").focus();
+  document.body.classList.add("panel-focus-open");
+}
+
+function setupPanelFocus() {
+  for (const panel of document.querySelectorAll("[data-panel]")) {
+    const heading = panel.querySelector(".panel-heading");
+    if (!heading || heading.querySelector(".panel-focus-button")) continue;
+    const meta = heading.querySelector("strong");
+    const actions = document.createElement("div");
+    actions.className = "panel-heading-actions";
+    if (meta) actions.appendChild(meta);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "panel-focus-button";
+    button.title = `Open ${panelTitle(panel)} fullscreen`;
+    button.setAttribute("aria-label", `Open ${panelTitle(panel)} fullscreen`);
+    button.addEventListener("click", () => openFocusedPanel(panel));
+    actions.appendChild(button);
+    heading.appendChild(actions);
+  }
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeFocusedPanel();
+  });
+}
 
 function headers() {
   return token ? { "X-FortifyLab-Token": token } : {};
@@ -59,6 +147,20 @@ function setupThemeSwitch() {
 
 async function loadJson(path) {
   const response = await fetch(path, { headers: headers() });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    const message = payload.error?.message || `Request failed: ${response.status}`;
+    throw new Error(message);
+  }
+  return payload.data || {};
+}
+
+async function postJson(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
     const message = payload.error?.message || `Request failed: ${response.status}`;
@@ -229,15 +331,93 @@ function renderHintList(hints) {
 
 function renderLogs(data) {
   const resources = data.resources || [];
-  const pods = resources.flatMap((resource) => (resource.pods || []).map((pod) => ({ ...pod, step_label: resource.step_label })));
+  const pods = resources.flatMap((resource) => (resource.pods || []).map((pod) => ({ ...pod, step_label: resource.step_label, step_state: resource.state })));
   setText("logs-count", `${pods.length} pods`);
   target("logs").innerHTML = pods.length
-    ? `<ul class="card-list">${pods.slice(0, 8).map((pod) => `
-        <li class="card-row">
+    ? `<ul class="card-list">${pods.slice(0, 8).map((pod) => {
+        const operationId = `logs.${pod.name}`;
+        const expanded = expandedLogIds.has(operationId);
+        const following = followedLogActionId === operationId;
+        return `
+        <li class="card-row log-card ${expanded ? "is-expanded" : ""}">
           <div class="row-main"><strong>${escapeHtml(pod.step_label || "Pod logs")}</strong><span>${escapeHtml(pod.name)}</span></div>
-          <code class="command">${escapeHtml(commandLine(pod.recent_command))}</code>
-        </li>`).join("")}</ul>`
+          <div class="row-note">${escapeHtml(pod.phase || "unknown")} · Ready ${escapeHtml(pod.ready || "0/0")}</div>
+          <div class="log-actions">
+            <button type="button" class="secondary-action" data-log-action="${escapeHtml(operationId)}">${expanded ? "Collapse logs" : "View recent logs"}</button>
+            <button type="button" class="secondary-action" data-log-follow="${escapeHtml(operationId)}">${following ? "Stop following" : "Follow logs"}</button>
+          </div>
+          ${expanded ? renderLogOutput(operationId) : ""}
+        </li>`;
+      }).join("")}</ul>`
     : empty("No pod log options reported yet.");
+  bindLogControls();
+}
+
+function renderLogOutput(operationId) {
+  const job = latestJobForAction(operationId);
+  const following = followedLogActionId === operationId;
+  if (!job) return `<div class="row-note log-placeholder">${following ? "Following logs; waiting for the first refresh." : "No log output loaded yet."}</div>`;
+  const detail = job.execution?.detail || job.message || "Log request submitted.";
+  return `<pre class="log-output">${escapeHtml(detail)}</pre>`;
+}
+
+function bindLogControls() {
+  for (const button of document.querySelectorAll("[data-log-action]")) {
+    button.addEventListener("click", () => toggleRecentLogs(button.dataset.logAction));
+  }
+  for (const button of document.querySelectorAll("[data-log-follow]")) {
+    button.addEventListener("click", () => toggleFollowLogs(button.dataset.logFollow));
+  }
+}
+
+function toggleRecentLogs(operationId) {
+  if (!operationId) return;
+  if (expandedLogIds.has(operationId)) {
+    expandedLogIds.delete(operationId);
+    if (followedLogActionId === operationId) stopFollowingLogs();
+    if (store.logs) renderLogs(store.logs);
+    return;
+  }
+  expandedLogIds.add(operationId);
+  submitReadOnlyOperation(operationId);
+}
+
+function toggleFollowLogs(operationId) {
+  if (!operationId) return;
+  if (followedLogActionId === operationId) {
+    stopFollowingLogs();
+    if (store.logs) renderLogs(store.logs);
+    return;
+  }
+  stopFollowingLogs();
+  followedLogActionId = operationId;
+  expandedLogIds.add(operationId);
+  submitReadOnlyOperation(operationId);
+  logFollowTimer = window.setInterval(() => submitReadOnlyOperation(operationId), refreshIntervalMs);
+}
+
+function stopFollowingLogs() {
+  if (logFollowTimer) window.clearInterval(logFollowTimer);
+  logFollowTimer = null;
+  followedLogActionId = null;
+}
+
+async function submitReadOnlyOperation(operationId) {
+  if (!operationId || logRequestsInFlight.has(operationId)) return;
+  logRequestsInFlight.add(operationId);
+  try {
+    const jobPayload = await postJson("/api/operations/jobs", { operation_id: operationId });
+    const finishedJob = await waitForJob(jobPayload.job?.job_id);
+    const job = finishedJob || jobPayload.job;
+    const existingJobs = store.operationJobs?.jobs || [];
+    store.operationJobs = { jobs: [job, ...existingJobs.filter((item) => item.job_id !== job.job_id)] };
+  } catch (error) {
+    store.operationJobs = { jobs: [{ operation_id: operationId, status: "failed", message: error.message }] };
+  } finally {
+    logRequestsInFlight.delete(operationId);
+    if (store.logs) renderLogs(store.logs);
+    if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
+  }
 }
 
 function renderDiagnostics(data) {
@@ -369,7 +549,6 @@ function fallbackLifecycleActions() {
       impact: operation.impact,
       mutates: operation.impact !== "read-only",
       warning: "Backend action preview endpoint is not available yet.",
-      command_preview: [],
       confirmation: { required: operation.impact === "destructive", phrase: operation.impact === "destructive" ? "shown by backend before execution" : null },
       job: { state: "not_started", message: "Preview only; no job endpoint is available." },
     })),
@@ -378,45 +557,152 @@ function fallbackLifecycleActions() {
 
 function renderLifecycleActions(data) {
   const payload = data || fallbackLifecycleActions();
-  const actions = payload.actions || [];
-  setText("lifecycle-mode", payload.mode ? pretty(payload.mode) : "Preview only");
+  const actions = (payload.actions || []).filter((action) => action.resource?.scope !== "pod");
+  const modeLabel = payload.mode ? pretty(payload.mode) : "Preview only";
+  setText("lifecycle-mode", modeLabel);
   if (!actions.length) {
     target("lifecycle").innerHTML = empty("No lifecycle actions are available for preview yet.");
     return;
   }
-  const featured = actions.find((action) => action.confirmation?.required) || actions.find((action) => action.mutates) || actions[0];
   target("lifecycle").innerHTML = `
     <div class="lifecycle-layout">
-      <ul class="action-list">${actions.map((action) => renderActionPreview(action)).join("")}</ul>
-      <div class="confirmation-box">
-        <div class="row-main"><strong>Confirmation preview</strong>${pill(featured.impact || "unknown")}</div>
-        <p>${escapeHtml(featured.warning || "Review the command preview, dependency order, and recovery notes before enabling execution.")}</p>
-        <label class="confirmation-label" for="confirmation-preview">Required phrase</label>
-        <input id="confirmation-preview" type="text" value="${escapeHtml(featured.confirmation?.phrase || "No typed phrase required for preview")}" readonly>
-        <code class="command">${actionCommandPreview(featured).length ? escapeHtml(commandLine(actionCommandPreview(featured))) : "Command preview pending backend support."}</code>
-        <button type="button" class="disabled-action" disabled>Execution disabled</button>
-      </div>
-      <div class="job-box">
-        <div class="row-main"><strong>Job status</strong>${pill(featured.job?.state || "not_started")}</div>
-        <p>${escapeHtml(featured.job?.message || "No lifecycle job has been submitted.")}</p>
-      </div>
+      ${renderActionGroups(actions, payload)}
     </div>`;
+  bindLifecycleControls(payload);
 }
 
-function actionCommandPreview(action) {
-  return action.command_preview || action.command || [];
+function renderActionGroups(actions, payload) {
+  const labActions = actions.filter((action) => ["cluster", "maintenance"].includes(action.resource?.scope || "maintenance"));
+  const appActions = actions.filter((action) => action.resource?.scope === "application");
+  return `
+    <section class="action-group lab-controls">
+      <div class="section-heading"><h3>Overall lab controls</h3><span>${escapeHtml(payload.mode ? pretty(payload.mode) : "Preview only")}</span></div>
+      <div class="control-grid compact-controls">${labActions.length ? labActions.map((action) => renderActionPreview(action, payload)).join("") : empty("No lab-level actions are available.")}</div>
+    </section>
+    <section class="action-group deployment-controls">
+      <div class="section-heading"><h3>Individual deployment controls</h3><span>${appActions.length} actions</span></div>
+      <div class="control-grid">${appActions.length ? appActions.map((action) => renderActionPreview(action, payload)).join("") : empty("No deployment-level actions are available yet.")}</div>
+    </section>`;
 }
 
-function renderActionPreview(action) {
+function resourceSummary(action) {
+  const resource = action.resource || {};
+  const label = resource.label || resource.id || "Fortify Lab";
+  const state = resource.state ? pretty(resource.state) : "available";
+  const scope = resource.scope ? pretty(resource.scope) : "operation";
+  return `${label} · ${scope} · ${state}`;
+}
+function latestJobForAction(actionId) {
+  const jobs = store.operationJobs?.jobs || [];
+  return jobs.find((job) => job.operation_id === actionId) || null;
+}
+
+function actionHelpText(action) {
+  if (!action.mutates) return "Read-only operation. Useful for evidence collection without changing the lab.";
+  if (action.execution_enabled) return "Execution is enabled for this action.";
+  return "Execution is disabled until the web console is started with action execution enabled.";
+}
+
+function renderConfirmationControl(action) {
   const confirmation = action.confirmation || {};
-  const commandPreview = actionCommandPreview(action);
-  return `<li class="action-card">
-    <div class="row-main"><strong>${escapeHtml(action.label || action.id || "Lifecycle action")}</strong>${pill(action.impact || "unknown")}</div>
-    <div class="row-note">${escapeHtml(action.kind || "operation")} · ${action.mutates ? "mutating" : "read-only"} · ${confirmation.required ? "typed confirmation required" : "no typed confirmation"}</div>
-    ${commandPreview.length ? `<code class="command">${escapeHtml(commandLine(commandPreview))}</code>` : `<div class="row-note">Command preview will appear when backend metadata is available.</div>`}
-  </li>`;
+  if (!confirmation.required) {
+    return `<div class="confirmation-note">No typed confirmation required.</div>`;
+  }
+  const inputId = `confirm-${domId(action.id)}`;
+  return `<label class="confirmation-label" for="${escapeHtml(inputId)}">Required phrase</label><input id="${escapeHtml(inputId)}" data-confirmation-for="${escapeHtml(action.id)}" type="text" placeholder="${escapeHtml(confirmation.phrase || "Enter confirmation phrase")}" autocomplete="off">`;
 }
 
+function actionCanRun(action) {
+  return Boolean(action.execution_enabled || !action.mutates);
+}
+
+function renderActionButton(action, payload) {
+  if (!actionCanRun(action)) {
+    return `<button type="button" class="disabled-action" disabled>${payload.execute_endpoint ? "Execution unavailable" : "Preview only"}</button>`;
+  }
+  const label = action.mutates ? `Run ${action.label || "action"}` : action.kind === "logs" ? "View logs" : `Run ${action.label || "read-only action"}`;
+  return `<button type="button" class="primary-action" data-run-lifecycle-action="${escapeHtml(action.id)}" ${lifecycleSubmitting ? "disabled" : ""}>${escapeHtml(label)}</button>`;
+}
+
+async function waitForJob(jobId) {
+  if (!jobId) return null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const data = await loadJson(`/api/operations/jobs/${encodeURIComponent(jobId)}`);
+    const job = data.job;
+    if (job && !["queued", "running"].includes(job.status)) return job;
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+  }
+  return null;
+}
+async function submitLifecycleAction(action, payload) {
+  const confirmation = confirmationValueFor(action.id);
+  lifecycleSubmitting = true;
+  renderLifecycleActions(store.lifecycleActions);
+  try {
+    const jobPayload = await postJson(payload.execute_endpoint || "/api/operations/jobs", {
+      operation_id: action.id,
+      execute: Boolean(action.mutates && action.execution_enabled),
+      confirmation,
+    });
+    const finishedJob = await waitForJob(jobPayload.job?.job_id);
+    const job = finishedJob || jobPayload.job;
+    const existingJobs = store.operationJobs?.jobs || [];
+    store.operationJobs = { jobs: [job, ...existingJobs.filter((item) => item.job_id !== job.job_id)] };
+    await loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit);
+  } catch (error) {
+    store.operationJobs = { jobs: [{ operation_id: action.id, status: "failed", message: error.message }] };
+  } finally {
+    lifecycleSubmitting = false;
+    renderLifecycleActions(store.lifecycleActions);
+  }
+}
+
+function bindLifecycleControls(payload) {
+  for (const runButton of document.querySelectorAll("[data-run-lifecycle-action]")) {
+    runButton.addEventListener("click", () => {
+      const action = (payload.actions || []).find((item) => item.id === runButton.dataset.runLifecycleAction);
+      if (action && actionCanRun(action)) submitLifecycleAction(action, payload);
+    });
+  }
+}
+
+function renderActionPreview(action, payload) {
+  const confirmation = action.confirmation || {};
+  const latestJob = latestJobForAction(action.id);
+  const resource = action.resource || {};
+  return `<article class="action-card ${action.impact === "destructive" ? "is-destructive" : ""}">
+    <div class="action-card-top">
+      <div>
+        <h4>${escapeHtml(action.label || action.id || "Lifecycle action")}</h4>
+        <div class="row-note">${escapeHtml(resourceSummary(action))}</div>
+      </div>
+      ${pill(action.impact || "unknown")}
+    </div>
+    <p>${escapeHtml(action.warning || actionHelpText(action))}</p>
+    ${renderConfirmationControl(action)}
+    <div class="action-footer">
+      ${renderActionButton(action, payload)}
+      ${latestJob ? `<span class="inline-job-state">${escapeHtml(pretty(latestJob.status || "submitted"))}</span>` : ""}
+    </div>
+    ${latestJob ? `<div class="inline-job-message">${escapeHtml(jobDisplayMessage(latestJob))}</div>` : ""}
+  </article>`;
+}
+
+function confirmationValueFor(actionId) {
+  for (const input of document.querySelectorAll("[data-confirmation-for]")) {
+    if (input.dataset.confirmationFor === actionId) return input.value || null;
+  }
+  return null;
+}
+
+function domId(value) {
+  return String(value || "action").replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function jobDisplayMessage(job) {
+  const message = job.execution?.detail || job.message || "Action submitted.";
+  return message.replace(/(?:\.\/)?(?:apps|scripts)\/[^\s'"]+/g, "[operation]");
+}
 function renderLifecycleAudit(data) {
   const entries = data.entries || [];
   setText("audit-count", `${entries.length} entries`);
@@ -469,11 +755,14 @@ async function refreshConsole() {
       loadPanel("securityPosture", "/api/security/posture", renderSecurityPosture),
       loadPanel("lifecycleActions", "/api/lifecycle/actions", renderLifecycleActions),
       loadPanel("lifecycleAudit", "/api/lifecycle/audit", renderLifecycleAudit),
+      loadPanel("operationJobs", "/api/operations/jobs", () => {}),
     ]);
 
     renderSummary();
     renderWorkspace();
     renderRoutes();
+    if (store.logs) renderLogs(store.logs);
+    if (store.lifecycleActions) renderLifecycleActions(store.lifecycleActions);
 
     const loaded = results.filter(Boolean).length;
     if (loaded === results.length) {
@@ -497,4 +786,5 @@ function scheduleRefresh() {
 }
 
 setupThemeSwitch();
+setupPanelFocus();
 scheduleRefresh();
