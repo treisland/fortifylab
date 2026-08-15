@@ -1,7 +1,6 @@
 :root {
   color-scheme: light;
   --bg: #f5f7fb;
-  --bg-grid: rgba(0, 63, 127, 0.04);
   --surface: #ffffff;
   --surface-raised: #ffffff;
   --surface-soft: #eef3f8;
@@ -34,7 +33,6 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0f1722;
-  --bg-grid: rgba(93, 168, 255, 0.055);
   --surface: #172231;
   --surface-raised: #1d2a3a;
   --surface-soft: #243447;
@@ -68,7 +66,6 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #0f1722;
-    --bg-grid: rgba(93, 168, 255, 0.055);
     --surface: #172231;
     --surface-raised: #1d2a3a;
     --surface-soft: #243447;
@@ -104,9 +101,7 @@
 body {
   min-width: 320px;
   margin: 0;
-  background:
-    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px) 0 0 / 44px 44px,
-    linear-gradient(180deg, var(--bg) 0%, var(--surface-soft) 100%);
+  background: linear-gradient(180deg, var(--bg) 0%, var(--surface-soft) 100%);
   color: var(--text);
   font-family: "Aptos", "Segoe UI", system-ui, sans-serif;
 }
@@ -986,9 +981,7 @@ p { color: var(--muted); line-height: 1.45; }
   min-height: 0;
   overflow: auto;
   padding: 18px;
-  background:
-    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px) 0 0 / 44px 44px,
-    var(--surface-soft);
+  background: var(--surface-soft);
 }
 
 .is-focused-panel.is-collapsing {
@@ -1441,9 +1434,9 @@ dd { margin: 6px 0 0; color: var(--heading); overflow-wrap: anywhere; }
 }
 
 .shell {
-  width: min(1560px, 100%);
+  width: min(1760px, 100%);
   margin: 0;
-  padding: 24px;
+  padding: 28px 32px;
 }
 
 .context-strip {
@@ -1451,7 +1444,7 @@ dd { margin: 6px 0 0; color: var(--heading); overflow-wrap: anywhere; }
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-  max-width: 760px;
+  max-width: 940px;
 }
 
 .context-strip span {

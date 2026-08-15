@@ -764,7 +764,7 @@ function renderDeployment(data) {
           <div class="step-body">
             <div class="step-title"><strong>${escapeHtml(step.label || step.step_id || "Deployment step")}</strong>${pill(step.state)}</div>
             <div class="step-detail">${escapeHtml(step.detail || "Waiting for live detail.")}</div>
-            <div class="step-meta">${escapeHtml((step.pods || []).length)} pods · ${escapeHtml(step.hint_count || 0)} hints</div>
+            <div class="step-meta">${escapeHtml((step.pods || []).length)} pods · ${escapeHtml(step.hint_count || 0)} findings</div>
           </div>
         </li>`).join("")}</ol>`
     : empty("No guided deployment steps reported.");
@@ -795,7 +795,7 @@ function renderWorkspace() {
       <div class="metric-grid">
         <div class="metric"><span>Pods</span><strong>${relatedPods.length}</strong></div>
         <div class="metric"><span>Routes</span><strong>${relatedRoutes.length}</strong></div>
-        <div class="metric"><span>Hints</span><strong>${relatedHints.length}</strong></div>
+        <div class="metric"><span>Findings</span><strong>${relatedHints.length}</strong></div>
         <div class="metric"><span>Elapsed</span><strong>${escapeHtml(step.elapsed_seconds || 0)}s</strong></div>
       </div>
       ${renderPodList(relatedPods)}
