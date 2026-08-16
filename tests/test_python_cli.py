@@ -29,7 +29,7 @@ class PythonCliTests(unittest.TestCase):
     def test_module_help_discovers_initial_commands(self) -> None:
         result = self.run_module("--help")
         self.assertEqual(result.returncode, 0, result.stderr)
-        for command in ("doctor", "config", "deploy", "logs", "runbook", "tui"):
+        for command in ("doctor", "config", "deploy", "logs", "runbook", "tui", "dashboard"):
             with self.subTest(command=command):
                 self.assertIn(command, result.stdout)
 
@@ -59,6 +59,14 @@ class PythonCliTests(unittest.TestCase):
         self.assertIn("Guided deployment - Step 9 of 13", result.stdout)
         self.assertIn("Verifying Software Security Center", result.stdout)
         self.assertIn("p. Pod logs", result.stdout)
+
+    def test_dashboard_demo_renders_read_only_snapshot(self) -> None:
+        result = self.run_module("dashboard", "--demo")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Fortify Lab Dashboard", result.stdout)
+        self.assertIn("Source:   demo", result.stdout)
+        self.assertIn("Software Security Center", result.stdout)
 
     def test_deploy_plan_prints_dry_run_orchestration_plan(self) -> None:
         result = self.run_module("deploy", "--plan", "ssc_only")

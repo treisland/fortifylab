@@ -6,13 +6,18 @@ import argparse
 import sys
 
 from .config.cli import configure_parser as configure_config_parser, run as run_config_command
+from .dashboard import collect_dashboard, render_dashboard
+from .dependencies import dependency_checks, migration_status_lines
 from .diagnostics import ClusterCollector, write_bundle
 from .operations import OperationCatalog, OperationRunner
 from .orchestration import BashOperationAdapter
-from .tui import build_demo_snapshot, build_profile, render_guided_step
+from .tui import TerminalStyle, build_demo_snapshot, build_profile, render_guided_step, render_operator_menu
 from .version import __version__
 
 _COMMAND_MESSAGES = {
+    "status": "Show Python migration status and optional dependency availability.",
+    "menu": "Render the Python operator menu shell preview.",
+    "dashboard": "Render the read-only Python dashboard preview.",
     "doctor": "Python doctor command shell is available; Bash adapter is not wired yet.",
     "config": "Python config command shell is available; config engine lands in Phase 3.4.",
     "deploy": "Python deploy command shell is available; orchestration lands in Phase 3.3.",
@@ -32,6 +37,15 @@ def build_parser() -> argparse.ArgumentParser:
     for name, message in _COMMAND_MESSAGES.items():
         sub = subparsers.add_parser(name, help=message)
         sub.set_defaults(message=message)
+        if name == "status":
+            sub.add_argument("--dependencies", action="store_true", help="include optional dependency availability")
+        if name == "menu":
+            sub.add_argument("--plain", action="store_true", help="render without ANSI color or symbols")
+        if name == "dashboard":
+            sub.add_argument("--demo", action="store_true", help="render deterministic demo dashboard data")
+            sub.add_argument("--namespace", default="fortify", help="Kubernetes namespace to inspect")
+            sub.add_argument("--kubectl", default="microk8s kubectl", help="kubectl command prefix")
+            sub.add_argument("--plain", action="store_true", help="render without ANSI color or symbols")
         if name == "doctor":
             sub.add_argument(
                 "--collect",
@@ -87,6 +101,22 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
+        return 0
+    if args.command == "status":
+        for line in migration_status_lines():
+            print(line)
+        if args.dependencies:
+            print()
+            print("Optional dependencies:")
+            for check in dependency_checks():
+                print(f"  {check.name:<10} {check.state:<9} {check.purpose}")
+        return 0
+    if args.command == "menu":
+        print(render_operator_menu(style=TerminalStyle.from_environment(plain=args.plain)), end="")
+        return 0
+    if args.command == "dashboard":
+        snapshot = collect_dashboard(demo=args.demo, namespace=args.namespace, kubectl=args.kubectl)
+        print(render_dashboard(snapshot, style=TerminalStyle.from_environment(plain=args.plain)), end="")
         return 0
     if args.command == "doctor" and args.collect:
         results = ClusterCollector().collect()

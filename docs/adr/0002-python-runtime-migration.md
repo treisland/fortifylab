@@ -29,6 +29,14 @@ Python core is stable and the operator workflow is proven.
 should become a thin launcher for the Python guided experience instead of the
 place where application logic lives.
 
+Phase 3.7-3.8 also establishes the dependency posture for the Python runtime.
+The current clone-and-run CLI continues to work with the Python standard
+library only. Richer CLI/TUI work may add a small, explicit dependency set:
+Typer for command structure, Rich for terminal output, Textual for interactive
+TUI screens, and Pydantic for typed configuration and operation contracts. These
+dependencies are declared separately from the documentation toolchain so
+operators can distinguish lab runtime needs from MkDocs publishing needs.
+
 ## Consequences
 
 - Python modules become the preferred home for new application logic.
@@ -40,6 +48,10 @@ place where application logic lives.
   call.
 - Fortify Lab remains CLI/TUI-focused; full visual cluster management stays with
   Kubernetes-native tools such as the Kubernetes Dashboard or Rancher.
+- Phase 3 does not introduce a Fortify Lab web UI. Browser-based lab
+  observation remains the job of Kubernetes Dashboard and product UIs.
+- New Python dependencies must be conservative, documented, and optional until a
+  specific Python workflow requires them.
 
 ## Alternatives considered
 
@@ -79,17 +91,32 @@ contents, registry tokens, TLS private keys, or raw application logs.
 
 ## Integration runway
 
-Phase 3 implementation PRs target `integration/cli-phases-2.7-3.6`. That branch was created
-from current `dev` and integrates accepted Phase 2 and Phase 3.0-3.6 work so Python migration work includes all accepted Phase
-2 behavior without touching `dev` or `main`.
+Phase 3.7-3.10 implementation PRs target the CLI/TUI runway branch
+`agent/phase-3.7-3.10-python-cli-tui`, created from `dev` after Phase 3.0-3.6
+was accepted. This keeps Python CLI/TUI integration work reviewable without
+touching `dev` or `main` directly.
 
 Promotion sequence:
 
-1. Merge Phase 3 feature PRs into `integration/cli-phases-2.7-3.6`.
+1. Merge Phase 3 feature PRs into `agent/phase-3.7-3.10-python-cli-tui`.
 2. Manually test customer demo and workshop/classroom scenarios from
-   `integration/cli-phases-2.7-3.6`.
-3. Open a PR from `integration/cli-phases-2.7-3.6` to `dev` only after manual validation.
+   `agent/phase-3.7-3.10-python-cli-tui`.
+3. Open a PR from `agent/phase-3.7-3.10-python-cli-tui` to `dev` only after manual validation.
 4. Promote `dev` to `main` after a second acceptance pass.
 
-Failed Phase 3 slices should be reverted or amended on `integration/cli-phases-2.7-3.6`.
+Failed Phase 3 slices should be reverted or amended on
+`agent/phase-3.7-3.10-python-cli-tui`.
 Do not repair the integration branch by pushing directly to `dev` or `main`.
+
+## Dependency policy
+
+The runtime dependency set is intentionally small:
+
+- core CLI dependencies: Typer, Rich, and Pydantic;
+- optional full TUI dependency: Textual;
+- development and documentation dependencies remain outside the runtime set.
+
+The standard-library CLI wrapper remains valid while these dependencies are
+introduced. A command that needs optional TUI dependencies must fail with a clear
+message that explains how to install the Python runtime dependencies instead of
+breaking unrelated Bash or Python preview commands.
