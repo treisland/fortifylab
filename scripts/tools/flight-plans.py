@@ -38,6 +38,8 @@ DISCOVERY_REPOSITORIES = {
     "FORTIFY_SSC_CHART_VERSION": "fortifydocker/helm-ssc",
     "FORTIFY_SSC_IMAGE_TAG": "fortifydocker/ssc-webapp",
     "FORTIFY_SCSAST_CHART_VERSION": "fortifydocker/helm-scancentral-sast",
+    "FORTIFY_SCSAST_CTRL_IMAGE_TAG": "fortifydocker/scancentral-sast-controller",
+    "FORTIFY_SCSAST_WORKER_IMAGE_TAG": "fortifydocker/scancentral-sast-sensor",
     "FORTIFY_SCDAST_CHART_VERSION": "fortifydocker/helm-scancentral-dast-core",
     "FORTIFY_LIM_CHART_VERSION": "fortifydocker/helm-lim",
 }
@@ -445,6 +447,10 @@ def discover(catalog: Catalog, family: str, output: Path, fixture_dir: Path | No
             lines.append(f"# - {note}")
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Wrote candidate Flight Plan draft: {output}")
+    print("Candidate components:")
+    for key in FORTIFY_KEYS:
+        value = selected.get(key, "") or "<review required>"
+        print(f"  {key}={value}")
     for note in notes:
         print(f"INFO: {note}")
     for warning in warnings:
