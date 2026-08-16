@@ -1758,19 +1758,220 @@ EOF
     done
 }
 
-versions_menu() {
-    title "Image versions"
-    section "Configured (.env)"
-    grep -E '^\s*export\s+FORTIFY_.*(CHART_VERSION|IMAGE_TAG)=' "$ENV_FILE" \
-        | sed 's/^\s*export\s*/  /'
-    section "Running"
-    if cluster_reachable; then
-        $KUBECTL -n "$NAMESPACE" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}' 2>/dev/null \
-            | awk -F'\t' '{ printf "  %-50s %s\n", $1, $2 }'
-    else
-        note "(cluster unreachable)"
+flight_plan_tool() {
+    local tool root
+    tool="$FORTIFY_HOME_K8S/scripts/tools/flight-plans.py"
+    if [ ! -f "$tool" ]; then
+        root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+        tool="$root/scripts/tools/flight-plans.py"
     fi
+    python3 "$tool" "$@"
+}
+
+flight_plan_default_id() {
+    flight_plan_tool default 2>/dev/null || printf '%s\n' fortify-26.2
+}
+
+flight_plan_selected_id() {
+    printf '%s\n' "${FORTIFY_FLIGHT_PLAN:-$(flight_plan_default_id)}"
+}
+
+flight_plan_list_records() {
+    flight_plan_tool list 2>/dev/null
+}
+
+flight_plan_status_label() {
+    case "$1" in
+        recommended) printf '%s\n' Recommended ;;
+        known-good) printf '%s\n' Known-good ;;
+        legacy) printf '%s\n' Legacy ;;
+        deprecated) printf '%s\n' Deprecated ;;
+        candidate) printf '%s\n' Candidate ;;
+        *) printf '%s\n' "${1:-Unknown}" ;;
+    esac
+}
+
+flight_plan_pending_value() {
+    local key="$1" fallback="${2:-}" pair
+    shift 2 || true
+    for pair in "$@"; do
+        [ "${pair%%=*}" = "$key" ] || continue
+        printf '%s\n' "${pair#*=}"
+        return 0
+    done
+    printf '%s\n' "$fallback"
+}
+
+flight_plan_alignment_summary() {
+    local plan_id="${1:-$(flight_plan_selected_id)}" output rc=0 drift=0 unknown=0 overrides=0
+    output=$(flight_plan_tool compare-env "$plan_id" --env-file "$ENV_FILE" 2>/dev/null) || rc=$?
+    [ -n "$output" ] || { printf 'unknown\n'; return 0; }
+    drift=$(printf '%s\n' "$output" | awk -F'\t' '$2=="drifted" {c++} END{print c+0}')
+    unknown=$(printf '%s\n' "$output" | awk -F'\t' '$2=="unknown" {c++} END{print c+0}')
+    if [ "$unknown" -gt 0 ]; then
+        printf 'needs review\n'
+    elif [ "$drift" -gt 0 ] || [ "$rc" -ne 0 ]; then
+        overrides="$drift"
+        printf 'mixed (%d override%s or drift%s)\n' "$overrides" "$([ "$overrides" -eq 1 ] || printf s)" "$([ "$overrides" -eq 1 ] || printf s)"
+    else
+        printf 'aligned\n'
+    fi
+}
+
+flight_plan_current_status() {
+    local plan_id="${1:-$(flight_plan_selected_id)}"
+    printf '  Flight Plan:        %s\n' "$plan_id"
+    printf '  Alignment:          %s\n' "$(flight_plan_alignment_summary "$plan_id")"
+    printf '  Deployment profile: %s\n' "${GUIDED_DEPLOYMENT_PROFILE_LABEL:-$(guided_profile_label "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}")}"
+}
+
+flight_plan_show_comparison() {
+    local plan_id="${1:-$(flight_plan_selected_id)}" output
+    section "Flight Plan comparison"
+    output=$(flight_plan_tool compare-env "$plan_id" --env-file "$ENV_FILE" 2>/dev/null || true)
+    if [ -z "$output" ]; then
+        error "Could not compare .env to Flight Plan $plan_id. Validate the catalog."
+        return 1
+    fi
+    printf '  %-36s %-18s %-22s %s\n' "Key" "State" "Expected" "Current"
+    printf '%s\n' "$output" | while IFS=$'\t' read -r key state expected current; do
+        printf '  %-36s %-18s %-22s %s\n' "$key" "$state" "$expected" "$current"
+    done
+    cat <<'EOF'
+
+Rollback note:
+  Restoring a previous .env backup is configuration rollback only. It does not
+  downgrade application data, database schemas, or persistent volumes.
+EOF
+}
+
+flight_plan_stage_updates() {
+    local array_name="$1" plan_id="$2" line
+    local -n pending_ref="$array_name"
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        env_pending_set "$array_name" "${line%%=*}" "${line#*=}"
+    done < <(flight_plan_tool env-updates "$plan_id")
+    env_pending_set "$array_name" FORTIFY_FLIGHT_PLAN "$plan_id"
+}
+
+flight_plan_select_menu() {
+    local array_name="$1" records=() record choice plan_id label status family idx
+    local -n pending_ref="$array_name"
+    mapfile -t records < <(flight_plan_list_records)
+    [ "${#records[@]}" -gt 0 ] || { error "No usable Flight Plans found. Validate config/flight-plans.toml."; press_any; return 1; }
+    while true; do
+        title "Select Fortify Flight Plan"
+        printf '\nCurrent: %s\nPending: %s\n\n' "$(flight_plan_selected_id)" "$(flight_plan_pending_value FORTIFY_FLIGHT_PLAN '<none>' "${pending_ref[@]}")"
+        section "Available Flight Plans"
+        for idx in "${!records[@]}"; do
+            IFS=$'\t' read -r plan_id label status family <<<"${records[$idx]}"
+            printf '  %2d. %-18s %-13s %s\n' "$((idx + 1))" "$label" "$(flight_plan_status_label "$status")" "family $family"
+        done
+        cat <<'EOF'
+
+  p. Preview pending changes
+  b. Back
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            [Bb]|"") return 0 ;;
+            [Pp]) [ "${#pending_ref[@]}" -gt 0 ] && env_preview_changes "${pending_ref[@]}" || note "No pending changes."; press_any ;;
+            ''|*[!0-9]*) error "Select a Flight Plan number shown above."; sleep 1 ;;
+            *)
+                if [ "$choice" -lt 1 ] || [ "$choice" -gt "${#records[@]}" ]; then
+                    error "Out of range"; sleep 1; continue
+                fi
+                IFS=$'\t' read -r plan_id label status family <<<"${records[$((choice - 1))]}"
+                flight_plan_stage_updates "$array_name" "$plan_id"
+                note "Flight Plan staged: $label"
+                cat <<'EOF'
+
+Safety note:
+  Flight Plan changes update version settings. Downgrades do not restore app
+  data, database schemas, or persistent volumes. Use backups or a full lab reset
+  when moving backward after a deployment has run.
+EOF
+                press_any
+                return 0
+                ;;
+        esac
+    done
+}
+
+flight_plan_discovery_menu() {
+    local family output
+    title "Flight Plan Discovery"
+    cat <<'EOF'
+
+Repo-owner workflow:
+  Discover -> Draft -> Review -> Test -> Promote -> Commit
+
+Discovery queries Docker Hub for known Fortify repositories and writes a
+candidate TOML file. It does not update config/flight-plans.toml and is not
+shown to normal users until the repo owner promotes it.
+EOF
+    echo
+    ask family "Fortify family to discover, for example 26.2 or 25:" 
+    [ -n "$family" ] || return 0
+    output="$FORTIFY_HOME_K8S/tmp/flight-plan-candidates/fortify-$family.toml"
+    flight_plan_tool discover --family "$family" --output "$output"
     press_any
+}
+
+flight_plan_versions_menu() {
+    local choice pending_updates=()
+    while true; do
+        title "Deployment Versions"
+        cat <<'EOF'
+
+Purpose
+  Choose a Fortify Flight Plan or override individual component versions.
+EOF
+        section "Current configuration"
+        flight_plan_current_status
+        section "Fortify components"
+        grep -E '^\s*export\s+FORTIFY_(SSC|SCSAST|SCDAST|LIM|FLIGHT_PLAN)' "$ENV_FILE" 2>/dev/null | sed 's/^\s*export\s*/  /' || true
+        section "Database versions"
+        grep -E '^\s*export\s+FORTIFY_(MYSQL|POSTGRES)' "$ENV_FILE" 2>/dev/null | sed 's/^\s*export\s*/  /' || true
+        cat <<'EOF'
+
+Impact
+  Flight Plans align Fortify product versions. MySQL and PostgreSQL are managed
+  separately because application upgrades and database rollback are different risks.
+
+Options
+  1. Select Fortify Flight Plan
+  2. Override individual Fortify component versions
+  3. Manage database versions
+  4. Compare .env to selected Flight Plan
+  5. Discover candidate Flight Plan tags (repo owner)
+  6. Preview pending .env changes
+  7. Apply pending version changes
+
+  r. Return
+  q. Quit safely
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) flight_plan_select_menu pending_updates ;;
+            2) env_guided_section_editor "Individual Fortify component versions" versions || return $? ;;
+            3) env_guided_section_editor "Database versions" database_versions || return $? ;;
+            4) flight_plan_show_comparison; press_any ;;
+            5) flight_plan_discovery_menu ;;
+            6) [ "${#pending_updates[@]}" -gt 0 ] && env_preview_changes "${pending_updates[@]}" || note "No pending changes."; press_any ;;
+            7) env_section_apply_pending flight-plan pending_updates; press_any ;;
+            [Rr]) env_section_prompt_return pending_updates && return 0 ;;
+            [Qq]) env_section_prompt_return pending_updates && return 130 ;;
+            *) error "Invalid selection"; sleep 1 ;;
+        esac
+    done
+}
+
+versions_menu() {
+    flight_plan_versions_menu
 }
 
 fcli_path_entry_present() {
@@ -2231,7 +2432,8 @@ env_section_keys() {
     case "$1" in
         identity) printf '%s\n' NAMESPACE ;;
         urls) printf '%s\n' SSC LIM SCDAST SCSAST SSC_URL LIM_URL LIM_API_URL SCDAST_URL SCSAST_URL SCSAST_CTRL_URL ;;
-        versions) printf '%s\n' FORTIFY_SSC_CHART_VERSION FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION FORTIFY_SCSAST_CTRL_IMAGE_TAG FORTIFY_SCSAST_WORKER_IMAGE_TAG FORTIFY_SCDAST_CHART_VERSION FORTIFY_LIM_CHART_VERSION FORTIFY_MYSQL_CHART_VERSION FORTIFY_POSTGRES_CHART_VERSION FORTIFY_POSTGRES_IMAGE_TAG FORTIFY_MYSQL_IMAGE_TAG ;;
+        versions) printf '%s\n' FORTIFY_FLIGHT_PLAN FORTIFY_SSC_CHART_VERSION FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION FORTIFY_SCSAST_CTRL_IMAGE_TAG FORTIFY_SCSAST_WORKER_IMAGE_TAG FORTIFY_SCDAST_CHART_VERSION FORTIFY_LIM_CHART_VERSION ;;
+        database_versions) printf '%s\n' FORTIFY_MYSQL_CHART_VERSION FORTIFY_POSTGRES_CHART_VERSION FORTIFY_POSTGRES_IMAGE_TAG FORTIFY_MYSQL_IMAGE_TAG ;;
         credentials) printf '%s\n' DEFAULT_PASS SCDAST_SSC_USER SCDAST_SSC_PASS SCDAST_DB_OWNER_USER SCDAST_DB_OWNER_PASS SCDAST_DB_STANDARD_USER SCDAST_DB_STANDARD_PASS LIM_POOL_NAME LIM_POOL_PASS ;;
         *) return 1 ;;
     esac
@@ -2661,10 +2863,11 @@ env_repair_domain_urls() {
 }
 
 env_diagnostics() {
-    local key raw effective expected issues
+    local key raw effective expected issues rc=0
     if python_config_available; then
-        python_config_diagnostics
-        return $?
+        python_config_diagnostics || rc=$?
+        flight_plan_show_comparison "$(flight_plan_selected_id)" || rc=$?
+        return "$rc"
     fi
     title "Configuration diagnostics"
     printf '\n.env file: %s\n' "$ENV_FILE"
@@ -2683,6 +2886,7 @@ env_diagnostics() {
     else
         printf '%s\n' "$issues" | awk '{ printf "  - %s\n", $0 }'
     fi
+    flight_plan_show_comparison "$(flight_plan_selected_id)" || return $?
     return 0
 }
 
@@ -2848,7 +3052,7 @@ EOF
         case "$choice" in
             1) env_guided_section_editor "Kubernetes namespace" identity || return $? ;;
             2) domain_url_assistant ;;
-            3) env_guided_section_editor "Deployment versions" versions || return $? ;;
+            3) flight_plan_versions_menu || return $? ;;
             4) env_guided_section_editor "Credentials, users, and passwords" credentials || return $? ;;
             5) env_guided_section_editor "Advanced service URLs" urls || return $? ;;
             6) env_diagnostics; press_any ;;

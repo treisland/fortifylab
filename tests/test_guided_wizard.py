@@ -374,7 +374,7 @@ class GuidedWizardTests(unittest.TestCase):
             'prereqs_complete() { return 0; }; inputs_complete() { return 0; }; '
             'cluster_reachable() { return 0; }; microk8s() { return 0; }; '
             'KUBECTL=mock_kubectl; mock_kubectl() { return 0; }; DOMAIN=demo.test; NAMESPACE=fortify; DEFAULT_PASS=demo; '
-            'FORTIFY_SSC_CHART_VERSION=1; FORTIFY_SSC_IMAGE_TAG=1; '
+            'FORTIFY_FLIGHT_PLAN=fortify-26.2; FORTIFY_SSC_CHART_VERSION=1; FORTIFY_SSC_IMAGE_TAG=1; '
             'FORTIFY_SCSAST_CHART_VERSION=1; '
             'preflight_memory_gib() { printf 4; }; preflight_disk_gib() { printf 4; }; '
             'preflight_inputs_complete',
@@ -587,13 +587,13 @@ class GuidedWizardTests(unittest.TestCase):
         result = self.run_wizard_functions(
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
             'printf "%s\n" "export DOMAIN=valid.test" >"$ENV_FILE"; FORTIFY_DEPLOYMENT_PROFILE=sast_full; '
-            'env_config_valid() { return 0; }; inputs_complete() { return 0; }; setup_docker_auth_ready() { return 0; }; '
+            'env_config_valid() { return 0; }; inputs_complete() { return 0; }; setup_license_ready() { return 0; }; setup_docker_auth_ready() { return 0; }; '
             'setup_regcred_ready() { return 1; }; certs_ready() { return 0; }; setup_root_ca_exported() { return 0; }; '
             'setup_fcli_trust_ready() { return 1; }; cluster_reachable() { return 1; }; '
             'printf "SCORE=%s\n" "$(setup_readiness_score)"; setup_profile_preview sast_full',
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("SCORE=7/10", result.stdout)
+        self.assertIn("SCORE=8/11", result.stdout)
         self.assertIn("Profile: SAST full with SSC", result.stdout)
         self.assertIn("Software Security Center", result.stdout)
         self.assertIn("ScanCentral SAST Sensor", result.stdout)
@@ -665,14 +665,15 @@ class GuidedWizardTests(unittest.TestCase):
             'setup_hosts_guidance() { printf "  host.example.test\n"; }; '
             'setup_readiness_items() { printf "  readiness item\n"; }; '
             'setup_review_pending() { printf "  pending item\n"; }; '
-            'for step in 0 1 2 3 4 5 6 7 8; do guided_setup_step_screen "$step"; done'
+            'for step in 0 1 2 3 4 5 6 7 8 9; do guided_setup_step_screen "$step"; done'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         for expected in ("Purpose", "Impact", "Recommended next action"):
-            self.assertGreaterEqual(result.stdout.count(expected), 9)
+            self.assertGreaterEqual(result.stdout.count(expected), 10)
         self.assertIn("Orient the setup flow", result.stdout)
         self.assertIn("Define the lab identity", result.stdout)
         self.assertIn("Choose which Fortify Lab components", result.stdout)
+        self.assertIn("Select the Fortify product-version bundle", result.stdout)
         self.assertIn("Prepare Docker Hub credentials", result.stdout)
         self.assertIn("Prepare fcli", result.stdout)
 
@@ -699,6 +700,8 @@ class GuidedWizardTests(unittest.TestCase):
             "q. Quit safely",
             "deployment_versions_discover_into",
             "u. Check available versions",
+            "flight_plan_versions_menu",
+            "Select Fortify Flight Plan",
         ):
             self.assertIn(expected, WIZARD)
 

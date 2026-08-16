@@ -387,6 +387,7 @@ prereqs_complete() {
 inputs_complete() {
     [ -s "$ENV_FILE" ] || return 1
     env_config_valid || return 1
+    flight_plan_tool show "$(flight_plan_selected_id)" >/dev/null 2>&1 || return 1
     ( source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh" &&
       fortify_resolve_license_file ) >/dev/null 2>&1
 }
@@ -395,9 +396,12 @@ deployment_inputs_menu() {
     while true; do
         title "Configuration and license"
         printf '\n  .env:    %s\n' "$ENV_FILE"
-        printf '  License: %s\n\n' "$(status_license)"
+        printf '  License: %s\n' "$(status_license)"
+        flight_plan_current_status
+        echo
         echo "  1. Configuration editor"
         echo "  2. Add or review the Fortify license"
+        echo "  3. Deployment versions and Flight Plan"
         echo "  ?. Help for this step"
         echo "  r. Return to the guided step"
         echo
@@ -405,6 +409,7 @@ deployment_inputs_menu() {
         case "$choice" in
             1) edit_env ;;
             2) license_menu ;;
+            3) flight_plan_versions_menu ;;
             \?) help_show_topic overview ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
@@ -418,7 +423,7 @@ preflight_inputs_complete() {
     microk8s status >/dev/null 2>&1 || return 1
     $KUBECTL get storageclass nfs >/dev/null 2>&1 || return 1
     [ -s "$HOME/.docker/config.json" ] || return 1
-    for variable in DOMAIN NAMESPACE DEFAULT_PASS FORTIFY_SSC_CHART_VERSION \
+    for variable in DOMAIN NAMESPACE DEFAULT_PASS FORTIFY_FLIGHT_PLAN FORTIFY_SSC_CHART_VERSION \
         FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION; do
         [ -n "${!variable:-}" ] || return 1
     done
@@ -1343,6 +1348,8 @@ wizard_doctor() {
     wizard_log_event "action=doctor_start mode=doctor"
     operational_cluster_available || unavailable=1
     operational_doctor_compact_health_summary || unavailable=1
+    printf '\nFlight Plan:\n'
+    flight_plan_current_status
     printf '\nDetailed checks:\n'
     operational_doctor_hosts_resolution || true
     operational_doctor_coredns_drift || true
@@ -1654,6 +1661,8 @@ guided_deployment_menu() {
     title "Guided deployment mode"
     printf '\n  %s\n' "$(guided_mode_context_text fresh)"
     guided_print_profile_summary
+    section "Flight Plan"
+    flight_plan_current_status
     cat <<EOF
 
   1. Interactive guided deployment
@@ -1816,6 +1825,8 @@ resume_repair() {
     echo
     echo "  State is derived from current files and Kubernetes; no password or token is persisted."
     guided_print_profile_summary
+    section "Flight Plan"
+    flight_plan_current_status
     echo
     guided_collect_step_statuses
     echo
@@ -1847,6 +1858,8 @@ express_deployment_plan() {
     local idx step number=1
     section "Selected profile"
     guided_print_profile_summary
+    section "Flight Plan"
+    flight_plan_current_status
     section "Express deployment plan"
     for idx in "${!GUIDED_STEP_ID[@]}"; do
         step="${GUIDED_STEP_ID[$idx]}"
@@ -1961,11 +1974,13 @@ preflight_check() {
         error "Required NFS storage class is unavailable (use option 3)"
         return 1
     }
+    section "Flight Plan"
+    flight_plan_current_status
     [ -s "$HOME/.docker/config.json" ] || {
         error "Docker registry login is missing (use option 3)"
         return 1
     }
-    for variable in DOMAIN NAMESPACE DEFAULT_PASS FORTIFY_SSC_CHART_VERSION \
+    for variable in DOMAIN NAMESPACE DEFAULT_PASS FORTIFY_FLIGHT_PLAN FORTIFY_SSC_CHART_VERSION \
         FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION; do
         [ -n "${!variable:-}" ] || {
             error "Required .env setting is empty: $variable"
