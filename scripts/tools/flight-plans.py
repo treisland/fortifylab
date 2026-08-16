@@ -44,6 +44,16 @@ DISCOVERY_REPOSITORIES = {
     "FORTIFY_LIM_CHART_VERSION": "fortifydocker/helm-lim",
 }
 HELP_EPILOG = """
+Command groups:
+  Lab operators:
+    list, show, compare-env
+
+  Wizard and automation helpers:
+    default, env-updates, validate
+
+  Repo-owner curation:
+    discover-releases, discover, curate, promote
+
 Common workflows:
   Review curated Flight Plans:
     flight-plans.py list
@@ -60,6 +70,11 @@ Common workflows:
   Promote a reviewed candidate:
     flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
     flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status recommended --yes
+
+Safety model:
+  Read-only:  default, list, show, compare-env, discover-releases without write flags, curate
+  Writes tmp: discover, discover-releases --write-complete, discover-releases --write-all
+  Writes catalog: promote --yes
 
 Vocabulary:
   Release      A Fortify yy.quarter line such as 25.2 or 26.2 discovered from tags.
@@ -692,18 +707,88 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, epilog=HELP_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--catalog", type=Path, default=default_catalog_path(), help="Flight Plan catalog path")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("validate", help="Validate catalog structure and curated plan requirements")
-    sub.add_parser("default", help="Print the default Flight Plan id")
-    list_parser = sub.add_parser("list", help="List curated Flight Plans")
+    sub.add_parser(
+        "validate",
+        help="Validate catalog structure and curated plan requirements",
+        description="Validate config/flight-plans.toml for required schema, statuses, component keys, and exactly one recommended plan.",
+        epilog="""Example:
+  flight-plans.py validate
+
+Safety:
+  Read-only. Use this before opening or merging a catalog change.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub.add_parser(
+        "default",
+        help="Print the default Flight Plan id",
+        description="Print only the configured default Flight Plan id. This is intended for scripts and wizard integration.",
+        epilog="""Example:
+  flight-plans.py default
+
+Safety:
+  Read-only.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    list_parser = sub.add_parser(
+        "list",
+        help="List curated Flight Plans",
+        description="List Flight Plans from the catalog. Candidate plans are hidden by default so normal lab users see only curated choices.",
+        epilog="""Examples:
+  flight-plans.py list
+  flight-plans.py list --include-candidates
+
+Safety:
+  Read-only.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     list_parser.add_argument("--include-candidates", action="store_true", help="Include candidate plans normally hidden from lab users")
-    show_parser = sub.add_parser("show", help="Show one Flight Plan and its component versions")
+    show_parser = sub.add_parser(
+        "show",
+        help="Show one Flight Plan and its component versions",
+        description="Show one Flight Plan, including Fortify component versions and the separate database defaults.",
+        epilog="""Example:
+  flight-plans.py show fortify-26.2
+
+Notes:
+  Database versions are shown separately because database upgrade and rollback decisions are not part of a Flight Plan.
+
+Safety:
+  Read-only.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     show_parser.add_argument("plan_id")
-    updates_parser = sub.add_parser("env-updates", help="Print .env updates for a selected Flight Plan")
+    updates_parser = sub.add_parser(
+        "env-updates",
+        help="Print .env updates for a selected Flight Plan",
+        description="Print shell-style key=value updates for the Fortify component versions in one Flight Plan. The wizard uses this output to stage .env changes with its normal backup flow.",
+        epilog="""Examples:
+  flight-plans.py env-updates fortify-26.2
+  flight-plans.py env-updates fortify-25.x --include-empty
+
+Safety:
+  Read-only. This command prints updates but does not edit .env.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     updates_parser.add_argument("plan_id")
-    updates_parser.add_argument("--include-empty", action="store_true")
-    compare_parser = sub.add_parser("compare-env", help="Compare the current .env to a Flight Plan")
+    updates_parser.add_argument("--include-empty", action="store_true", help="Print keys even when the candidate value is blank")
+    compare_parser = sub.add_parser(
+        "compare-env",
+        help="Compare the current .env to a Flight Plan",
+        description="Compare Fortify component version values in an .env file against one Flight Plan and report aligned, drifted, or review-required fields.",
+        epilog="""Examples:
+  flight-plans.py compare-env fortify-26.2
+  flight-plans.py compare-env fortify-26.2 --env-file /path/to/.env
+
+Exit codes:
+  0  all managed Fortify component values match
+  1  one or more managed values drift from the plan
+
+Safety:
+  Read-only. Secrets are not printed.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     compare_parser.add_argument("plan_id")
-    compare_parser.add_argument("--env-file", type=Path, default=repo_root() / ".env")
+    compare_parser.add_argument("--env-file", type=Path, default=repo_root() / ".env", help=".env file to compare; defaults to the repo .env")
     discover_parser = sub.add_parser(
         "discover",
         help="Draft one candidate Flight Plan from a Fortify release",
@@ -755,7 +840,18 @@ Safety:
     promote_parser.add_argument("--status", choices=sorted(VALID_STATUSES), default="candidate")
     promote_parser.add_argument("--set-default", action="store_true")
     promote_parser.add_argument("--yes", action="store_true")
-    curate_parser = sub.add_parser("curate", help="Print the repo-owner Flight Plan curation workflow")
+    curate_parser = sub.add_parser(
+        "curate",
+        help="Print the repo-owner Flight Plan curation workflow",
+        description="Scan release candidates and print the recommended repo-owner workflow for drafting, reviewing, promoting, and validating Flight Plans.",
+        epilog="""Examples:
+  flight-plans.py curate --years 25,26
+  flight-plans.py curate --years 26
+
+Safety:
+  Read-only. This command prints guidance and does not write candidate files or the catalog.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     curate_parser.add_argument("--years", default="", help="Comma-separated release years such as 25,26")
     curate_parser.add_argument("--fixture-dir", type=Path)
     args = parser.parse_args(argv)

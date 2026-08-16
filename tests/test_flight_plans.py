@@ -295,6 +295,45 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn('[flight_plans."fortify-26.2"]', updated)
         self.assertIn('status = "known-good"', updated)
 
+    def test_top_level_help_groups_workflows_and_safety_model(self) -> None:
+        result = self.run_tool("-h")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Command groups:", result.stdout)
+        self.assertIn("Lab operators:", result.stdout)
+        self.assertIn("Repo-owner curation:", result.stdout)
+        self.assertIn("Safety model:", result.stdout)
+        self.assertIn("flight-plans.py discover-releases --years 25,26", result.stdout)
+        self.assertIn("Release      A Fortify yy.quarter line", result.stdout)
+
+    def test_subcommand_help_explains_operator_commands(self) -> None:
+        list_help = self.run_tool("list", "-h")
+        compare_help = self.run_tool("compare-env", "-h")
+        env_help = self.run_tool("env-updates", "-h")
+        self.assertEqual(list_help.returncode, 0, list_help.stderr)
+        self.assertEqual(compare_help.returncode, 0, compare_help.stderr)
+        self.assertEqual(env_help.returncode, 0, env_help.stderr)
+        self.assertIn("Candidate plans are hidden by default", list_help.stdout)
+        self.assertIn("Exit codes:", compare_help.stdout)
+        self.assertIn("Secrets are not printed", compare_help.stdout)
+        self.assertIn("does not edit .env", env_help.stdout)
+
+    def test_subcommand_help_explains_owner_commands(self) -> None:
+        discover_help = self.run_tool("discover", "-h")
+        releases_help = self.run_tool("discover-releases", "-h")
+        promote_help = self.run_tool("promote", "-h")
+        curate_help = self.run_tool("curate", "-h")
+        self.assertEqual(discover_help.returncode, 0, discover_help.stderr)
+        self.assertEqual(releases_help.returncode, 0, releases_help.stderr)
+        self.assertEqual(promote_help.returncode, 0, promote_help.stderr)
+        self.assertEqual(curate_help.returncode, 0, curate_help.stderr)
+        self.assertIn("--release RELEASE, --family RELEASE", discover_help.stdout)
+        self.assertIn("Compatibility:", discover_help.stdout)
+        self.assertIn("score candidate Flight Plan coverage", releases_help.stdout)
+        self.assertIn("--write-complete", releases_help.stdout)
+        self.assertIn("Dry run is the default", promote_help.stdout)
+        self.assertIn("--yes writes config/flight-plans.toml", promote_help.stdout)
+        self.assertIn("drafting, reviewing, promoting, and validating", curate_help.stdout)
+
     def test_shell_wrappers_delegate_to_single_catalog_implementation(self) -> None:
         result = subprocess.run(
             ["bash", "-c", 'FORTIFY_HOME_K8S="$PWD"; source scripts/lib/flight-plans.sh; flight_plan_validate_catalog; flight_plan_list'],
