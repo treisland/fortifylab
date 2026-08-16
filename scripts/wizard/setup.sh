@@ -55,6 +55,15 @@ setup_pending_set() {
     env_pending_set SETUP_PENDING_UPDATES "$1" "$2"
 }
 
+setup_pending_unset() {
+    local key="$1" pair next=()
+    for pair in "${SETUP_PENDING_UPDATES[@]}"; do
+        [ "${pair%%=*}" = "$key" ] && continue
+        next+=("$pair")
+    done
+    SETUP_PENDING_UPDATES=("${next[@]}")
+}
+
 setup_pending_action_selected() {
     local wanted="$1" action
     for action in "${SETUP_PENDING_ACTIONS[@]}"; do
@@ -74,6 +83,22 @@ setup_pending_domain_value() {
 
 setup_pending_license_value() {
     env_pending_value FORTIFY_LICENSE_FILE "$(fortifylab_license_input_path)" "${SETUP_PENDING_UPDATES[@]}"
+}
+
+setup_pending_tls_mode() {
+    env_pending_value FORTIFY_TLS_MODE "${FORTIFY_TLS_MODE:-mkcert}" "${SETUP_PENDING_UPDATES[@]}"
+}
+
+setup_pending_byo_tls_cert() {
+    env_pending_value FORTIFY_BYO_TLS_CERT "${FORTIFY_BYO_TLS_CERT:-}" "${SETUP_PENDING_UPDATES[@]}"
+}
+
+setup_pending_byo_tls_key() {
+    env_pending_value FORTIFY_BYO_TLS_KEY "${FORTIFY_BYO_TLS_KEY:-}" "${SETUP_PENDING_UPDATES[@]}"
+}
+
+setup_pending_byo_tls_ca_cert() {
+    env_pending_value FORTIFY_BYO_TLS_CA_CERT "${FORTIFY_BYO_TLS_CA_CERT:-}" "${SETUP_PENDING_UPDATES[@]}"
 }
 
 setup_profile_value() {
@@ -175,11 +200,62 @@ setup_readiness_items() {
     cluster_reachable && setup_status_line ready "Kubernetes cluster is reachable" || setup_status_line warn "Kubernetes cluster is reachable" "start MicroK8s or check kube context"
 }
 
+setup_readiness_guidance() {
+    printf '
+Readiness guidance
+'
+    printf '
+License
+'
+    printf '  Configured: %s
+' "$(setup_pending_license_value)"
+    inputs_complete && printf '  Verified:   readable, non-empty license file
+  Next:       continue
+' || printf '  Verified:   missing or unreadable
+  Impact:     deployment cannot create complete Fortify secrets
+  Next:       choose an external license path or import the file
+'
+    printf '
+Registry
+'
+    setup_docker_auth_ready && printf '  Docker login: ready
+' || printf '  Docker login: needs attention
+'
+    setup_regcred_ready && printf '  Kubernetes regcred: ready
+  Next:       continue
+' || printf '  Kubernetes regcred: missing or not verified
+  Impact:     Kubernetes may fail to pull Fortify images
+  Next:       refresh Kubernetes registry secret after cluster access is ready
+'
+    printf '
+TLS and trust
+'
+    printf '  TLS mode:   %s
+' "$(setup_tls_mode_label)"
+    certs_ready && printf '  Generated artifacts: ready
+' || printf '  Generated artifacts: need generation
+'
+    setup_root_ca_exported && printf '  Browser root CA export: ready
+' || printf '  Browser root CA export: not exported
+'
+    setup_fcli_trust_ready && printf '  fcli trust: ready or truststore available
+' || printf '  fcli trust: not configured
+'
+    printf '  Next:       regenerate TLS artifacts and refresh Kubernetes secrets after TLS changes
+'
+}
+
 setup_readiness_summary() {
     title "Setup readiness"
-    printf '\nSetup readiness: %s\n\n' "$(setup_readiness_score)"
+    printf '
+Setup readiness: %s
+
+' "$(setup_readiness_score)"
     setup_readiness_items
-    printf '\nSelected deployment profile\n'
+    setup_readiness_guidance
+    printf '
+Selected deployment profile
+'
     setup_profile_preview "$(setup_profile_value)"
 }
 
@@ -257,14 +333,143 @@ setup_registry_login() {
     printf '%s\n' "$secret" | docker login --username "$username" --password-stdin
 }
 
+setup_tls_mode_label() {
+    case "$(setup_pending_tls_mode)" in
+        byo) printf '%s
+' "bring your own certificate" ;;
+        *) printf '%s
+' "mkcert generated certificates" ;;
+    esac
+}
+
+setup_byo_tls_validate_pending() {
+    local saved_mode="${FORTIFY_TLS_MODE:-}" saved_cert="${FORTIFY_BYO_TLS_CERT:-}" saved_key="${FORTIFY_BYO_TLS_KEY:-}" saved_ca="${FORTIFY_BYO_TLS_CA_CERT:-}" rc=0
+    FORTIFY_TLS_MODE="$(setup_pending_tls_mode)"
+    FORTIFY_BYO_TLS_CERT="$(setup_pending_byo_tls_cert)"
+    FORTIFY_BYO_TLS_KEY="$(setup_pending_byo_tls_key)"
+    FORTIFY_BYO_TLS_CA_CERT="$(setup_pending_byo_tls_ca_cert)"
+    export FORTIFY_TLS_MODE FORTIFY_BYO_TLS_CERT FORTIFY_BYO_TLS_KEY FORTIFY_BYO_TLS_CA_CERT
+    fortify_tls_validate_byo_inputs || rc=$?
+    FORTIFY_TLS_MODE="$saved_mode"
+    FORTIFY_BYO_TLS_CERT="$saved_cert"
+    FORTIFY_BYO_TLS_KEY="$saved_key"
+    FORTIFY_BYO_TLS_CA_CERT="$saved_ca"
+    export FORTIFY_TLS_MODE FORTIFY_BYO_TLS_CERT FORTIFY_BYO_TLS_KEY FORTIFY_BYO_TLS_CA_CERT
+    return "$rc"
+}
+
+setup_byo_tls_stage() {
+    local cert="$1" key="$2" ca="$3" resolved_cert resolved_key resolved_ca
+    [ -n "$cert" ] || { error "Certificate path is required."; return 1; }
+    [ -n "$key" ] || { error "Private key path is required."; return 1; }
+    [ -n "$ca" ] || { error "CA/chain certificate path is required."; return 1; }
+    resolved_cert="$(realpath -- "$cert")" || { error "Could not resolve certificate path."; return 1; }
+    resolved_key="$(realpath -- "$key")" || { error "Could not resolve private key path."; return 1; }
+    resolved_ca="$(realpath -- "$ca")" || { error "Could not resolve CA/chain path."; return 1; }
+    setup_pending_set FORTIFY_TLS_MODE byo
+    setup_pending_set FORTIFY_BYO_TLS_CERT "$resolved_cert"
+    setup_pending_set FORTIFY_BYO_TLS_KEY "$resolved_key"
+    setup_pending_set FORTIFY_BYO_TLS_CA_CERT "$resolved_ca"
+    if ! setup_byo_tls_validate_pending; then
+        setup_pending_unset FORTIFY_TLS_MODE
+        setup_pending_unset FORTIFY_BYO_TLS_CERT
+        setup_pending_unset FORTIFY_BYO_TLS_KEY
+        setup_pending_unset FORTIFY_BYO_TLS_CA_CERT
+        error "BYO TLS inputs did not validate. Nothing was applied yet."
+        return 1
+    fi
+    note "BYO TLS certificate, key, and CA chain staged. Private key contents were not printed or copied."
+}
+
 setup_tls_status() {
-    printf '\nServer cert:     %s\n' "${SERVER_CERT:-$FORTIFY_HOME_K8S/certs/server.crt}"
-    printf 'Server key:      %s\n' "${SERVER_KEY:-$FORTIFY_HOME_K8S/certs/server.key}"
-    printf 'JVM truststore:  %s\n' "${TRUSTSTORE:-$FORTIFY_HOME_K8S/certs/truststore}"
-    printf 'Exported rootCA: %s\n\n' "$FORTIFY_HOME_K8S/certs/rootCA.pem"
-    certs_ready && printf 'TLS artifacts: ready\n' || printf 'TLS artifacts: need generation\n'
-    setup_root_ca_exported && printf 'Public root CA: exported\n' || printf 'Public root CA: not exported\n'
-    setup_fcli_trust_ready && printf 'fcli trust: available\n' || printf 'fcli trust: not configured\n'
+    printf '
+Purpose
+  TLS secures lab URLs and feeds Java/fcli trust artifacts used by Fortify components.
+'
+    printf '
+Current configuration
+'
+    printf '  TLS mode:        %s
+' "$(setup_tls_mode_label)"
+    printf '  Server cert:     %s
+' "${SERVER_CERT:-$FORTIFY_HOME_K8S/certs/server.crt}"
+    printf '  Server key:      %s
+' "${SERVER_KEY:-$FORTIFY_HOME_K8S/certs/server.key}"
+    printf '  JVM truststore:  %s
+' "${TRUSTSTORE:-$FORTIFY_HOME_K8S/certs/truststore}"
+    if [ "$(setup_pending_tls_mode)" = byo ]; then
+        printf '  BYO cert:        %s
+' "$(setup_pending_byo_tls_cert)"
+        printf '  BYO key:         %s
+' "$(setup_pending_byo_tls_key)"
+        printf '  BYO CA/chain:    %s
+' "$(setup_pending_byo_tls_ca_cert)"
+    fi
+    printf '
+Verification
+'
+    certs_ready && printf '  %s Generated TLS artifacts are ready
+' "$OK_MARK" || printf '  %s Generated TLS artifacts need generation
+' "$WARN_MARK"
+    if [ "$(setup_pending_tls_mode)" = byo ]; then
+        setup_byo_tls_validate_pending && printf '  %s BYO TLS inputs validate for configured lab hostnames
+' "$OK_MARK" || printf '  %s BYO TLS inputs need attention
+' "$WARN_MARK"
+    fi
+    setup_root_ca_exported && printf '  %s Public root CA is exported
+' "$OK_MARK" || printf '  %s Public root CA is not exported
+' "$WARN_MARK"
+    setup_fcli_trust_ready && printf '  %s fcli trust material is available
+' "$OK_MARK" || printf '  %s fcli trust is not configured
+' "$WARN_MARK"
+    printf '
+Impact
+'
+    printf '  Browser trust is client-side; every client must trust the issuing CA.
+'
+    printf '  After TLS changes, regenerate TLS artifacts and rerun Kubernetes secrets if deployments already exist.
+'
+    printf '
+Recommended next action
+'
+    if [ "$(setup_pending_tls_mode)" = byo ]; then
+        printf '  Generate TLS artifacts after applying BYO paths, then refresh Kubernetes secrets.
+'
+    else
+        printf '  Use mkcert for local labs, or choose BYO if your organization manages certificates.
+'
+    fi
+}
+
+setup_tls_assistant() {
+    local choice cert key ca
+    while true; do
+        title "TLS certificates and trust"
+        setup_tls_status
+        wizard_vertical_footer "TLS actions"             "1. Use mkcert-generated lab certificates"             "2. Bring your own certificate and key"             "3. Generate/regenerate TLS artifacts now"             "4. Stage root CA export"             "5. Stage fcli trust configuration"             "b. Back"
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1)
+                setup_pending_set FORTIFY_TLS_MODE mkcert
+                setup_pending_set FORTIFY_BYO_TLS_CERT ""
+                setup_pending_set FORTIFY_BYO_TLS_KEY ""
+                setup_pending_set FORTIFY_BYO_TLS_CA_CERT ""
+                note "mkcert TLS mode staged."
+                ;;
+            2)
+                ask cert "Certificate or full chain PEM path:"
+                ask key "Private key PEM path:"
+                ask ca "CA or issuer chain PEM path:"
+                setup_byo_tls_stage "$cert" "$key" "$ca"
+                ;;
+            3) run_deployment_operation certs ;;
+            4) setup_pending_action_add export-root-ca; note "Root CA export staged." ;;
+            5) setup_pending_action_add configure-fcli-trust; note "fcli trust configuration staged." ;;
+            [Bb]|"") return 0 ;;
+            *) error "Invalid TLS action"; sleep 1 ;;
+        esac
+    done
 }
 
 setup_hosts_guidance() {
@@ -389,11 +594,7 @@ guided_setup_edit_step() {
             ask value "Select:"
             case "$value" in 1) setup_registry_login ;; 2) setup_pending_action_add refresh-registry; note "Registry secret refresh staged." ;; [Bb]|"") return 0 ;; *) error "Invalid registry action"; return 1 ;; esac
             ;;
-        5)
-            wizard_vertical_footer "TLS actions" "1. Generate TLS certificates now" "2. Stage root CA export" "3. Stage fcli trust configuration" "b. Back"
-            ask value "Select:"
-            case "$value" in 1) run_deployment_operation certs ;; 2) setup_pending_action_add export-root-ca; note "Root CA export staged." ;; 3) setup_pending_action_add configure-fcli-trust; note "fcli trust configuration staged." ;; [Bb]|"") return 0 ;; *) error "Invalid TLS action"; return 1 ;; esac
-            ;;
+        5) setup_tls_assistant ;;
         6) setup_hosts_guidance; press_any ;;
         7) setup_pending_action_add configure-fcli-trust; note "fcli trust configuration staged." ;;
         8) setup_apply_pending ;;

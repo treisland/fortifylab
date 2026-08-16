@@ -73,6 +73,13 @@ class TlsContractTests(unittest.TestCase):
         self.assertEqual(ok.returncode, 0, ok.stderr)
         self.assertNotEqual(bad.returncode, 0)
 
+    def test_byo_validation_checks_certificate_expiry(self) -> None:
+        helper = HELPER.read_text(encoding="utf-8")
+        self.assertIn("fortify_tls_validate_cert_not_expired", helper)
+        self.assertIn("-checkend 0", helper)
+        self.assertIn('fortify_tls_validate_cert_not_expired "FORTIFY_BYO_TLS_CERT"', helper)
+        self.assertIn('fortify_tls_validate_cert_not_expired "FORTIFY_BYO_TLS_CA_CERT"', helper)
+
     def test_byo_validation_requires_key_match_and_required_sans(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)

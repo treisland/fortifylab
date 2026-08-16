@@ -56,6 +56,15 @@ fortify_tls_validate_key_file() {
     }
 }
 
+fortify_tls_validate_cert_not_expired() {
+    local label="$1" path="$2"
+    openssl x509 -in "$path" -checkend 0 -noout >/dev/null 2>&1 || {
+        printf '%s is expired or not currently valid: %s
+' "$label" "$path" >&2
+        return 1
+    }
+}
+
 fortify_tls_cert_key_match() {
     local cert="$1" key="$2" cert_pub key_pub
     cert_pub=$(openssl x509 -in "$cert" -pubkey -noout 2>/dev/null | openssl sha256 2>/dev/null) || return 1
@@ -109,8 +118,10 @@ fortify_tls_validate_cert_hosts() {
 
 fortify_tls_validate_byo_inputs() {
     fortify_tls_validate_cert_file "FORTIFY_BYO_TLS_CERT" "${FORTIFY_BYO_TLS_CERT:-}" || return 1
+    fortify_tls_validate_cert_not_expired "FORTIFY_BYO_TLS_CERT" "$FORTIFY_BYO_TLS_CERT" || return 1
     fortify_tls_validate_key_file "FORTIFY_BYO_TLS_KEY" "${FORTIFY_BYO_TLS_KEY:-}" || return 1
     fortify_tls_validate_cert_file "FORTIFY_BYO_TLS_CA_CERT" "${FORTIFY_BYO_TLS_CA_CERT:-}" || return 1
+    fortify_tls_validate_cert_not_expired "FORTIFY_BYO_TLS_CA_CERT" "$FORTIFY_BYO_TLS_CA_CERT" || return 1
     fortify_tls_cert_key_match "$FORTIFY_BYO_TLS_CERT" "$FORTIFY_BYO_TLS_KEY" || {
         printf 'FORTIFY_BYO_TLS_CERT and FORTIFY_BYO_TLS_KEY do not match.\n' >&2
         return 1
