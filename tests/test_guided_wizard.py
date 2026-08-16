@@ -116,7 +116,7 @@ class GuidedWizardTests(unittest.TestCase):
     def test_guided_and_express_share_one_operation_dispatcher(self) -> None:
         self.assertIn("run_deployment_operation()", WIZARD)
         self.assertIn('run_deployment_operation "$id"', WIZARD)
-        self.assertIn('guided_run_and_verify certs "Certs"', WIZARD)
+        self.assertIn('guided_run_and_verify "$step"', WIZARD)
         for operation in ("certs", "dashboard", "secrets", "mysql", "ssc", "dast"):
             self.assertIn(f"{operation})", WIZARD)
 
@@ -253,6 +253,10 @@ class GuidedWizardTests(unittest.TestCase):
             'cluster_reachable() { return 0; }; '
             'kube() { case "$*" in '
             '"-n fortify get pods --no-headers") printf "scancentral-sast-controller-0 1/1 Running 0 1m\nscancentral-sast-sensor-0 1/1 Running 0 1m\n" ;; '
+            '*"scancentral-sast-controller"*"jsonpath={.spec.replicas}"*) printf 1 ;; '
+            '*"scancentral-sast-controller"*"jsonpath={.status.readyReplicas}"*) printf 1 ;; '
+            '*"scancentral-sast-sensor"*"jsonpath={.spec.replicas}"*) printf 1 ;; '
+            '*"scancentral-sast-sensor"*"jsonpath={.status.readyReplicas}"*) printf 1 ;; '
             '*) return 1 ;; '
             'esac; }; '
             'press_any() { :; }; guided_apply_deployment_profile() { :; }; guided_deployment() { printf "START=%s\n" "$1"; }; '
@@ -699,6 +703,45 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("PROFILE=sast_standalone", result.stdout)
         self.assertIn("sast_controller", result.stdout)
         self.assertNotIn("BAD_SAVE", result.stdout)
+
+    def test_guided_profile_menu_labels_sample_apps_and_custom_separately(self) -> None:
+        self.assertIn("printf '  6. Sample applications only\\n'", WIZARD)
+        self.assertIn("printf '  7. Custom\\n\\n'", WIZARD)
+        self.assertIn("6) fortify_lab_show_action_warning vulnerable-sample; profile=sample_apps ;;", WIZARD)
+        self.assertIn("7) guided_custom_component_prompt; return $? ;;", WIZARD)
+
+    def test_sast_sensor_live_state_does_not_complete_from_controller_only(self) -> None:
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; cluster_reachable() { return 0; }; '
+            'kube() { case "$*" in '
+            '*"get pods"*) printf "scancentral-sast-controller-0 1/1 Running 0 1m\n" ;; '
+            '*"scancentral-sast-controller"*"jsonpath={.spec.replicas}"*) printf 1 ;; '
+            '*"scancentral-sast-controller"*"jsonpath={.status.readyReplicas}"*) printf 1 ;; '
+            '*) return 1 ;; esac; }; '
+            'printf "STATE=%s\n" "$(guided_step_live_state sast_sensor)"; '
+            'if sast_sensor_ready; then printf READY; else printf NOT_READY; fi'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("STATE=pending", result.stdout)
+        self.assertIn("NOT_READY", result.stdout)
+        self.assertNotIn("STATE=complete", result.stdout)
+
+    def test_sast_sensor_live_state_completes_with_sensor_workload(self) -> None:
+        result = self.run_wizard_functions(
+            'NAMESPACE=fortify; KUBECTL=kube; cluster_reachable() { return 0; }; '
+            'kube() { case "$*" in '
+            '*"get pods"*) printf "scancentral-sast-controller-0 1/1 Running 0 1m\nscancentral-sast-sensor-linux-0 1/1 Running 0 1m\n" ;; '
+            '*"scancentral-sast-controller"*"jsonpath={.spec.replicas}"*) printf 1 ;; '
+            '*"scancentral-sast-controller"*"jsonpath={.status.readyReplicas}"*) printf 1 ;; '
+            '*"scancentral-sast-sensor-linux"*"jsonpath={.spec.replicas}"*) printf 1 ;; '
+            '*"scancentral-sast-sensor-linux"*"jsonpath={.status.readyReplicas}"*) printf 1 ;; '
+            '*) return 1 ;; esac; }; '
+            'printf "STATE=%s\n" "$(guided_step_live_state sast_sensor)"; '
+            'if sast_sensor_ready; then printf READY; else printf NOT_READY; fi'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("STATE=complete", result.stdout)
+        self.assertIn("READY", result.stdout)
 
     def test_optional_skip_is_explicit_and_required_skip_is_rejected(self) -> None:
         self.assertIn("GUIDED_ALL_STEP_OPTIONAL=(1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1)", WIZARD)
@@ -1252,6 +1295,59 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertNotIn("VERIFY:postgresql", result.stdout)
         self.assertNotIn("VERIFY:lim", result.stdout)
         self.assertNotIn("VERIFY:dast", result.stdout)
+
+    def test_express_deployment_uses_selected_profile_steps(self) -> None:
+        result = self.run_wizard_functions(
+            'FORTIFY_DEPLOYMENT_PROFILE=sast_full; '
+            'fresh_deployment_guard() { return 0; }; wizard_deployment_plan() { :; }; '
+            'confirm() { return 0; }; press_any() { :; }; '
+            'guided_run_and_verify() { printf "VERIFY:%s:%s\n" "$1" "$2"; }; '
+            'deploy_from_scratch'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        verifies = [line for line in result.stdout.splitlines() if line.startswith("VERIFY:")]
+        self.assertEqual(
+            verifies,
+            [
+                "VERIFY:preflight:Deployment pre-flight",
+                "VERIFY:certs:TLS certificates",
+                "VERIFY:dashboard:Kubernetes Dashboard",
+                "VERIFY:secrets:Kubernetes Secrets",
+                "VERIFY:mysql:MySQL",
+                "VERIFY:ssc:Software Security Center",
+                "VERIFY:sast_controller:ScanCentral SAST Controller",
+                "VERIFY:sast_sensor:ScanCentral SAST Sensor",
+            ],
+        )
+        self.assertNotIn("VERIFY:postgresql", result.stdout)
+        self.assertNotIn("VERIFY:lim", result.stdout)
+        self.assertNotIn("VERIFY:dast", result.stdout)
+        self.assertNotIn("VERIFY:configure", result.stdout)
+
+    def test_express_deployment_ssc_only_skips_sast_and_dast_steps(self) -> None:
+        result = self.run_wizard_functions(
+            'FORTIFY_DEPLOYMENT_PROFILE=ssc_only; '
+            'fresh_deployment_guard() { return 0; }; wizard_deployment_plan() { :; }; '
+            'confirm() { return 0; }; press_any() { :; }; '
+            'guided_run_and_verify() { printf "VERIFY:%s:%s\n" "$1" "$2"; }; '
+            'deploy_from_scratch'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        verifies = [line for line in result.stdout.splitlines() if line.startswith("VERIFY:")]
+        self.assertEqual(
+            verifies,
+            [
+                "VERIFY:preflight:Deployment pre-flight",
+                "VERIFY:certs:TLS certificates",
+                "VERIFY:dashboard:Kubernetes Dashboard",
+                "VERIFY:secrets:Kubernetes Secrets",
+                "VERIFY:mysql:MySQL",
+                "VERIFY:ssc:Software Security Center",
+            ],
+        )
+        self.assertNotIn("VERIFY:sast", result.stdout)
+        self.assertNotIn("VERIFY:dast", result.stdout)
+        self.assertNotIn("VERIFY:lim", result.stdout)
 
     def test_lifecycle_shutdown_uses_selected_profile_scripts(self) -> None:
         result = self.run_wizard_functions(

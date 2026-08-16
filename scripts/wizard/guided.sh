@@ -236,7 +236,8 @@ guided_profile_menu() {
     printf '  3. SAST full with SSC (SSC + controller + sensor)\n'
     printf '  4. DAST full (SSC + LIM + DAST Core + scanner)\n'
     printf '  5. Full lab\n'
-    printf '  6. Custom\n\n'
+    printf '  6. Sample applications only\n'
+    printf '  7. Custom\n\n'
     guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
     printf 'Current saved profile:\n'
     guided_print_profile_summary
@@ -520,6 +521,49 @@ sast_pods_in_progress() {
     pod_prefix_in_progress scancentral-sast
 }
 
+sast_sensor_workload_names() {
+    printf '%s\n' scancentral-sast-sensor-linux scancentral-sast-sensor scancentral-sast-worker-linux
+}
+
+sast_sensor_workload_ready() {
+    local name
+    for name in $(sast_sensor_workload_names); do
+        if workload_ready "$NAMESPACE" statefulset "$name"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+sast_sensor_workload_in_progress() {
+    local name
+    for name in $(sast_sensor_workload_names); do
+        if statefulset_in_progress "$NAMESPACE" "$name"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+sast_sensor_pending_detail() {
+    local name existing=""
+    cluster_reachable || { printf '%s\n' "Cluster is not reachable while checking the SAST sensor."; return 0; }
+    if ! sast_controller_ready; then
+        printf '%s\n' "Waiting for the SAST controller StatefulSet before checking the sensor."
+        return 0
+    fi
+    for name in $(sast_sensor_workload_names); do
+        if resource_exists "$NAMESPACE" statefulset "$name"; then
+            existing="$existing $name"
+        fi
+    done
+    if [ -z "$existing" ]; then
+        printf 'No SAST sensor StatefulSet found. Checked: %s.\n' "$(sast_sensor_workload_names | paste -sd ' ' -)"
+    else
+        printf 'Waiting for SAST sensor StatefulSet readiness. Found:%s.\n' "$existing"
+    fi
+}
+
 pod_prefix_ready() {
     local prefix="$1" pods total ready
     cluster_reachable || return 1
@@ -626,7 +670,7 @@ sast_controller_ready() {
 }
 
 sast_sensor_ready() {
-    sast_controller_ready && workload_ready "$NAMESPACE" statefulset scancentral-sast-worker-linux
+    sast_controller_ready && sast_sensor_workload_ready
 }
 
 sast_ready() {
@@ -676,7 +720,7 @@ guided_step_live_complete() {
         ssc) pod_prefix_ready ssc-webapp ;;
         lim) pod_prefix_ready lim ;;
         sast_controller) pod_prefix_ready scancentral-sast-controller ;;
-        sast_sensor|sast) pod_prefix_ready scancentral-sast ;;
+        sast_sensor|sast) sast_sensor_ready ;;
         dast_core) pod_prefix_ready sdast-core ;;
         dast_scanner|dast) pod_prefix_ready sdast ;;
         *) guided_step_complete "$1" ;;
@@ -690,7 +734,7 @@ guided_step_live_in_progress() {
         ssc) pod_prefix_in_progress ssc-webapp ;;
         lim) pod_prefix_in_progress lim ;;
         sast_controller) pod_prefix_in_progress scancentral-sast-controller ;;
-        sast_sensor|sast) pod_prefix_in_progress scancentral-sast ;;
+        sast_sensor|sast) sast_sensor_workload_in_progress || { sast_controller_ready && pod_prefix_in_progress scancentral-sast-sensor; } ;;
         dast_core) pod_prefix_in_progress sdast-core ;;
         dast_scanner|dast) pod_prefix_in_progress sdast ;;
         *) guided_step_in_progress "$1" ;;
@@ -784,7 +828,7 @@ guided_step_in_progress() {
         ssc) statefulset_in_progress "$NAMESPACE" ssc-webapp ;;
         lim) statefulset_in_progress "$NAMESPACE" lim ;;
         sast_controller) statefulset_in_progress "$NAMESPACE" scancentral-sast-controller ;;
-        sast_sensor|sast) sast_pods_in_progress ;;
+        sast_sensor|sast) sast_sensor_workload_in_progress || { sast_controller_ready && pod_prefix_in_progress scancentral-sast-sensor; } ;;
         dast_core)
             statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-api ||
                 statefulset_in_progress "$NAMESPACE" sdast-core-scancentral-dast-core-globalservice ||
@@ -838,7 +882,7 @@ guided_step_progress_message() {
         ssc) guided_component_endpoint_detail ssc-service ssc-ingress "${SSC:?SSC is required}" "${SSC_URL:?SSC_URL is required}" ;;
         lim) guided_component_endpoint_detail lim lim-ingress "${LIM:?LIM is required}" "${LIM_URL:?LIM_URL is required}" ;;
         sast_controller) printf '%s\n' "Waiting for the SAST controller StatefulSet." ;;
-        sast_sensor|sast) printf '%s\n' "Waiting for the SAST sensor after the controller is ready." ;;
+        sast_sensor|sast) sast_sensor_pending_detail ;;
         dast_core)
             source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
             FORTIFY_HEALTH_HTTP_MAX_TIME=3 health_http_detail "${SCDAST_URL:?SCDAST_URL is required}"
@@ -1787,42 +1831,49 @@ resume_repair() {
     guided_deployment "$start"
 }
 
-deploy_from_scratch() {
-    fortify_lab_require_acknowledgement || return 1
-    GUIDED_MODE_CONTEXT=fresh
-    title "Deploy lab from scratch"
-    fresh_deployment_guard || { press_any; return 1; }
-    wizard_deployment_plan
+express_step_runnable() {
+    case "$1" in
+        prereqs|inputs|configure) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+express_deployment_plan() {
+    local idx step number=1
+    section "Selected profile"
+    guided_print_profile_summary
+    section "Express deployment plan"
+    for idx in "${!GUIDED_STEP_ID[@]}"; do
+        step="${GUIDED_STEP_ID[$idx]}"
+        express_step_runnable "$step" || continue
+        printf '  %2d. %s (%s)\n' "$number" "${GUIDED_STEP_LABEL[$idx]}" "${GUIDED_STEP_IMPACT[$idx]}"
+        number=$((number + 1))
+    done
     cat <<EOF
 
-  This will run, in order:
-    1. Pre-flight checks (license, prereqs, cluster reachable)
-    2. scripts/create-certs.sh
-    3. Kubernetes Dashboard (TLS ingress + readiness)
-    4. scripts/create-secrets.sh
-    5. apps/mysql/start.sh + apps/postgresql/start.sh   (wait until ready)
-    6. apps/ssc/start.sh + apps/lim/start.sh            (wait until ready)
-    7. apps/scsast/start.sh
-    8. apps/scdast/core/start.sh + apps/scdast/scanner/start.sh
-
-  The whole flow takes ~15-20 minutes. SSC's first start runs DB
-  migrations; LIM does signing-cert setup. Watch logs in another
-  terminal if you want progress.
-
+  Express runs the selected profile with one confirmation and verifies each
+  deployable step. Configuration and post-deploy integration steps remain in
+  Guided deployment and Advanced setup so they can collect operator input.
 EOF
-    confirm "Proceed?" || return
+}
 
-    guided_run_and_verify preflight "Pre-flight" || return
-    guided_run_and_verify certs "Certs" || return
-    guided_run_and_verify dashboard "Dashboard" || return
-    guided_run_and_verify secrets "Secrets" || return
-    guided_run_and_verify mysql "MySQL" || return
-    guided_run_and_verify postgresql "PostgreSQL" || return
-    guided_run_and_verify ssc "SSC" || return
-    guided_run_and_verify lim "LIM" || return
-    guided_run_and_verify sast "SAST" || return
-    guided_run_and_verify dast "DAST" || return
-    note "Deploy complete. Use Advanced setup and configuration for DNS, the SSC token, and LIM."
+deploy_from_scratch() {
+    local idx step
+    fortify_lab_require_acknowledgement || return 1
+    GUIDED_MODE_CONTEXT=fresh
+    guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
+    title "Express deployment"
+    fresh_deployment_guard || { press_any; return 1; }
+    wizard_deployment_plan
+    express_deployment_plan
+    confirm "Proceed with Express deployment for $GUIDED_DEPLOYMENT_PROFILE_LABEL?" || return
+
+    for idx in "${!GUIDED_STEP_ID[@]}"; do
+        step="${GUIDED_STEP_ID[$idx]}"
+        express_step_runnable "$step" || continue
+        guided_run_and_verify "$step" "${GUIDED_STEP_LABEL[$idx]}" || return
+    done
+    note "Express deployment complete for $GUIDED_DEPLOYMENT_PROFILE_LABEL. Use Guided deployment or Advanced setup for post-deploy configuration."
     press_any
 }
 
