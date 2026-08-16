@@ -428,6 +428,75 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("NAMESPACE=newns DOMAIN=old.test", result.stdout)
         self.assertNotIn("DOMAIN [old.test]", result.stdout)
 
+
+    def test_guided_setup_stages_domain_and_can_cancel_without_writing(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=old.test" >"$ENV_FILE"; source "$ENV_FILE"; '
+            'read -r _lab_ack; guided_setup_edit_step 1; setup_apply_pending; source "$ENV_FILE"; '
+            'printf "DOMAIN=%s PENDING=%s\n" "$DOMAIN" "${#SETUP_PENDING_UPDATES[@]}"',
+            user_input="new.test\nn\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Domain and derived URL changes staged", result.stdout)
+        self.assertIn("Setup changes cancelled", result.stdout)
+        self.assertIn("DOMAIN=old.test", result.stdout)
+
+    def test_guided_setup_applies_staged_domain_with_backup(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=old.test" >"$ENV_FILE"; source "$ENV_FILE"; '
+            'read -r _lab_ack; guided_setup_edit_step 1; setup_apply_pending >/dev/null; source "$ENV_FILE"; '
+            'printf "DOMAIN=%s BACKUPS=%s\n" "$DOMAIN" "$(find "$ENV_BACKUP_DIR" -name ".env.*.bak" | wc -l)"',
+            user_input="new.test\ny\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DOMAIN=new.test", result.stdout)
+        self.assertIn("BACKUPS=1", result.stdout)
+
+    def test_setup_readiness_score_and_profile_preview_are_profile_aware(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'printf "%s\n" "export DOMAIN=valid.test" >"$ENV_FILE"; FORTIFY_DEPLOYMENT_PROFILE=sast_full; '
+            'env_config_valid() { return 0; }; inputs_complete() { return 0; }; setup_docker_auth_ready() { return 0; }; '
+            'setup_regcred_ready() { return 1; }; certs_ready() { return 0; }; setup_root_ca_exported() { return 0; }; '
+            'setup_fcli_trust_ready() { return 1; }; cluster_reachable() { return 1; }; '
+            'printf "SCORE=%s\n" "$(setup_readiness_score)"; setup_profile_preview sast_full',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SCORE=7/10", result.stdout)
+        self.assertIn("Profile: SAST full with SSC", result.stdout)
+        self.assertIn("Software Security Center", result.stdout)
+        self.assertIn("ScanCentral SAST Sensor", result.stdout)
+        self.assertIn("PostgreSQL", result.stdout)
+
+    def test_known_issue_detector_matches_common_failure_patterns(self) -> None:
+        result = self.run_wizard_functions(
+            'printf "%s\n" "Back-off pulling image" "TRAEFIK DEFAULT CERT" "Insufficient memory" | known_issue_lines_from_text'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Image pull failure", result.stdout)
+        self.assertIn("Traefik default certificate", result.stdout)
+        self.assertIn("Insufficient memory", result.stdout)
+
+    def test_complete_lab_reset_requires_typed_confirmation(self) -> None:
+        result = self.run_wizard_functions(
+            'fortify_lab_show_action_warning() { :; }; lab_shutdown_deployments() { printf BAD_RESET; }; wizard_log_event() { :; }; '
+            'read -r _lab_ack; lab_reset_execute soft; printf "RC=%s\n" "$?"',
+            user_input="nope\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Soft reset preview", result.stdout)
+        self.assertIn("Reset cancelled", result.stdout)
+        self.assertIn("RC=1", result.stdout)
+        self.assertNotIn("BAD_RESET", result.stdout)
+
+    def test_guided_setup_and_deployment_footers_render_vertical_options(self) -> None:
+        result = self.run_wizard_functions('guided_setup_footer; guided_deployment_footer')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for expected in ("Options", "  e. Edit values", "  c. Continue", "  r. Retry operation", "  p. Pod logs", "  x. Export diagnostics bundle"):
+            self.assertIn(expected, result.stdout)
+
     def test_domain_changes_are_only_exposed_through_domain_url_assistant(self) -> None:
         identity_keys = WIZARD.split("identity) printf", 1)[1].split(";;", 1)[0]
         self.assertIn("NAMESPACE", identity_keys)
@@ -671,6 +740,7 @@ class GuidedWizardTests(unittest.TestCase):
             "sast_standalone": ["prereqs", "inputs", "preflight", "certs", "dashboard", "secrets", "sast_controller"],
             "sast_full": ["prereqs", "inputs", "preflight", "certs", "dashboard", "secrets", "mysql", "ssc", "sast_controller", "sast_sensor", "configure"],
             "dast_full": ["prereqs", "inputs", "preflight", "certs", "dashboard", "secrets", "mysql", "postgresql", "ssc", "lim", "dast_core", "dast_scanner", "configure"],
+            "sample_apps": ["prereqs", "inputs", "preflight", "certs", "dashboard", "secrets", "sample_juice_shop", "sample_webgoat", "sample_dvwa"],
         }
         for profile, expected in cases.items():
             with self.subTest(profile=profile):

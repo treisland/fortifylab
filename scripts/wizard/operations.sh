@@ -552,6 +552,7 @@ lab_lifecycle_menu() {
   4. Shutdown all lab deployments (preserve data)
   5. Start all lab deployments
   6. Destroy all lab deployments and data
+  7. Complete lab reset wizard
 
   r. Return
   q. Quit
@@ -579,6 +580,8 @@ EOF
             6)
                 lab_destroy_deployments all
                 press_any ;;
+            7)
+                lab_reset_menu ;;
             [Rr]) return ;;
             [Qq]) clear; exit 0 ;;
             *) error "Invalid"; sleep 1 ;;
@@ -2907,6 +2910,7 @@ advanced_menu() {
   4. Configure DNS, SSC token, LIM, and Dashboard access
   5. Configuration editor (.env, domain, root CA)
   6. Cluster profiles and remote readiness
+  7. Setup readiness summary
 
   r. Return
 EOF
@@ -2919,6 +2923,7 @@ EOF
             4) configure_menu ;;
             5) edit_env ;;
             6) cluster_profile_menu ;;
+            7) setup_menu ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
         esac

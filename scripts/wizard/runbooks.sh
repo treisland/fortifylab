@@ -233,6 +233,22 @@ runbook_param_value() {
     fi
 }
 
+runbook_param_is_secret() {
+    local name="${1:-}"
+    [[ "$name" =~ (pass|password|token|secret|key|credential) ]]
+}
+
+runbook_param_display_value() {
+    local idx="$1" name value
+    name="${RUNBOOK_PARAM_NAMES[$idx]:-}"
+    value="$(runbook_param_value "$idx")"
+    if runbook_param_is_secret "$name"; then
+        [ -n "$value" ] && printf '%s\n' "<redacted>" || printf '%s\n' "<unset>"
+    else
+        [ -n "$value" ] && printf '%s\n' "$value" || printf '%s\n' "<unset>"
+    fi
+}
+
 runbook_init_param_values() {
     local idx
     RUNBOOK_SELECTED_PARAM_VALUES=()
@@ -283,11 +299,10 @@ runbook_print_params() {
     fi
     for idx in "${!RUNBOOK_PARAM_NAMES[@]}"; do
         name="${RUNBOOK_PARAM_NAMES[$idx]}"
-        value="$(runbook_param_value "$idx")"
+        value="$(runbook_param_display_value "$idx")"
         required="${RUNBOOK_PARAM_REQUIRED[$idx]:-false}"
         suffix=""
         [[ "$required" =~ ^(true|yes|1)$ ]] && suffix=" required"
-        [ -n "$value" ] || value="<unset>"
         printf '  %2d. %-22s %s%s\n' "$((idx + 1))" "$name" "$value" "$suffix"
         [ -z "${RUNBOOK_PARAM_DESCRIPTIONS[$idx]:-}" ] || printf '      %s\n' "${RUNBOOK_PARAM_DESCRIPTIONS[$idx]}"
     done
@@ -308,8 +323,12 @@ runbook_show_resolved_command() {
     for idx in "${!RUNBOOK_PARAM_NAMES[@]}"; do
         name="${RUNBOOK_PARAM_NAMES[$idx]}"
         env_name="$(runbook_env_name "$name")"
-        value="$(runbook_param_value "$idx")"
-        printf '%s=%q \\\n' "$env_name" "$value"
+        if runbook_param_is_secret "$name"; then
+            printf '%s=<redacted>\n' "$env_name"
+        else
+            value="$(runbook_param_value "$idx")"
+            printf '%s=%q\n' "$env_name" "$value"
+        fi
     done
     printf 'bash %q\n' "${file#$FORTIFY_HOME_K8S/}"
     press_any
@@ -341,7 +360,12 @@ runbook_edit_params() {
                 fi
                 name="${RUNBOOK_PARAM_NAMES[$idx]}"
                 current="$(runbook_param_value "$idx")"
-                read -rp "$name [$current]: " value
+                if runbook_param_is_secret "$name"; then
+                    read -rsp "$name [<redacted>]: " value
+                    echo
+                else
+                    read -rp "$name [$current]: " value
+                fi
                 [ -n "$value" ] || value="$current"
                 RUNBOOK_SELECTED_PARAM_VALUES[$idx]="$value"
                 ;;

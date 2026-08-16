@@ -133,7 +133,7 @@ fortifylab_first_time_welcome_menu() {
         echo
         ask choice "Select:"
         case "$choice" in
-            1) guided_deployment_menu; return ;;
+            1) guided_setup_menu; return ;;
             2) title "Requirements"; fortifylab_welcome_warnings; printf '\n'; fortifylab_welcome_locations; printf '\n'; fortifylab_welcome_snapshot; press_any ;;
             3) guided_profile_menu ;;
             4) help_center ;;
@@ -160,6 +160,7 @@ main_menu() {
         status_user
 
         section "Deploy"
+        echo "   0. Initial setup and readiness"
         echo "   1. Guided deployment (recommended)"
         echo "   2. Express deployment"
         echo "   3. Resume or repair deployment"
@@ -193,6 +194,7 @@ main_menu() {
         ask choice "Select:"
 
         case "$choice" in
+            0)  setup_menu ;;
             1)  guided_deployment_menu ;;
             2)  deploy_from_scratch ;;
             3)  resume_repair ;;
