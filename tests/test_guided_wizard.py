@@ -649,6 +649,33 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Guided Setup cancelled", result.stdout)
         self.assertIn("RC=130", result.stdout)
 
+    def test_guided_setup_welcome_footer_only_shows_relevant_actions(self) -> None:
+        result = self.run_wizard_functions('guided_setup_footer 0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("  c. Continue", result.stdout)
+        self.assertIn("  q. Cancel setup", result.stdout)
+        for hidden in ("Edit values", "Skip", "Back", "Help"):
+            self.assertNotIn(hidden, result.stdout)
+
+    def test_guided_setup_steps_explain_purpose_impact_and_next_action(self) -> None:
+        result = self.run_wizard_functions(
+            'setup_profile_preview() { printf "  Profile preview\n"; }; '
+            'setup_registry_status() { printf "  Registry status\n"; }; '
+            'setup_tls_status() { printf "\nPurpose\n  TLS purpose\n\nCurrent configuration\n  TLS current\n\nImpact\n  TLS impact\n\nRecommended next action\n  TLS next\n"; }; '
+            'setup_hosts_guidance() { printf "  host.example.test\n"; }; '
+            'setup_readiness_items() { printf "  readiness item\n"; }; '
+            'setup_review_pending() { printf "  pending item\n"; }; '
+            'for step in 0 1 2 3 4 5 6 7 8; do guided_setup_step_screen "$step"; done'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for expected in ("Purpose", "Impact", "Recommended next action"):
+            self.assertGreaterEqual(result.stdout.count(expected), 9)
+        self.assertIn("Orient the setup flow", result.stdout)
+        self.assertIn("Define the lab identity", result.stdout)
+        self.assertIn("Choose which Fortify Lab components", result.stdout)
+        self.assertIn("Prepare Docker Hub credentials", result.stdout)
+        self.assertIn("Prepare fcli", result.stdout)
+
     def test_guided_setup_and_deployment_footers_render_vertical_options(self) -> None:
         result = self.run_wizard_functions('guided_setup_footer; guided_deployment_footer')
         self.assertEqual(result.returncode, 0, result.stderr)

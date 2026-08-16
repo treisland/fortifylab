@@ -30,6 +30,13 @@ wizard_vertical_footer() {
 }
 
 guided_setup_footer() {
+    local step="${1:-}"
+    if [ "$step" = 0 ]; then
+        wizard_vertical_footer "Options" \
+            "c. Continue" \
+            "q. Cancel setup"
+        return
+    fi
     wizard_vertical_footer "Options" \
         "e. Edit values" \
         "c. Continue" \
@@ -567,20 +574,101 @@ setup_apply_pending() {
     return "$rc"
 }
 
+setup_guidance_block() {
+    local purpose="$1" current="$2" impact="$3" next="$4"
+    printf '\nPurpose\n  %s\n' "$purpose"
+    printf '\nCurrent status\n%s\n' "$current"
+    printf '\nImpact\n  %s\n' "$impact"
+    printf '\nRecommended next action\n  %s\n' "$next"
+}
+
+setup_welcome_status() {
+    cat <<EOF
+  Guided Setup prepares configuration and readiness before deployment.
+  Changes are staged until final review, so you can inspect everything before writing .env updates or running setup actions.
+EOF
+}
+
+setup_identity_status() {
+    printf '  Current domain:  %s\n' "${DOMAIN:-<unset>}"
+    printf '  Proposed domain: %s\n' "$(setup_pending_domain_value)"
+    printf '  Namespace:       %s\n' "$(env_pending_value NAMESPACE "${NAMESPACE:-fortify}" "${SETUP_PENDING_UPDATES[@]}")"
+}
+
+setup_license_status() {
+    printf '  License status:  %s\n' "$(status_license)"
+    printf '  Current input:   %s\n' "$(fortifylab_license_input_path)"
+    printf '  Pending input:   %s\n' "$(setup_pending_license_value)"
+}
+
+setup_fcli_status() {
+    setup_fcli_trust_ready && printf '  fcli truststore: ready\n' || printf '  fcli truststore: needs configuration\n'
+    printf '  Truststore path: %s\n' "${FCLI_TRUSTSTORE:-${TRUSTSTORE:-$FORTIFY_HOME_K8S/certs/truststore}}"
+}
+
 guided_setup_step_screen() {
     local step="$1"
     title "Guided Setup - Step $((step + 1)) of ${#SETUP_STEP_LABEL[@]}"
     section "${SETUP_STEP_LABEL[$step]}"
     case "$step" in
-        0) printf 'Guided Setup prepares configuration and readiness before deployment. Changes are staged until final review.\n' ;;
-        1) printf 'Current domain:  %s\nProposed domain: %s\nNamespace:       %s\n' "${DOMAIN:-<unset>}" "$(setup_pending_domain_value)" "$(env_pending_value NAMESPACE "${NAMESPACE:-fortify}" "${SETUP_PENDING_UPDATES[@]}")" ;;
-        2) setup_profile_preview "$(setup_profile_value)" ;;
-        3) printf 'License status: %s\nConfigured input: %s\nPending input:    %s\n' "$(status_license)" "$(fortifylab_license_input_path)" "$(setup_pending_license_value)" ;;
-        4) setup_registry_status ;;
+        0)
+            setup_guidance_block \
+                "Orient the setup flow before changing configuration." \
+                "$(setup_welcome_status)" \
+                "This step does not change files or the cluster; it explains how staged setup works." \
+                "Continue when you are ready to review the configurable setup sections."
+            ;;
+        1)
+            setup_guidance_block \
+                "Define the lab identity that drives hostnames, URLs, ingress hosts, and generated certificates." \
+                "$(setup_identity_status)" \
+                "Incorrect domain values lead to invalid ingress rules, TLS mismatches, browser warnings, or services opening at the wrong URL." \
+                "Edit when the base domain should change; otherwise continue."
+            ;;
+        2)
+            printf '\nPurpose\n  Choose which Fortify Lab components this environment should deploy and monitor.\n'
+            printf '\nCurrent profile\n'
+            setup_profile_preview "$(setup_profile_value)"
+            printf '\nImpact\n  The profile controls guided deployment steps, readiness expectations, and which components are considered in lifecycle status.\n'
+            printf '\nRecommended next action\n  Use Full lab for broad demos, or choose a smaller profile to save memory and deployment time.\n'
+            ;;
+        3)
+            setup_guidance_block \
+                "Point the lab at a readable Fortify license file without printing license contents." \
+                "$(setup_license_status)" \
+                "A missing or unreadable license blocks complete Kubernetes secret creation and prevents licensed Fortify services from starting correctly." \
+                "Edit to choose or import a license file before deployment."
+            ;;
+        4)
+            printf '\nPurpose\n  Prepare Docker Hub credentials and the Kubernetes image pull secret used for Fortify images.\n'
+            printf '\nCurrent status\n'
+            setup_registry_status
+            printf '\nImpact\n  If Docker credentials are stale or the Kubernetes regcred secret is missing, pods can fail with ImagePullBackOff even when manual docker pull works.\n'
+            printf '\nRecommended next action\n  Run Docker login if needed, then stage a Kubernetes registry secret refresh after cluster access is ready.\n'
+            ;;
         5) setup_tls_status ;;
-        6) setup_hosts_guidance ;;
-        7) setup_fcli_trust_ready && printf 'fcli truststore: ready\n' || printf 'fcli truststore: needs configuration\n' ;;
-        8) setup_readiness_summary; setup_review_pending ;;
+        6)
+            printf '\nPurpose\n  Show the hostnames clients must resolve to reach Fortify Lab services on the LAN.\n'
+            printf '\nCurrent guidance\n'
+            setup_hosts_guidance
+            printf '\nImpact\n  DNS or hosts-file drift causes browsers and fcli to hit the wrong endpoint, Traefik default routes, or certificate names that do not match.\n'
+            printf '\nRecommended next action\n  Add these names to DNS or each client hosts file, then test from the client machine.\n'
+            ;;
+        7)
+            setup_guidance_block \
+                "Prepare fcli to trust the lab certificate chain for local SSC and ScanCentral runbooks." \
+                "$(setup_fcli_status)" \
+                "Without fcli trust, browser access may work while fcli login fails with PKIX certificate validation errors." \
+                "Stage fcli trust configuration after TLS artifacts exist, or continue if your shell already has the truststore configured."
+            ;;
+        8)
+            printf '\nPurpose\n  Review staged .env changes and setup actions before anything is applied.\n'
+            printf '\nCurrent status\n'
+            setup_readiness_items
+            setup_review_pending
+            printf '\nImpact\n  Applying writes the staged configuration backup and may run selected setup actions such as registry, root CA, or fcli trust updates.\n'
+            printf '\nRecommended next action\n  Continue to apply, or go back to adjust any section first.\n'
+            ;;
     esac
 }
 
@@ -623,7 +711,7 @@ guided_setup_menu() {
     SETUP_PENDING_ACTIONS=()
     while true; do
         guided_setup_step_screen "$step"
-        guided_setup_footer
+        guided_setup_footer "$step"
         echo
         ask choice "Select:"
         case "$choice" in
