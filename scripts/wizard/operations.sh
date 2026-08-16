@@ -1352,6 +1352,34 @@ pod_has_restarts() {
         | awk '$1 > 0 { found=1 } END { exit found ? 0 : 1 }'
 }
 
+restore_int_trap() {
+    local saved_trap="${1:-}"
+    if [ -n "$saved_trap" ]; then
+        eval "$saved_trap"
+    else
+        trap - INT
+    fi
+}
+
+follow_pod_logs_safe() {
+    local pod="$1" tail_lines="${2:-100}" pid rc saved_int_trap interrupted=0
+    saved_int_trap=$(trap -p INT || true)
+    (
+        trap - INT
+        $KUBECTL -n "$NAMESPACE" logs --all-containers --follow --tail="$tail_lines" --ignore-errors=true "$pod"
+    ) &
+    pid=$!
+    trap 'interrupted=1; kill -INT "$pid" 2>/dev/null; sleep 0.2; kill -TERM "$pid" 2>/dev/null' INT
+    wait "$pid"
+    rc=$?
+    restore_int_trap "$saved_int_trap"
+    if [ "$interrupted" -eq 1 ] || [ "$rc" -ge 130 ]; then
+        note "Stopped following logs for $pod."
+        return 0
+    fi
+    return "$rc"
+}
+
 pod_log_action_menu() {
     local pod="$1" choice previous_label
     while true; do
@@ -1370,8 +1398,8 @@ pod_log_action_menu() {
                 return 0
                 ;;
             2)
-                note "Following logs for $pod. Press Ctrl+C to return."
-                $KUBECTL -n "$NAMESPACE" logs --all-containers --follow --tail=100 "$pod" || true
+                note "Following logs for $pod. Press Ctrl+C to return to Fortify Lab."
+                follow_pod_logs_safe "$pod" 100 || true
                 press_any
                 return 0
                 ;;
@@ -1445,16 +1473,15 @@ stream_logs() {
     # Cycle through 6 ANSI colors so adjacent pods read distinct.
     local colors=(1 2 3 4 5 6)
 
-    # Each pod tail runs in a backgrounded subshell that traps its OWN
-    # exit and does `kill 0` — sending TERM to its entire process group,
-    # which includes all pipeline children (kubectl + grep + awk). That
-    # way the parent's cleanup just has to TERM the subshells; each one
-    # fans out its own kill. Without this, `( pipe1 | pipe2 ) &`
-    # leaks the kubectl process when the subshell exits — which was the
-    # bug the user hit when `source`-ing the wizard.
+    # Each pod tail runs in a backgrounded subshell. The parent owns Ctrl+C
+    # handling, terminates those subshells, waits for them, and restores the
+    # previous interrupt trap before returning to the menu.
     cleanup_streams() {
         local p
         for p in "${pids[@]}"; do
+            if command -v pkill >/dev/null 2>&1; then
+                pkill -TERM -P "$p" 2>/dev/null || true
+            fi
             kill -TERM "$p" 2>/dev/null
         done
         # Brief grace, then verify clean.
@@ -1464,7 +1491,9 @@ stream_logs() {
         done
         pids=()
     }
-    trap 'cleanup_streams; trap - INT; echo; return 0' INT
+    local saved_int_trap stream_interrupted=0
+    saved_int_trap=$(trap -p INT || true)
+    trap 'stream_interrupted=1; cleanup_streams' INT
 
     echo
     note "Streaming. Ctrl+C to stop."
@@ -1482,9 +1511,7 @@ stream_logs() {
 
         if [ -n "$filter" ]; then
             (
-              # On any exit, kill our entire process group → takes
-              # down kubectl logs + grep + awk in one shot.
-              trap 'kill 0' EXIT
+              trap - INT TERM
               $KUBECTL -n "$NAMESPACE" logs --follow --all-containers --tail=20 \
                   --ignore-errors=true "$pod" 2>&1 \
               | grep --line-buffered -F -- "$filter" \
@@ -1493,7 +1520,7 @@ stream_logs() {
             ) &
         else
             (
-              trap 'kill 0' EXIT
+              trap - INT TERM
               $KUBECTL -n "$NAMESPACE" logs --follow --all-containers --tail=20 \
                   --ignore-errors=true "$pod" 2>&1 \
               | awk -v c="$color" -v r="$RESET" -v p="$short" \
@@ -1504,9 +1531,13 @@ stream_logs() {
     done
 
     # Block until all backgrounded tails exit OR Ctrl+C trips the trap.
-    wait
+    wait || true
     cleanup_streams
-    trap - INT
+    restore_int_trap "$saved_int_trap"
+    if [ "$stream_interrupted" -eq 1 ]; then
+        echo
+        note "Stopped streaming logs."
+    fi
 }
 
 credential_value_from_secret() {

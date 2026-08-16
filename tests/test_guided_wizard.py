@@ -900,7 +900,7 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn('k8s_select_resource pod "Select a pod"', WIZARD)
         self.assertIn('k8s_select_resource pod "Select a pod" "" "$prefix"', WIZARD)
         self.assertIn("--all-containers --tail=200", WIZARD)
-        self.assertIn("--all-containers --follow --tail=100", WIZARD)
+        self.assertIn('follow_pod_logs_safe "$pod" 100 || true', WIZARD)
         self.assertIn("--all-containers --previous --tail=200", WIZARD)
 
         result = self.run_wizard_functions(
@@ -925,6 +925,45 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("LOGS:ssc-webapp-0", result.stdout)
         self.assertNotIn("BAD_SELECTOR", result.stdout)
+
+    def test_follow_logs_uses_interrupt_safe_helper(self) -> None:
+        self.assertIn("follow_pod_logs_safe()", WIZARD)
+        self.assertIn("restore_int_trap()", WIZARD)
+        self.assertIn('follow_pod_logs_safe "$pod" 100 || true', WIZARD)
+        self.assertNotIn('logs --all-containers --follow --tail=100 "$pod" || true', WIZARD)
+
+    def test_stream_logs_restores_trap_and_avoids_process_group_kill(self) -> None:
+        self.assertIn('saved_int_trap=$(trap -p INT || true)', WIZARD)
+        self.assertIn('restore_int_trap "$saved_int_trap"', WIZARD)
+        self.assertIn('pkill -TERM -P "$p"', WIZARD)
+        self.assertNotIn("trap 'kill 0' EXIT", WIZARD)
+        self.assertNotIn("return 0' INT", WIZARD)
+
+    def test_follow_logs_interrupted_child_returns_to_shell_and_restores_outer_trap(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); '
+            'printf "%s\n" "#!/usr/bin/env bash" "printf \'FAKE_KUBE:%s\\n\' \"\\$*\"" "exit 130" >"$tmp/kube"; '
+            'chmod +x "$tmp/kube"; '
+            'KUBECTL="$tmp/kube"; NAMESPACE=fortify; '
+            'note() { printf "NOTE:%s\n" "$*"; }; '
+            'trap \'printf "OUTER_INT\\n"\' INT; '
+            'follow_pod_logs_safe ssc-webapp-0 7; '
+            'trap -p INT; printf "AFTER_FOLLOW\n"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for expected in (
+            "FAKE_KUBE:-n",
+            "FAKE_KUBE:fortify",
+            "FAKE_KUBE:logs",
+            "FAKE_KUBE:--follow",
+            "FAKE_KUBE:--tail=7",
+            "FAKE_KUBE:--ignore-errors=true",
+            "FAKE_KUBE:ssc-webapp-0",
+        ):
+            self.assertIn(expected, result.stdout)
+        self.assertIn("Stopped following logs for ssc-webapp-0", result.stdout)
+        self.assertIn("OUTER_INT", result.stdout)
+        self.assertIn("AFTER_FOLLOW", result.stdout)
 
     def test_guided_wait_logs_skip_selector_when_only_one_pod_matches(self) -> None:
         result = self.run_wizard_functions(
