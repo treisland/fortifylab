@@ -118,32 +118,12 @@ fortifylab_first_time_welcome_menu() {
     [ "${FORTIFY_SKIP_WELCOME:-0}" = "1" ] && return 0
     [ -t 0 ] && [ -t 1 ] || return 0
 
-    while true; do
-        title "Welcome to FortifyLab"
-        fortifylab_first_time_welcome_content
-        section "Next steps"
-        echo "   1. Start guided setup"
-        echo "   2. Review requirements"
-        echo "   3. Choose deployment profile"
-        echo "   4. Open Help Center"
-        echo "   5. Advanced setup and configuration"
-        echo
-        echo "   r. Continue to main menu"
-        echo "   q. Quit"
-        echo
-        ask choice "Select:"
-        case "$choice" in
-            1) guided_setup_menu; return ;;
-            2) title "Requirements"; fortifylab_welcome_warnings; printf '\n'; fortifylab_welcome_locations; printf '\n'; fortifylab_welcome_snapshot; press_any ;;
-            3) guided_profile_menu ;;
-            4) help_center ;;
-            5) advanced_menu ;;
-            [Rr]) return ;;
-            [Qq]) clear; exit 0 ;;
-            *) error "Invalid choice"; sleep 1 ;;
-        esac
-    done
+    title "Welcome to FortifyLab"
+    fortifylab_first_time_welcome_content
+    printf '\nThe main menu includes Initial setup and readiness as the recommended next step.\n'
+    press_any
 }
+
 
 # ============================================================
 # Main menu

@@ -72,6 +72,10 @@ setup_pending_domain_value() {
     env_pending_value DOMAIN "${DOMAIN:-}" "${SETUP_PENDING_UPDATES[@]}"
 }
 
+setup_pending_license_value() {
+    env_pending_value FORTIFY_LICENSE_FILE "$(fortifylab_license_input_path)" "${SETUP_PENDING_UPDATES[@]}"
+}
+
 setup_profile_value() {
     env_pending_value FORTIFY_DEPLOYMENT_PROFILE "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}" "${SETUP_PENDING_UPDATES[@]}"
 }
@@ -177,6 +181,58 @@ setup_readiness_summary() {
     setup_readiness_items
     printf '\nSelected deployment profile\n'
     setup_profile_preview "$(setup_profile_value)"
+}
+
+setup_license_assistant() {
+    local choice src resolved default_file
+    default_file="$FORTIFY_HOME_K8S/secrets/input/fortify.license"
+    while true; do
+        title "License file"
+        printf '\nConfigured license input: %s\n' "$(fortifylab_license_input_path)"
+        printf 'Pending license input:    %s\n\n' "$(setup_pending_license_value)"
+        if [ -s "$(setup_pending_license_value)" ]; then
+            printf '  %s Pending Fortify license path is readable\n' "$OK_MARK"
+        else
+            printf '  %s Pending Fortify license path is unavailable\n' "$FAIL_MARK"
+        fi
+        wizard_vertical_footer "License actions" \
+            "1. Use an external license file path" \
+            "2. Import to the repository-local input path" \
+            "3. Where to obtain a license" \
+            "b. Back"
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1)
+                ask src "Path to fortify.license file:"
+                [ -n "$src" ] || continue
+                if [ ! -s "$src" ]; then
+                    error "The selected file is missing, unreadable, or empty."
+                    sleep 1
+                    continue
+                fi
+                resolved="$(realpath -- "$src")" || { error "Could not resolve selected license path."; sleep 1; continue; }
+                setup_pending_set FORTIFY_LICENSE_FILE "$resolved"
+                note "External Fortify license path staged."
+                ;;
+            2)
+                ask src "Path to fortify.license file:"
+                [ -n "$src" ] || continue
+                if [ ! -s "$src" ]; then
+                    error "The selected file is missing, unreadable, or empty."
+                    sleep 1
+                    continue
+                fi
+                mkdir -p "$(dirname "$default_file")"
+                cp "$src" "$default_file" || { error "Could not import license file."; sleep 1; continue; }
+                setup_pending_set FORTIFY_LICENSE_FILE "$default_file"
+                note "Imported license file and staged repository-local license path."
+                ;;
+            3) license_menu ;;
+            [Bb]|"") return 0 ;;
+            *) error "Invalid license action"; sleep 1 ;;
+        esac
+    done
 }
 
 setup_registry_status() {
@@ -299,7 +355,7 @@ guided_setup_step_screen() {
         0) printf 'Guided Setup prepares configuration and readiness before deployment. Changes are staged until final review.\n' ;;
         1) printf 'Current domain:  %s\nProposed domain: %s\nNamespace:       %s\n' "${DOMAIN:-<unset>}" "$(setup_pending_domain_value)" "$(env_pending_value NAMESPACE "${NAMESPACE:-fortify}" "${SETUP_PENDING_UPDATES[@]}")" ;;
         2) setup_profile_preview "$(setup_profile_value)" ;;
-        3) printf 'License status: %s\nLicense input:  %s\n' "$(status_license)" "$(fortifylab_license_input_path)" ;;
+        3) printf 'License status: %s\nConfigured input: %s\nPending input:    %s\n' "$(status_license)" "$(fortifylab_license_input_path)" "$(setup_pending_license_value)" ;;
         4) setup_registry_status ;;
         5) setup_tls_status ;;
         6) setup_hosts_guidance ;;
@@ -327,7 +383,7 @@ guided_setup_edit_step() {
             setup_pending_set FORTIFY_DEPLOYMENT_COMPONENTS ""
             note "Deployment profile staged: $(guided_profile_label "$profile")"
             ;;
-        3) license_menu ;;
+        3) setup_license_assistant ;;
         4)
             wizard_vertical_footer "Registry actions" "1. Run Docker login" "2. Stage Kubernetes registry secret refresh" "b. Back"
             ask value "Select:"
@@ -413,8 +469,8 @@ lab_reset_preview() {
     case "$tier" in
         soft) printf '  - Stop all lab workloads.\n  - Preserve PVC data, .env, secrets, and certificates.\n' ;;
         data) printf '  - Destroy all application deployments and PVC-backed data using component destroy scripts.\n  - Preserve .env and generated certificates.\n' ;;
-        full) printf '  - Run data reset.\n  - Remove generated Kubernetes secrets and lab TLS artifacts.\n  - Preserve .env after creating a backup.\n' ;;
-        factory) printf '  - Run full reset.\n  - Restore .env from .env.example after backing up current .env.\n  - Clear wizard rollback marker.\n' ;;
+        full) printf '  - Run data reset.\n  - Remove generated Kubernetes secrets and lab TLS artifacts.\n  - Preserve .env after creating a backup.\n  - Clear the saved lab-use acknowledgement after reset succeeds.\n' ;;
+        factory) printf '  - Run full reset.\n  - Restore .env from .env.example after backing up current .env.\n  - Clear wizard rollback marker and saved lab-use acknowledgement after reset succeeds.\n' ;;
     esac
 }
 
@@ -434,8 +490,8 @@ lab_reset_execute() {
     case "$tier" in
         soft) lab_shutdown_deployments all ;;
         data) lab_destroy_deployments all ;;
-        full) env_prepare_backup reset-full || return 1; lab_destroy_deployments all || return $?; rm -f "$FORTIFY_HOME_K8S/certs/server.crt" "$FORTIFY_HOME_K8S/certs/server.key" "$FORTIFY_HOME_K8S/certs/rootCA.pem" "$FORTIFY_HOME_K8S/certs/truststore" 2>/dev/null || true ;;
-        factory) env_prepare_backup reset-factory || return 1; lab_destroy_deployments all || return $?; [ -s "$ENV_EXAMPLE" ] && cp "$ENV_EXAMPLE" "$ENV_FILE"; rm -f "$FORTIFY_HOME_K8S/.env.rollback" 2>/dev/null || true ;;
+        full) env_prepare_backup reset-full || return 1; lab_destroy_deployments all || return $?; rm -f "$FORTIFY_HOME_K8S/certs/server.crt" "$FORTIFY_HOME_K8S/certs/server.key" "$FORTIFY_HOME_K8S/certs/rootCA.pem" "$FORTIFY_HOME_K8S/certs/truststore" 2>/dev/null || true; fortify_lab_reset_acknowledgement || return 1 ;;
+        factory) env_prepare_backup reset-factory || return 1; lab_destroy_deployments all || return $?; [ -s "$ENV_EXAMPLE" ] && cp "$ENV_EXAMPLE" "$ENV_FILE"; rm -f "$FORTIFY_HOME_K8S/.env.rollback" 2>/dev/null || true; fortify_lab_reset_acknowledgement || return 1 ;;
     esac
     wizard_log_event "action=lab_reset tier=$tier state=complete"
     note "Reset complete. Recommended next step: Guided setup."
