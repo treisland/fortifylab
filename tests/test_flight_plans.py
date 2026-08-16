@@ -126,6 +126,28 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn('FORTIFY_SSC_CHART_VERSION = "26.2.0-1"', candidate)
         self.assertIn("Wrote candidate Flight Plan draft", result.stdout)
 
+    def test_discovery_reuses_catalog_values_when_repo_listing_is_unavailable(self) -> None:
+        payload = {"results": [{"name": "26.2.0-1"}], "next": None}
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_dir = Path(directory) / "fixtures"
+            fixture_dir.mkdir()
+            for repo in (
+                "fortifydocker__helm-ssc__page1.json",
+                "fortifydocker__helm-scancentral-sast__page1.json",
+                "fortifydocker__helm-scancentral-dast-core__page1.json",
+                "fortifydocker__helm-lim__page1.json",
+            ):
+                (fixture_dir / repo).write_text(json.dumps(payload), encoding="utf-8")
+            output = Path(directory) / "candidate.toml"
+            result = self.run_tool("discover", "--family", "26.2", "--fixture-dir", str(fixture_dir), "--output", str(output))
+            candidate = output.read_text(encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('FORTIFY_SSC_IMAGE_TAG = "26.2.0.0183"', candidate)
+        self.assertIn('FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.2.0"', candidate)
+        self.assertIn('FORTIFY_SCSAST_WORKER_IMAGE_TAG = "25.2.0"', candidate)
+        self.assertIn("reused catalog value", result.stdout)
+        self.assertNotIn("FORTIFY_SSC_IMAGE_TAG: FORTIFY_SSC_IMAGE_TAG", result.stdout)
+
     def test_shell_wrappers_delegate_to_single_catalog_implementation(self) -> None:
         result = subprocess.run(
             ["bash", "-c", 'FORTIFY_HOME_K8S="$PWD"; source scripts/lib/flight-plans.sh; flight_plan_validate_catalog; flight_plan_list'],

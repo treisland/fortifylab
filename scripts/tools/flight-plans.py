@@ -224,6 +224,21 @@ def toml_quote(value: str) -> str:
     return json.dumps(value)
 
 
+def catalog_fallback_component(catalog: Catalog, family: str, key: str) -> str:
+    exact_id = f"fortify-{family}"
+    if exact_id in catalog.flight_plans:
+        value = str(catalog.flight_plans[exact_id].get("components", {}).get(key, ""))
+        if value:
+            return value
+    for plan in catalog.flight_plans.values():
+        if str(plan.get("family", "")) != family:
+            continue
+        value = str(plan.get("components", {}).get(key, ""))
+        if value:
+            return value
+    return ""
+
+
 def discover(catalog: Catalog, family: str, output: Path, fixture_dir: Path | None) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -241,15 +256,25 @@ def discover(catalog: Catalog, family: str, output: Path, fixture_dir: Path | No
     selected: dict[str, str] = {}
     for key in FORTIFY_KEYS:
         repo = DISCOVERY_REPOSITORIES.get(key)
+        fallback = catalog_fallback_component(catalog, family, key)
         if not repo:
-            selected[key] = ""
-            warnings.append(f"{key}: no Docker repository mapping; fill manually")
+            selected[key] = fallback
+            if fallback:
+                warnings.append(f"{key}: no Docker repository mapping; reused catalog value {fallback}")
+            else:
+                warnings.append(f"{key}: no Docker repository mapping; fill manually")
             continue
         try:
             tags = dockerhub_tags(repo, fixture_dir=fixture_dir)
             value, warning = best_tag_for_family(tags, family)
+            if not value and fallback:
+                value = fallback
+                warning = f"{warning}; reused catalog value {fallback}" if warning else f"reused catalog value {fallback}"
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-            value, warning = "", f"{key}: discovery failed for {repo}: {exc}"
+            if fallback:
+                value, warning = fallback, f"discovery failed for {repo}; reused catalog value {fallback} ({exc})"
+            else:
+                value, warning = "", f"discovery failed for {repo}: {exc}"
         selected[key] = value
         if warning:
             warnings.append(f"{key}: {warning}")
