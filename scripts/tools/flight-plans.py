@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
+import subprocess
 import sys
 import tomllib
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -176,7 +179,137 @@ def compare_env(catalog: Catalog, plan_id: str, env_file: Path) -> int:
     return 1 if mismatch else 0
 
 
-def dockerhub_tags(repo: str, page_size: int = 100, pages: int = 2, fixture_dir: Path | None = None) -> list[dict[str, Any]]:
+def docker_config_path() -> Path:
+    return Path(os.environ.get("DOCKER_CONFIG", Path.home() / ".docker")) / "config.json"
+
+
+def docker_config() -> dict[str, Any]:
+    path = docker_config_path()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def docker_registry_hosts(repo: str) -> tuple[str, ...]:
+    if "/" not in repo:
+        return ("https://index.docker.io/v1/", "registry-1.docker.io", "docker.io")
+    return ("https://index.docker.io/v1/", "registry-1.docker.io", "https://registry-1.docker.io/v2/", "docker.io")
+
+
+def docker_credential_helper_name(config: dict[str, Any], host: str) -> str:
+    helpers = config.get("credHelpers", {})
+    helper = helpers.get(host)
+    if helper:
+        return str(helper)
+    store = config.get("credsStore")
+    return str(store or "")
+
+
+def docker_credential_from_helper(helper: str, host: str) -> tuple[str, str] | None:
+    if not helper:
+        return None
+    command = f"docker-credential-{helper}"
+    try:
+        result = subprocess.run(
+            [command, "get"],
+            input=host,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    username = str(data.get("Username", ""))
+    secret = str(data.get("Secret", ""))
+    if username and secret:
+        return username, secret
+    return None
+
+
+def docker_credential_from_auths(config: dict[str, Any], host: str) -> tuple[str, str] | None:
+    auths = config.get("auths", {})
+    record = auths.get(host) or auths.get(host.rstrip("/"))
+    if not isinstance(record, dict):
+        return None
+    encoded = str(record.get("auth", ""))
+    if not encoded:
+        return None
+    try:
+        decoded = base64.b64decode(encoded).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if ":" not in decoded:
+        return None
+    username, secret = decoded.split(":", 1)
+    if username and secret:
+        return username, secret
+    return None
+
+
+def docker_credential(repo: str) -> tuple[str, str] | None:
+    config = docker_config()
+    for host in docker_registry_hosts(repo):
+        helper = docker_credential_helper_name(config, host)
+        credential = docker_credential_from_helper(helper, host)
+        if credential:
+            return credential
+        credential = docker_credential_from_auths(config, host)
+        if credential:
+            return credential
+    return None
+
+
+def registry_bearer_token(repo: str) -> str:
+    credential = docker_credential(repo)
+    query = urllib.parse.urlencode({"service": "registry.docker.io", "scope": f"repository:{repo}:pull"})
+    request = urllib.request.Request(f"https://auth.docker.io/token?{query}")
+    if credential:
+        raw = f"{credential[0]}:{credential[1]}".encode("utf-8")
+        request.add_header("Authorization", "Basic " + base64.b64encode(raw).decode("ascii"))
+    with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - fixed Docker auth endpoint
+        data = json.loads(response.read().decode("utf-8"))
+    token = str(data.get("token") or data.get("access_token") or "")
+    if not token:
+        raise urllib.error.URLError("Docker registry token response did not include a token")
+    return token
+
+
+def registry_tags(repo: str, page_size: int = 1000, fixture_dir: Path | None = None) -> list[dict[str, Any]]:
+    namespace, name = repo.split("/", 1)
+    if fixture_dir:
+        fixture = fixture_dir / f"registry__{namespace}__{name}__page1.json"
+        if not fixture.exists():
+            return []
+        data = json.loads(fixture.read_text(encoding="utf-8"))
+        return [{"name": tag} for tag in data.get("tags", [])]
+    token = registry_bearer_token(repo)
+    tags: list[str] = []
+    last = ""
+    for _ in range(10):
+        query = urllib.parse.urlencode({"n": str(page_size), **({"last": last} if last else {})})
+        request = urllib.request.Request(f"https://registry-1.docker.io/v2/{repo}/tags/list?{query}")
+        request.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - fixed Docker registry endpoint
+            data = json.loads(response.read().decode("utf-8"))
+        page_tags = [str(tag) for tag in data.get("tags", []) if tag]
+        tags.extend(page_tags)
+        if len(page_tags) < page_size:
+            break
+        last = page_tags[-1]
+    return [{"name": tag} for tag in tags]
+
+
+def dockerhub_api_tags(repo: str, page_size: int = 100, pages: int = 2, fixture_dir: Path | None = None) -> list[dict[str, Any]]:
     namespace, name = repo.split("/", 1)
     records: list[dict[str, Any]] = []
     for page in range(1, pages + 1):
@@ -194,6 +327,19 @@ def dockerhub_tags(repo: str, page_size: int = 100, pages: int = 2, fixture_dir:
             break
     return records
 
+
+def dockerhub_tags(repo: str, page_size: int = 100, pages: int = 2, fixture_dir: Path | None = None) -> tuple[list[dict[str, Any]], str]:
+    try:
+        records = dockerhub_api_tags(repo, page_size=page_size, pages=pages, fixture_dir=fixture_dir)
+        if records:
+            return records, "Docker Hub API"
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {401, 403, 404}:
+            raise
+    records = registry_tags(repo, fixture_dir=fixture_dir)
+    if records:
+        return records, "Docker Registry API"
+    return [], "Docker Hub API"
 
 def version_sort_key(tag: str) -> tuple[Any, ...]:
     pieces = re.split(r"([0-9]+)", tag)
@@ -265,8 +411,10 @@ def discover(catalog: Catalog, family: str, output: Path, fixture_dir: Path | No
                 warnings.append(f"{key}: no Docker repository mapping; fill manually")
             continue
         try:
-            tags = dockerhub_tags(repo, fixture_dir=fixture_dir)
+            tags, source = dockerhub_tags(repo, fixture_dir=fixture_dir)
             value, warning = best_tag_for_family(tags, family)
+            if source == "Docker Registry API" and value:
+                warning = f"selected from authenticated {source}" if not warning else f"{warning}; selected from authenticated {source}"
             if not value and fallback:
                 value = fallback
                 warning = f"{warning}; reused catalog value {fallback}" if warning else f"reused catalog value {fallback}"

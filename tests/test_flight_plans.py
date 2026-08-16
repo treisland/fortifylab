@@ -148,6 +148,27 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("reused catalog value", result.stdout)
         self.assertNotIn("FORTIFY_SSC_IMAGE_TAG: FORTIFY_SSC_IMAGE_TAG", result.stdout)
 
+    def test_discovery_can_use_registry_tag_fixture_when_hub_api_is_unavailable(self) -> None:
+        payload = {"results": [{"name": "25.2.0-1"}], "next": None}
+        registry_payload = {"name": "fortifydocker/ssc-webapp", "tags": ["25.2.1.00010", "25.2.2.0005", "25.2.2.0005.518"]}
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_dir = Path(directory) / "fixtures"
+            fixture_dir.mkdir()
+            for repo in (
+                "fortifydocker__helm-ssc__page1.json",
+                "fortifydocker__helm-scancentral-sast__page1.json",
+                "fortifydocker__helm-scancentral-dast-core__page1.json",
+                "fortifydocker__helm-lim__page1.json",
+            ):
+                (fixture_dir / repo).write_text(json.dumps(payload), encoding="utf-8")
+            (fixture_dir / "registry__fortifydocker__ssc-webapp__page1.json").write_text(json.dumps(registry_payload), encoding="utf-8")
+            output = Path(directory) / "candidate.toml"
+            result = self.run_tool("discover", "--family", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(output))
+            candidate = output.read_text(encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('FORTIFY_SSC_IMAGE_TAG = "25.2.2.0005.518"', candidate)
+        self.assertIn("selected from authenticated Docker Registry API", result.stdout)
+
     def test_shell_wrappers_delegate_to_single_catalog_implementation(self) -> None:
         result = subprocess.run(
             ["bash", "-c", 'FORTIFY_HOME_K8S="$PWD"; source scripts/lib/flight-plans.sh; flight_plan_validate_catalog; flight_plan_list'],
