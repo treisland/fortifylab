@@ -167,7 +167,8 @@ class FlightPlansTests(unittest.TestCase):
             candidate = output.read_text(encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('FORTIFY_SSC_IMAGE_TAG = "25.2.2.0005.518"', candidate)
-        self.assertIn("selected from authenticated Docker Registry API", result.stdout)
+        self.assertIn("INFO: FORTIFY_SSC_IMAGE_TAG: selected from authenticated Docker Registry API", result.stdout)
+        self.assertNotIn("WARNING: FORTIFY_SSC_IMAGE_TAG", result.stdout)
 
     def test_shell_wrappers_delegate_to_single_catalog_implementation(self) -> None:
         result = subprocess.run(

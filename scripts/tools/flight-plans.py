@@ -399,6 +399,7 @@ def discover(catalog: Catalog, family: str, output: Path, fixture_dir: Path | No
         f"[flight_plans.{toml_quote('fortify-' + family)}.components]",
     ]
     warnings: list[str] = []
+    notes: list[str] = []
     selected: dict[str, str] = {}
     for key in FORTIFY_KEYS:
         repo = DISCOVERY_REPOSITORIES.get(key)
@@ -414,7 +415,7 @@ def discover(catalog: Catalog, family: str, output: Path, fixture_dir: Path | No
             tags, source = dockerhub_tags(repo, fixture_dir=fixture_dir)
             value, warning = best_tag_for_family(tags, family)
             if source == "Docker Registry API" and value:
-                warning = f"selected from authenticated {source}" if not warning else f"{warning}; selected from authenticated {source}"
+                notes.append(f"{key}: selected from authenticated {source}")
             if not value and fallback:
                 value = fallback
                 warning = f"{warning}; reused catalog value {fallback}" if warning else f"reused catalog value {fallback}"
@@ -432,12 +433,20 @@ def discover(catalog: Catalog, family: str, output: Path, fixture_dir: Path | No
     lines.append(f"[flight_plans.{toml_quote('fortify-' + family)}.repositories]")
     for key, repo in DISCOVERY_REPOSITORIES.items():
         lines.append(f"{key} = {toml_quote(repo)}")
-    lines.append("")
-    lines.append("# Review warnings")
-    for warning in warnings:
-        lines.append(f"# - {warning}")
+    if warnings:
+        lines.append("")
+        lines.append("# Review warnings")
+        for warning in warnings:
+            lines.append(f"# - {warning}")
+    if notes:
+        lines.append("")
+        lines.append("# Discovery notes")
+        for note in notes:
+            lines.append(f"# - {note}")
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Wrote candidate Flight Plan draft: {output}")
+    for note in notes:
+        print(f"INFO: {note}")
     for warning in warnings:
         print(f"WARNING: {warning}")
     return 0
