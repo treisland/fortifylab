@@ -637,6 +637,18 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("RC=1", result.stdout)
         self.assertNotIn("BAD_RESET", result.stdout)
 
+    def test_guided_setup_help_uses_help_center_topics(self) -> None:
+        result = self.run_wizard_functions(
+            'guided_setup_step_screen() { :; }; guided_setup_footer() { :; }; '
+            'answers=(h q); ask() { local __target="$1"; shift || true; printf -v "$__target" "%s" "${answers[0]}"; answers=("${answers[@]:1}"); }; '
+            'help_show_topic() { printf "HELP:%s\n" "$1"; }; '
+            'guided_setup_menu; printf "RC=%s\n" "$?"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("HELP:overview", result.stdout)
+        self.assertIn("Guided Setup cancelled", result.stdout)
+        self.assertIn("RC=130", result.stdout)
+
     def test_guided_setup_and_deployment_footers_render_vertical_options(self) -> None:
         result = self.run_wizard_functions('guided_setup_footer; guided_deployment_footer')
         self.assertEqual(result.returncode, 0, result.stderr)

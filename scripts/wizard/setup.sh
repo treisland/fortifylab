@@ -39,6 +39,21 @@ guided_setup_footer() {
         "q. Cancel setup"
 }
 
+guided_setup_help_topic() {
+    case "$1" in
+        0) printf '%s\n' overview ;;
+        1) printf '%s\n' urls ;;
+        2) printf '%s\n' lab-scope ;;
+        3) printf '%s\n' troubleshooting/license ;;
+        4) printf '%s\n' troubleshooting/registry ;;
+        5) printf '%s\n' troubleshooting/tls ;;
+        6) printf '%s\n' urls ;;
+        7) printf '%s\n' troubleshooting/tls ;;
+        8) printf '%s\n' guided/configuration ;;
+        *) printf '%s\n' overview ;;
+    esac
+}
+
 guided_deployment_footer() {
     wizard_vertical_footer "Options" \
         "r. Retry operation" \
@@ -616,7 +631,7 @@ guided_setup_menu() {
             [Cc]|"") [ "$step" -lt $((${#SETUP_STEP_LABEL[@]} - 1)) ] && step=$((step + 1)) || { setup_apply_pending; press_any; return $?; } ;;
             [Ss]) [ "$step" -lt $((${#SETUP_STEP_LABEL[@]} - 1)) ] && step=$((step + 1)) ;;
             [Bb]) [ "$step" -gt 0 ] && step=$((step - 1)) || return 0 ;;
-            [Hh]) show_help_for_step inputs; press_any ;;
+            [Hh]) help_show_topic "$(guided_setup_help_topic "$step")" ;;
             [Qq]) note "Guided Setup cancelled; no staged changes were applied."; return 130 ;;
             *) error "Invalid"; sleep 1 ;;
         esac
