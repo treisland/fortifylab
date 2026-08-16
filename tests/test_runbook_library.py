@@ -321,6 +321,40 @@ class RunbookLibraryTests(unittest.TestCase):
             self.assertIn("token=<redacted>", result.stdout)
             self.assertNotIn("super-secret-value", result.stdout)
 
+    def test_parameter_forms_and_previews_redact_secret_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runbook_root = Path(directory) / "runbooks"
+            script = self.make_runbook(
+                runbook_root,
+                "ssc/login.sh",
+                """
+                #!/usr/bin/env bash
+                # fortifylab-runbook: true
+                # name: SSC login
+                # description: Login example.
+                # category: SSC
+                # risk: medium
+                # params:
+                #   - name: ssc_token
+                #     description: SSC token.
+                #     default: secret-token-value
+                #   - name: app_name
+                #     description: Application name.
+                #     default: Demo
+                echo ok
+                """,
+            )
+            result = self.run_wizard_functions(
+                f'runbook_parse_file {script}; runbook_init_param_values; '
+                f'runbook_print_params; runbook_show_resolved_command {script}',
+                runbook_root=runbook_root,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("ssc_token", result.stdout)
+            self.assertIn("<redacted>", result.stdout)
+            self.assertIn("APP_NAME=Demo", result.stdout)
+            self.assertNotIn("secret-token-value", result.stdout)
+
     def test_resolved_command_preview_shows_parameter_exports(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runbook_root = Path(directory) / "runbooks"

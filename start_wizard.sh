@@ -103,6 +103,7 @@ source_wizard_module app-registry.sh
 source_wizard_module operations.sh
 source_wizard_module guided.sh
 source_wizard_module runbooks.sh
+source_wizard_module setup.sh
 source_wizard_module menu.sh
 
 # ============================================================

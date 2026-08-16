@@ -76,6 +76,7 @@ guided_profile_label() {
         sast_full) printf '%s\n' "SAST full with SSC" ;;
         dast_full) printf '%s\n' "DAST full" ;;
         full_lab) printf '%s\n' "Full lab" ;;
+        sample_apps) printf '%s\n' "Sample applications only" ;;
         custom) printf '%s\n' "Custom" ;;
         *) printf '%s\n' "Full lab" ;;
     esac
@@ -88,6 +89,7 @@ guided_profile_components_for() {
         sast_full) printf '%s\n' "ssc sast_controller sast_sensor" ;;
         dast_full) printf '%s\n' "ssc lim dast_core dast_scanner" ;;
         full_lab) printf '%s\n' "ssc lim sast_controller sast_sensor dast_core dast_scanner" ;;
+        sample_apps) printf '%s\n' "sample_apps" ;;
         custom) printf '%s\n' "${GUIDED_DEPLOYMENT_COMPONENTS:-${FORTIFY_DEPLOYMENT_COMPONENTS:-}}" ;;
         *) printf '%s\n' "ssc lim sast_controller sast_sensor dast_core dast_scanner" ;;
     esac
@@ -1144,8 +1146,11 @@ guided_wait_render() {
     guided_print_pods "$id"
     section "Recent events"
     guided_print_recent_events
-    printf '\n  r. Retry operation   i. Take interactive control   p. Pod logs   l. Wizard log   h. Help\n'
-    printf '  d. Live diagnostics   x. Export diagnostics bundle   q. Quit safely\n'
+    if declare -F guided_deployment_footer >/dev/null 2>&1; then
+        guided_deployment_footer
+    else
+        printf '\nOptions\n  r. Retry operation\n  i. Take interactive control\n  p. Pod logs\n  l. Wizard log\n  d. Live diagnostics\n  x. Export diagnostics bundle\n  h. Help\n  q. Quit safely\n'
+    fi
     printf '  Waiting %ss before the next refresh' "$interval"
     [ "$timeout" -gt 0 ] && printf ' (%ss remaining)' "$remaining"
     printf '...\n'
