@@ -1817,6 +1817,9 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("cluster_profile_report", helper)
         self.assertIn("cluster-profile.txt", helper)
         self.assertIn("cluster-profile.txt", diagnostics)
+        self.assertIn("release_overlay_report", helper)
+        self.assertIn("release-overlays.txt", helper)
+        self.assertIn("release-overlays.txt", diagnostics)
 
 
 if __name__ == "__main__":

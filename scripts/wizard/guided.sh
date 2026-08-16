@@ -1024,6 +1024,8 @@ guided_live_diagnostics() {
     section "Live diagnostics for $label"
     printf '  Status: %s\n' "$(guided_step_live_status "$id")"
     printf '  Detail: %s\n' "$(guided_step_why_pending "$id")"
+    section "Release overlays"
+    release_overlay_report
     section "Pods"
     guided_print_pods "$id"
     section "Services and endpoints"
@@ -1349,7 +1351,8 @@ wizard_doctor() {
     operational_cluster_available || unavailable=1
     operational_doctor_compact_health_summary || unavailable=1
     printf '\nFlight Plan:\n'
-    flight_plan_current_status
+    release_overlay_report
+    release_overlay_validate_selected || unavailable=1
     printf '\nDetailed checks:\n'
     operational_doctor_hosts_resolution || true
     operational_doctor_coredns_drift || true
@@ -1663,6 +1666,7 @@ guided_deployment_menu() {
     guided_print_profile_summary
     section "Flight Plan"
     flight_plan_current_status
+    release_overlay_report
     cat <<EOF
 
   1. Interactive guided deployment
@@ -1827,6 +1831,7 @@ resume_repair() {
     guided_print_profile_summary
     section "Flight Plan"
     flight_plan_current_status
+    release_overlay_report
     echo
     guided_collect_step_statuses
     echo
@@ -1860,6 +1865,7 @@ express_deployment_plan() {
     guided_print_profile_summary
     section "Flight Plan"
     flight_plan_current_status
+    release_overlay_report
     section "Express deployment plan"
     for idx in "${!GUIDED_STEP_ID[@]}"; do
         step="${GUIDED_STEP_ID[$idx]}"
@@ -1976,6 +1982,8 @@ preflight_check() {
     }
     section "Flight Plan"
     flight_plan_current_status
+    release_overlay_report
+    release_overlay_validate_selected || return 1
     [ -s "$HOME/.docker/config.json" ] || {
         error "Docker registry login is missing (use option 3)"
         return 1

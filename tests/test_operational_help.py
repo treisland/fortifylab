@@ -234,6 +234,7 @@ class OperationalHelpTests(unittest.TestCase):
                         "doctor-summary.txt",
                         "kubernetes-evidence.txt",
                         "network-diagnostics.txt",
+                        "release-overlays.txt",
                         "wizard-log-excerpt.txt",
                     ],
                 )

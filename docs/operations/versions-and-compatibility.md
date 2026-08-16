@@ -47,6 +47,44 @@ when testing a specific compatibility issue or preparing a new catalog entry.
 Diagnostics compare the current `.env` against the selected plan and report drift
 without printing secrets.
 
+## Release-aware deployment overlays
+
+Most release changes should be handled through Flight Plan values. When a
+specific Fortify release needs a deployment-script tweak, keep that tweak beside
+the affected app instead of branching the entire `apps/` tree.
+
+Overlay path convention:
+
+```text
+apps/<app-id>/releases/<major.minor>/overrides.sh
+```
+
+Examples:
+
+```text
+apps/ssc/releases/26.2/overrides.sh
+apps/scdast/core/releases/26.2/overrides.sh
+apps/scdast/scanner/releases/26.2/overrides.sh
+```
+
+The selected Flight Plan determines the `<major.minor>` baseline. During an app
+start or upgrade, the app script sources the matching overlay when it exists.
+Missing overlays are normal and mean the shared deployment script is valid for
+that release. Selected overlays must pass `bash -n`; guided pre-flight and
+configuration diagnostics report syntax or readability problems before the app
+script runs.
+
+Overlays should stay small and release-specific. Prefer appending Helm arguments
+to `RELEASE_OVERLAY_HELM_ARGS` rather than replacing whole commands:
+
+```bash
+RELEASE_OVERLAY_HELM_ARGS+=(--set-string example.releaseSetting=true)
+```
+
+Do not place secrets, generated credentials, or environment-specific values in a
+release overlay. Those belong in `.env`, Kubernetes Secrets, or the existing
+configuration editor flow.
+
 ## Repo-owner discovery workflow
 
 Repo owners can draft and curate new plan candidates with the discovery helper.

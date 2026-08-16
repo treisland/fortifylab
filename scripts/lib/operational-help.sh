@@ -567,6 +567,14 @@ operational_create_diagnostics_bundle() {
     else
         printf '%s\n' 'Cluster profile report unavailable outside the wizard runtime.' >"$work/cluster-profile.txt"
     fi
+    if declare -F release_overlay_report >/dev/null 2>&1; then
+        {
+            release_overlay_report
+            release_overlay_validate_selected || true
+        } | _operational_sanitize_stream >"$work/release-overlays.txt"
+    else
+        printf '%s\n' 'Release overlay report unavailable outside the wizard runtime.' >"$work/release-overlays.txt"
+    fi
     operational_doctor_compact_health_summary | _operational_sanitize_stream >"$work/doctor-summary.txt"
     {
         operational_doctor_hosts_resolution
@@ -599,7 +607,7 @@ operational_create_diagnostics_bundle() {
     else
         printf '%s\n' 'MicroK8s was unavailable; Kubernetes evidence was skipped after a bounded read-only probe.' >"$work/kubernetes-evidence.txt"
     fi
-    tar -C "$work" -czf "$bundle" README.txt deployment-plan.txt cluster-profile.txt doctor-summary.txt network-diagnostics.txt kubernetes-evidence.txt wizard-log-excerpt.txt
+    tar -C "$work" -czf "$bundle" README.txt deployment-plan.txt cluster-profile.txt release-overlays.txt doctor-summary.txt network-diagnostics.txt kubernetes-evidence.txt wizard-log-excerpt.txt
     archive_status=$?
     rm -rf -- "$work"
     [ "$archive_status" -eq 0 ] || return "$archive_status"
