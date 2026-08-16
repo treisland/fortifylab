@@ -26,7 +26,7 @@ FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
 FORTIFY_SSC_CHART_VERSION = "fortifydocker/helm-ssc"
 FORTIFY_SSC_IMAGE_TAG = "fortifydocker/ssc-webapp"
 FORTIFY_SCSAST_CHART_VERSION = "fortifydocker/helm-scancentral-sast"
-FORTIFY_SCDAST_CHART_VERSION = "fortifydocker/helm-scancentral-dast-core"
+FORTIFY_SCDAST_CHART_VERSION = "fortifydocker/helm-scancentral-dast-core, fortifydocker/helm-scancentral-dast-scanner"
 FORTIFY_LIM_CHART_VERSION = "fortifydocker/helm-lim"
 
 [flight_plans."fortify-25.x"]

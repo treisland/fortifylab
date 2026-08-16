@@ -73,7 +73,14 @@ To inspect or regenerate one release explicitly:
 Discovery prints the selected component candidates to the terminal and writes a
 TOML draft under `tmp/flight-plan-candidates/` by default. It prefers Docker Hub
 tag listings, falls back to the authenticated Docker Registry API when needed,
-and reuses existing catalog values when a repository cannot be listed.
+and reuses existing catalog values when a repository cannot be listed. Discovery
+only counts tags that match the requested release prefix; it does not substitute
+newer tags from a different release to make coverage look complete.
+
+`FORTIFY_SCDAST_CHART_VERSION` is shared by ScanCentral DAST Core and Scanner in
+this lab, so discovery requires the release tag to exist in both
+`fortifydocker/helm-scancentral-dast-core` and
+`fortifydocker/helm-scancentral-dast-scanner` before counting DAST as covered.
 
 Promotion remains an owner-controlled step. Use a dry run first, then write the
 catalog only after reviewing the candidate and testing the deployment path:

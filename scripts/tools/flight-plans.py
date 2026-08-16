@@ -35,13 +35,16 @@ DATABASE_KEYS = (
     "FORTIFY_POSTGRES_IMAGE_TAG",
 )
 DISCOVERY_REPOSITORIES = {
-    "FORTIFY_SSC_CHART_VERSION": "fortifydocker/helm-ssc",
-    "FORTIFY_SSC_IMAGE_TAG": "fortifydocker/ssc-webapp",
-    "FORTIFY_SCSAST_CHART_VERSION": "fortifydocker/helm-scancentral-sast",
-    "FORTIFY_SCSAST_CTRL_IMAGE_TAG": "fortifydocker/scancentral-sast-controller",
-    "FORTIFY_SCSAST_WORKER_IMAGE_TAG": "fortifydocker/scancentral-sast-sensor",
-    "FORTIFY_SCDAST_CHART_VERSION": "fortifydocker/helm-scancentral-dast-core",
-    "FORTIFY_LIM_CHART_VERSION": "fortifydocker/helm-lim",
+    "FORTIFY_SSC_CHART_VERSION": ("fortifydocker/helm-ssc",),
+    "FORTIFY_SSC_IMAGE_TAG": ("fortifydocker/ssc-webapp",),
+    "FORTIFY_SCSAST_CHART_VERSION": ("fortifydocker/helm-scancentral-sast",),
+    "FORTIFY_SCSAST_CTRL_IMAGE_TAG": ("fortifydocker/scancentral-sast-controller",),
+    "FORTIFY_SCSAST_WORKER_IMAGE_TAG": ("fortifydocker/scancentral-sast-sensor",),
+    "FORTIFY_SCDAST_CHART_VERSION": (
+        "fortifydocker/helm-scancentral-dast-core",
+        "fortifydocker/helm-scancentral-dast-scanner",
+    ),
+    "FORTIFY_LIM_CHART_VERSION": ("fortifydocker/helm-lim",),
 }
 HELP_EPILOG = """
 Command groups:
@@ -421,21 +424,35 @@ def version_sort_key(tag: str) -> tuple[Any, ...]:
     return tuple(result)
 
 
-def best_tag_for_family(tags: list[dict[str, Any]], family: str) -> tuple[str, str]:
-    candidates: list[str] = []
+def family_tag_candidates(tags: list[dict[str, Any]], family: str) -> set[str]:
+    candidates: set[str] = set()
     for record in tags:
         name = str(record.get("name", ""))
-        if not name or name == "latest":
-            continue
-        if name.startswith(family):
-            candidates.append(name)
+        if name and name != "latest" and name.startswith(family):
+            candidates.add(name)
+    return candidates
+
+
+def best_tag_for_family(tags: list[dict[str, Any]], family: str) -> tuple[str, str]:
+    candidates = family_tag_candidates(tags, family)
     if not candidates:
-        numeric = [str(record.get("name", "")) for record in tags if re.search(r"\d", str(record.get("name", "")))]
-        numeric = [name for name in numeric if name and name != "latest"]
-        if not numeric:
-            return "", "no numeric tag found"
-        return sorted(numeric, key=version_sort_key)[-1], f"no {family} tag found; selected newest numeric candidate"
+        return "", f"no {family} tag found"
     return sorted(candidates, key=version_sort_key)[-1], ""
+
+
+def best_shared_tag_for_family(repo_tags: dict[str, list[dict[str, Any]]], family: str) -> tuple[str, str]:
+    shared: set[str] | None = None
+    missing: list[str] = []
+    for repo, tags in repo_tags.items():
+        candidates = family_tag_candidates(tags, family)
+        if not candidates:
+            missing.append(repo)
+        shared = candidates if shared is None else shared & candidates
+    if missing:
+        return "", f"no {family} tag found in {', '.join(missing)}"
+    if not shared:
+        return "", f"no common {family} tag found across {', '.join(repo_tags)}"
+    return sorted(shared, key=version_sort_key)[-1], ""
 
 
 def toml_quote(value: str) -> str:
@@ -457,9 +474,9 @@ def discover_components(catalog: Catalog, family: str, fixture_dir: Path | None)
     notes: list[str] = []
     selected: dict[str, str] = {}
     for key in FORTIFY_KEYS:
-        repo = DISCOVERY_REPOSITORIES.get(key)
+        repos = DISCOVERY_REPOSITORIES.get(key, ())
         fallback = catalog_fallback_component(catalog, family, key)
-        if not repo:
+        if not repos:
             selected[key] = fallback
             if fallback:
                 warnings.append(f"{key}: no Docker repository mapping; reused catalog value {fallback}")
@@ -467,18 +484,28 @@ def discover_components(catalog: Catalog, family: str, fixture_dir: Path | None)
                 warnings.append(f"{key}: no Docker repository mapping; fill manually")
             continue
         try:
-            tags, source = dockerhub_tags(repo, fixture_dir=fixture_dir)
-            value, warning = best_tag_for_family(tags, family)
-            if source == "Docker Registry API" and value:
-                notes.append(f"{key}: selected from authenticated {source}")
+            repo_tags: dict[str, list[dict[str, Any]]] = {}
+            sources: dict[str, str] = {}
+            for repo in repos:
+                tags, source = dockerhub_tags(repo, fixture_dir=fixture_dir)
+                repo_tags[repo] = tags
+                sources[repo] = source
+            if len(repos) == 1:
+                value, warning = best_tag_for_family(repo_tags[repos[0]], family)
+            else:
+                value, warning = best_shared_tag_for_family(repo_tags, family)
+            registry_repos = [repo for repo, source in sources.items() if source == "Docker Registry API"]
+            if registry_repos and value:
+                notes.append(f"{key}: selected from authenticated Docker Registry API for {', '.join(registry_repos)}")
             if not value and fallback:
                 value = fallback
                 warning = f"{warning}; reused catalog value {fallback}" if warning else f"reused catalog value {fallback}"
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+            repo_list = ", ".join(repos)
             if fallback:
-                value, warning = fallback, f"discovery failed for {repo}; reused catalog value {fallback} ({exc})"
+                value, warning = fallback, f"discovery failed for {repo_list}; reused catalog value {fallback} ({exc})"
             else:
-                value, warning = "", f"discovery failed for {repo}: {exc}"
+                value, warning = "", f"discovery failed for {repo_list}: {exc}"
         selected[key] = value
         if warning:
             warnings.append(f"{key}: {warning}")
@@ -501,8 +528,8 @@ def candidate_lines(family: str, selected: dict[str, str], warnings: list[str], 
         lines.append(f"{key} = {toml_quote(selected.get(key, ''))}")
     lines.append("")
     lines.append(f"[flight_plans.{toml_quote('fortify-' + family)}.repositories]")
-    for key, repo in DISCOVERY_REPOSITORIES.items():
-        lines.append(f"{key} = {toml_quote(repo)}")
+    for key, repos in DISCOVERY_REPOSITORIES.items():
+        lines.append(f"{key} = {toml_quote(", ".join(repos))}")
     if warnings:
         lines.append("")
         lines.append("# Review warnings")
@@ -557,18 +584,19 @@ def discover(catalog: Catalog, family: str, output: Path, fixture_dir: Path | No
 
 def discover_family_scores(catalog: Catalog, fixture_dir: Path | None, years: set[str] | None = None) -> list[FamilyScore]:
     families: set[str] = set()
-    for repo in DISCOVERY_REPOSITORIES.values():
-        try:
-            tags, _source = dockerhub_tags(repo, fixture_dir=fixture_dir)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-            continue
-        for record in tags:
-            family = release_family_from_tag(str(record.get("name", "")))
-            if not family:
+    for repos in DISCOVERY_REPOSITORIES.values():
+        for repo in repos:
+            try:
+                tags, _source = dockerhub_tags(repo, fixture_dir=fixture_dir)
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
                 continue
-            if years and family.split(".", 1)[0] not in years:
-                continue
-            families.add(family)
+            for record in tags:
+                family = release_family_from_tag(str(record.get("name", "")))
+                if not family:
+                    continue
+                if years and family.split(".", 1)[0] not in years:
+                    continue
+                families.add(family)
     for plan in catalog.flight_plans.values():
         family = str(plan.get("family", ""))
         if not re.fullmatch(r"\d{2,4}\.\d+", family):

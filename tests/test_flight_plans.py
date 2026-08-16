@@ -55,6 +55,7 @@ class FlightPlansTests(unittest.TestCase):
             "fortifydocker__scancentral-sast-controller__page1.json",
             "fortifydocker__scancentral-sast-sensor__page1.json",
             "fortifydocker__helm-scancentral-dast-core__page1.json",
+            "fortifydocker__helm-scancentral-dast-scanner__page1.json",
             "fortifydocker__helm-lim__page1.json",
         ):
             (fixture_dir / repo).write_text(json.dumps(hub_payload), encoding="utf-8")
@@ -196,10 +197,13 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("INFO: FORTIFY_SSC_IMAGE_TAG: selected from authenticated Docker Registry API", result.stdout)
         self.assertNotIn("WARNING: FORTIFY_SSC_IMAGE_TAG", result.stdout)
 
-    def test_discovery_maps_scancentral_sast_image_repositories(self) -> None:
+    def test_discovery_maps_scancentral_repositories(self) -> None:
         tool = TOOL.read_text(encoding="utf-8")
-        self.assertIn('"FORTIFY_SCSAST_CTRL_IMAGE_TAG": "fortifydocker/scancentral-sast-controller"', tool)
-        self.assertIn('"FORTIFY_SCSAST_WORKER_IMAGE_TAG": "fortifydocker/scancentral-sast-sensor"', tool)
+        self.assertIn('"FORTIFY_SCSAST_CTRL_IMAGE_TAG": ("fortifydocker/scancentral-sast-controller",)', tool)
+        self.assertIn('"FORTIFY_SCSAST_WORKER_IMAGE_TAG": ("fortifydocker/scancentral-sast-sensor",)', tool)
+        self.assertIn('"FORTIFY_SCDAST_CHART_VERSION": (', tool)
+        self.assertIn('"fortifydocker/helm-scancentral-dast-core"', tool)
+        self.assertIn('"fortifydocker/helm-scancentral-dast-scanner"', tool)
 
     def test_discover_releases_scores_release_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -212,6 +216,47 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("7/7", result.stdout)
         self.assertIn("candidate ready", result.stdout)
         self.assertNotIn("26.2", result.stdout)
+
+    def test_discover_releases_does_not_count_missing_component_release_tags(self) -> None:
+        old_payload = {"results": [{"name": "22.1.0-1"}], "next": None}
+        dast_payload = {"results": [{"name": "24.4.0-2"}], "next": None}
+        registry_payload = {"name": "fortifydocker/ssc-webapp", "tags": ["22.1.0.0001"]}
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_dir = Path(directory) / "fixtures"
+            fixture_dir.mkdir()
+            for repo in (
+                "fortifydocker__helm-ssc__page1.json",
+                "fortifydocker__helm-scancentral-sast__page1.json",
+                "fortifydocker__scancentral-sast-controller__page1.json",
+                "fortifydocker__scancentral-sast-sensor__page1.json",
+                "fortifydocker__helm-lim__page1.json",
+            ):
+                (fixture_dir / repo).write_text(json.dumps(old_payload), encoding="utf-8")
+            for repo in (
+                "fortifydocker__helm-scancentral-dast-core__page1.json",
+                "fortifydocker__helm-scancentral-dast-scanner__page1.json",
+            ):
+                (fixture_dir / repo).write_text(json.dumps(dast_payload), encoding="utf-8")
+            (fixture_dir / "registry__fortifydocker__ssc-webapp__page1.json").write_text(json.dumps(registry_payload), encoding="utf-8")
+            result = self.run_tool("discover-releases", "--years", "22", "--fixture-dir", str(fixture_dir))
+            candidate = Path(directory) / "fortify-22.1.toml"
+            write_result = self.run_tool(
+                "discover-releases",
+                "--years",
+                "22",
+                "--write-complete",
+                "--output-dir",
+                str(Path(directory) / "candidates"),
+                "--fixture-dir",
+                str(fixture_dir),
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("22.1", result.stdout)
+        self.assertIn("6/7", result.stdout)
+        self.assertIn("needs review", result.stdout)
+        self.assertEqual(write_result.returncode, 0, write_result.stderr)
+        self.assertIn("Candidate files written: 0", write_result.stdout)
+        self.assertFalse(candidate.exists())
 
     def test_discover_releases_can_write_complete_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
