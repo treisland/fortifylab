@@ -745,6 +745,46 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("latest available: new-chart", result.stdout)
         self.assertIn("VERSION=new-chart", result.stdout)
 
+    def test_deployment_versions_menu_exposes_flight_plan_upgrade_and_component_override(self) -> None:
+        for expected in (
+            "Full Flight Plan upgrade",
+            "Advanced individual component override",
+            "Show candidate Flight Plans",
+            "flight_plan_full_upgrade_flow",
+            "flight_plan_component_override_menu",
+            "FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS",
+            "Restore this component to current Flight Plan baseline",
+        ):
+            self.assertIn(expected, WIZARD)
+
+    def test_full_flight_plan_upgrade_stages_through_pending_preview(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$PWD"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'cp .env.example "$ENV_FILE"; source "$ENV_FILE"; pending=(); '
+            'confirm() { return 0; }; press_any() { :; }; '
+            'flight_plan_full_upgrade_flow pending fortify-26.2; printf "COUNT=%s\n" "${#pending[@]}"; printf "%s\n" "${pending[@]}"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Current Flight Plan", result.stdout)
+        self.assertIn("Target Flight Plan", result.stdout)
+        self.assertIn("Upgrade safety", result.stdout)
+        self.assertIn("FORTIFY_FLIGHT_PLAN=fortify-26.2", result.stdout)
+        self.assertIn("COUNT=8", result.stdout)
+
+    def test_component_override_marks_drift_and_restore_clears_marker(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$PWD"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'cp .env.example "$ENV_FILE"; source "$ENV_FILE"; pending=(); '
+            'flight_plan_stage_component_from_plan pending sast fortify-26.2; flight_plan_stage_drift_marker pending sast; '
+            'printf "STAGED:%s\n" "${pending[@]}"; '
+            'flight_plan_clear_drift_marker pending sast; printf "RESTORE:%s\n" "${pending[@]}"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("FORTIFY_SCSAST_CHART_VERSION=26.2.0-1", result.stdout)
+        self.assertIn("FORTIFY_SCSAST_CTRL_IMAGE_TAG=26.2.0", result.stdout)
+        self.assertIn("FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS=sast", result.stdout)
+        self.assertIn("RESTORE:FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS=", result.stdout)
+
     def test_domain_assistant_updates_domain_and_derived_urls(self) -> None:
         result = self.run_wizard_functions(
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '

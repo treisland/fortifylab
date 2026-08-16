@@ -1777,7 +1777,12 @@ flight_plan_selected_id() {
 }
 
 flight_plan_list_records() {
-    flight_plan_tool list 2>/dev/null
+    local include="${1:-}"
+    if [ "$include" = candidate ] || [ "$include" = candidates ] || [ "$include" = all ] || [ "$include" = "--include-candidates" ]; then
+        flight_plan_tool list --include-candidates 2>/dev/null
+    else
+        flight_plan_tool list 2>/dev/null
+    fi
 }
 
 flight_plan_status_label() {
@@ -1789,6 +1794,19 @@ flight_plan_status_label() {
         candidate) printf '%s\n' Candidate ;;
         *) printf '%s\n' "${1:-Unknown}" ;;
     esac
+}
+
+flight_plan_label_for_id() {
+    local plan_id="$1" record id label status family
+    while IFS= read -r record; do
+        IFS=$'	' read -r id label status family <<<"$record"
+        [ "$id" = "$plan_id" ] || continue
+        printf '%s
+' "${label:-$plan_id}"
+        return 0
+    done < <(flight_plan_list_records all)
+    printf '%s
+' "$plan_id"
 }
 
 flight_plan_pending_value() {
@@ -1845,6 +1863,185 @@ Rollback note:
 EOF
 }
 
+
+flight_plan_component_keys() {
+    case "$1" in
+        ssc) printf '%s\n' FORTIFY_SSC_CHART_VERSION FORTIFY_SSC_IMAGE_TAG ;;
+        lim) printf '%s\n' FORTIFY_LIM_CHART_VERSION ;;
+        sast) printf '%s\n' FORTIFY_SCSAST_CHART_VERSION FORTIFY_SCSAST_CTRL_IMAGE_TAG FORTIFY_SCSAST_WORKER_IMAGE_TAG ;;
+        dast) printf '%s\n' FORTIFY_SCDAST_CHART_VERSION ;;
+        *) return 1 ;;
+    esac
+}
+
+flight_plan_component_label() {
+    case "$1" in
+        ssc) printf '%s\n' "Software Security Center" ;;
+        lim) printf '%s\n' "License and Infrastructure Manager" ;;
+        sast) printf '%s\n' "ScanCentral SAST" ;;
+        dast) printf '%s\n' "ScanCentral DAST" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
+flight_plan_component_step() {
+    case "$1" in
+        ssc) printf '%s\n' ssc ;;
+        lim) printf '%s\n' lim ;;
+        sast) printf '%s\n' sast ;;
+        dast) printf '%s\n' dast ;;
+        *) return 1 ;;
+    esac
+}
+
+flight_plan_value_for_key() {
+    local plan_id="$1" key="$2" line
+    while IFS= read -r line; do
+        [ "${line%%=*}" = "$key" ] || continue
+        printf '%s\n' "${line#*=}"
+        return 0
+    done < <(flight_plan_tool env-updates "$plan_id")
+    return 1
+}
+
+flight_plan_stage_component_from_plan() {
+    local array_name="$1" component="$2" plan_id="$3" key value changed=0
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        value=$(flight_plan_value_for_key "$plan_id" "$key" 2>/dev/null || true)
+        [ -n "$value" ] || continue
+        env_pending_set "$array_name" "$key" "$value"
+        changed=1
+    done < <(flight_plan_component_keys "$component")
+    return $((changed == 0))
+}
+
+flight_plan_restore_component_baseline() {
+    local array_name="$1" component="$2" plan_id="${3:-$(flight_plan_selected_id)}"
+    flight_plan_stage_component_from_plan "$array_name" "$component" "$plan_id"
+}
+
+flight_plan_component_drift_status() {
+    local component="$1" plan_id="${2:-$(flight_plan_selected_id)}" key expected current drift=0 total=0
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        expected=$(flight_plan_value_for_key "$plan_id" "$key" 2>/dev/null || true)
+        current=$(env_current_value "$key")
+        [ -n "$expected" ] || continue
+        total=$((total + 1))
+        [ "$current" = "$expected" ] || drift=$((drift + 1))
+    done < <(flight_plan_component_keys "$component")
+    if [ "$total" -eq 0 ]; then
+        printf 'unknown\n'
+    elif [ "$drift" -eq 0 ]; then
+        printf 'aligned\n'
+    else
+        printf 'custom override (%d/%d drifted)\n' "$drift" "$total"
+    fi
+}
+
+flight_plan_pending_drift_components() {
+    local fallback pair key="FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS"
+    fallback="$(env_current_value "$key")"
+    for pair in "$@"; do
+        [ "${pair%%=*}" = "$key" ] || continue
+        printf '%s\n' "${pair#*=}"
+        return 0
+    done
+    printf '%s\n' "$fallback"
+}
+
+flight_plan_stage_drift_marker() {
+    local array_name="$1" component="$2" current item next=""
+    local -n pending_ref="$array_name"
+    current="$(flight_plan_pending_drift_components "${pending_ref[@]}")"
+    IFS=',' read -r -a _flight_plan_drift_items <<<"$current"
+    for item in "${_flight_plan_drift_items[@]}"; do
+        [ -n "$item" ] || continue
+        [ "$item" = "$component" ] && continue
+        next="${next:+$next,}$item"
+    done
+    next="${next:+$next,}$component"
+    env_pending_set "$array_name" FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS "$next"
+}
+
+flight_plan_clear_drift_marker() {
+    local array_name="$1" component="$2" current item next=""
+    local -n pending_ref="$array_name"
+    current="$(flight_plan_pending_drift_components "${pending_ref[@]}")"
+    IFS=',' read -r -a _flight_plan_drift_items <<<"$current"
+    for item in "${_flight_plan_drift_items[@]}"; do
+        [ -n "$item" ] || continue
+        [ "$item" = "$component" ] && continue
+        next="${next:+$next,}$item"
+    done
+    env_pending_set "$array_name" FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS "$next"
+}
+
+flight_plan_print_component_impact() {
+    local component="$1" target_plan="$2" key current target
+    printf '  Component: %s\n' "$(flight_plan_component_label "$component")"
+    printf '  Baseline Flight Plan: %s\n' "$(flight_plan_selected_id)"
+    printf '  Target source: %s\n' "$target_plan"
+    printf '  Current drift: %s\n' "$(flight_plan_component_drift_status "$component")"
+    printf '\n  %-36s %-22s %s\n' "Key" "Current" "Target"
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        current=$(env_current_value "$key")
+        target=$(flight_plan_value_for_key "$target_plan" "$key" 2>/dev/null || true)
+        printf '  %-36s %-22s %s\n' "$key" "${current:-<unset>}" "${target:-<review required>}"
+    done < <(flight_plan_component_keys "$component")
+}
+
+flight_plan_print_upgrade_impact() {
+    local target_plan="$1" current_plan current_family target_family relation="upgrade/change" output rc=0 drift=0 unknown=0
+    current_plan="$(flight_plan_selected_id)"
+    current_family=$(flight_plan_tool show "$current_plan" 2>/dev/null | awk -F: '/^Family:/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit }')
+    target_family=$(flight_plan_tool show "$target_plan" 2>/dev/null | awk -F: '/^Family:/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit }')
+    if [ -n "$current_family" ] && [ -n "$target_family" ]; then
+        if [ "$target_family" = "$current_family" ]; then
+            relation="same release family"
+        elif printf '%s\n%s\n' "$target_family" "$current_family" | sort -V | tail -1 | grep -qx "$target_family"; then
+            relation="upgrade"
+        else
+            relation="downgrade or rollback"
+        fi
+    fi
+    output=$(flight_plan_tool compare-env "$target_plan" --env-file "$ENV_FILE" 2>/dev/null) || rc=$?
+    drift=$(printf '%s\n' "$output" | awk -F'\t' '$2=="drifted" {c++} END{print c+0}')
+    unknown=$(printf '%s\n' "$output" | awk -F'\t' '$2=="unknown" {c++} END{print c+0}')
+    printf '  Current Flight Plan: %s\n' "$current_plan"
+    printf '  Target Flight Plan:  %s\n' "$target_plan"
+    printf '  Change type:         %s\n' "$relation"
+    printf '  Target differences:  %d drifted, %d unknown\n' "$drift" "$unknown"
+    printf '  Database versions:   managed separately; not changed by Flight Plan upgrades\n'
+    printf '\nTarget release overlays:\n'
+    FORTIFY_FLIGHT_PLAN="$target_plan" release_overlay_report
+    [ "$rc" -eq 0 ] || true
+}
+
+flight_plan_upgrade_safety_note() {
+    cat <<'EOF'
+
+Upgrade safety
+  Take a VM/LXC snapshot or backup before upgrading a lab with data you care
+  about. Restoring .env is configuration rollback only; it does not reverse SSC,
+  LIM, SAST, DAST, database schema migrations, PVC contents, or Helm history.
+  Downgrades after an application has migrated data should be treated as data
+  recovery or full lab reset work.
+EOF
+}
+
+flight_plan_component_override_safety_note() {
+    cat <<'EOF'
+
+Component override safety
+  This creates a custom/drifted lab. Do not describe the environment as the
+  selected Flight Plan when only one component has been changed. Restore the
+  component to the Flight Plan baseline when compatibility testing is complete.
+EOF
+}
+
 flight_plan_stage_updates() {
     local array_name="$1" plan_id="$2" line
     local -n pending_ref="$array_name"
@@ -1855,47 +2052,184 @@ flight_plan_stage_updates() {
     env_pending_set "$array_name" FORTIFY_FLIGHT_PLAN "$plan_id"
 }
 
-flight_plan_select_menu() {
-    local array_name="$1" records=() record choice plan_id label status family idx
-    local -n pending_ref="$array_name"
-    mapfile -t records < <(flight_plan_list_records)
+
+flight_plan_choose_menu() {
+    local result_var="$1" include_candidates="${2:-}" records=() choice selected_plan_id label status family idx
+    mapfile -t records < <(flight_plan_list_records "$include_candidates")
     [ "${#records[@]}" -gt 0 ] || { error "No usable Flight Plans found. Validate config/flight-plans.toml."; press_any; return 1; }
     while true; do
         title "Select Fortify Flight Plan"
-        printf '\nCurrent: %s\nPending: %s\n\n' "$(flight_plan_selected_id)" "$(flight_plan_pending_value FORTIFY_FLIGHT_PLAN '<none>' "${pending_ref[@]}")"
+        printf '\nCurrent: %s\n\n' "$(flight_plan_selected_id)"
         section "Available Flight Plans"
         for idx in "${!records[@]}"; do
-            IFS=$'\t' read -r plan_id label status family <<<"${records[$idx]}"
+            IFS=$'\t' read -r selected_plan_id label status family <<<"${records[$idx]}"
             printf '  %2d. %-18s %-13s %s\n' "$((idx + 1))" "$label" "$(flight_plan_status_label "$status")" "family $family"
         done
         cat <<'EOF'
 
-  p. Preview pending changes
   b. Back
 EOF
         echo
         ask choice "Select:"
         case "$choice" in
             [Bb]|"") return 0 ;;
-            [Pp]) [ "${#pending_ref[@]}" -gt 0 ] && env_preview_changes "${pending_ref[@]}" || note "No pending changes."; press_any ;;
             ''|*[!0-9]*) error "Select a Flight Plan number shown above."; sleep 1 ;;
             *)
                 if [ "$choice" -lt 1 ] || [ "$choice" -gt "${#records[@]}" ]; then
                     error "Out of range"; sleep 1; continue
                 fi
-                IFS=$'\t' read -r plan_id label status family <<<"${records[$((choice - 1))]}"
-                flight_plan_stage_updates "$array_name" "$plan_id"
-                note "Flight Plan staged: $label"
-                cat <<'EOF'
-
-Safety note:
-  Flight Plan changes update version settings. Downgrades do not restore app
-  data, database schemas, or persistent volumes. Use backups or a full lab reset
-  when moving backward after a deployment has run.
-EOF
-                press_any
+                IFS=$'\t' read -r selected_plan_id label status family <<<"${records[$((choice - 1))]}"
+                printf -v "$result_var" '%s' "$selected_plan_id"
+                FLIGHT_PLAN_CHOICE_LABEL="$label"
                 return 0
                 ;;
+        esac
+    done
+}
+
+flight_plan_select_menu() {
+    local array_name="$1" include_candidates="${2:-}" plan_id
+    FLIGHT_PLAN_CHOICE_LABEL=""
+    flight_plan_choose_menu plan_id "$include_candidates" || return $?
+    [ -n "$plan_id" ] || return 0
+    flight_plan_stage_updates "$array_name" "$plan_id"
+    note "Flight Plan staged: ${FLIGHT_PLAN_CHOICE_LABEL:-$(flight_plan_label_for_id "$plan_id")}"
+    flight_plan_upgrade_safety_note
+    press_any
+}
+
+flight_plan_full_upgrade_flow() {
+    local array_name="$1" target_plan="${2:-}"
+    [ -n "$target_plan" ] || flight_plan_choose_menu target_plan all || return $?
+    [ -n "$target_plan" ] || return 0
+    section "Flight Plan upgrade impact"
+    flight_plan_print_upgrade_impact "$target_plan"
+    flight_plan_upgrade_safety_note
+    if confirm "Stage full Flight Plan upgrade to $target_plan?"; then
+        flight_plan_stage_updates "$array_name" "$target_plan"
+        section "Pending .env changes"
+        local -n pending_ref="$array_name"
+        env_preview_changes "${pending_ref[@]}"
+        note "Full Flight Plan upgrade staged. Use Apply pending version changes to write .env with a backup."
+    else
+        note "Flight Plan upgrade was not staged."
+    fi
+}
+
+flight_plan_upgrade_menu() {
+    flight_plan_full_upgrade_flow "$@"
+}
+
+flight_plan_show_candidates() {
+    local records=() record plan_id label status family found=0
+    section "Candidate Flight Plans"
+    mapfile -t records < <(flight_plan_list_records all)
+    for record in "${records[@]}"; do
+        IFS=$'\t' read -r plan_id label status family <<<"$record"
+        [ "$status" = candidate ] || continue
+        printf '  %-18s %-18s family %s\n' "$plan_id" "$label" "$family"
+        found=1
+    done
+    [ "$found" -eq 1 ] || note "No candidate Flight Plans are currently available."
+}
+
+flight_plan_component_select_menu() {
+    local result_var="$1" choice component
+    while true; do
+        title "Component override"
+        printf '\nSelected Flight Plan baseline: %s\n\n' "$(flight_plan_selected_id)"
+        printf '  1. SSC  - %s\n' "$(flight_plan_component_drift_status ssc)"
+        printf '  2. LIM  - %s\n' "$(flight_plan_component_drift_status lim)"
+        printf '  3. SAST - %s\n' "$(flight_plan_component_drift_status sast)"
+        printf '  4. DAST - %s\n' "$(flight_plan_component_drift_status dast)"
+        printf '\n  b. Back\n\n'
+        ask choice "Select component:"
+        case "$choice" in
+            1) component=ssc ;;
+            2) component=lim ;;
+            3) component=sast ;;
+            4) component=dast ;;
+            [Bb]|"") return 0 ;;
+            *) error "Select SSC, LIM, SAST, or DAST."; sleep 1; continue ;;
+        esac
+        printf -v "$result_var" '%s' "$component"
+        return 0
+    done
+}
+
+flight_plan_component_manual_values() {
+    local array_name="$1" component="$2" key current value changed=0
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        current=$(env_current_value "$key")
+        printf '\n%s [%s]\n' "$key" "${current:-<unset>}"
+        read -rp "New value (empty to keep current): " value
+        [ -n "$value" ] || continue
+        env_pending_set "$array_name" "$key" "$value"
+        changed=1
+    done < <(flight_plan_component_keys "$component")
+    if [ "$changed" -eq 1 ]; then
+        flight_plan_stage_drift_marker "$array_name" "$component"
+        note "$(flight_plan_component_label "$component") override staged and marked as Flight Plan drift."
+    else
+        note "No component values were changed."
+    fi
+}
+
+flight_plan_component_override_menu() {
+    local array_name="$1" component choice target_plan
+    flight_plan_component_select_menu component || return $?
+    [ -n "$component" ] || return 0
+    while true; do
+        title "$(flight_plan_component_label "$component") override"
+        flight_plan_print_component_impact "$component" "$(flight_plan_selected_id)"
+        flight_plan_component_override_safety_note
+        cat <<'EOF'
+
+Options
+  1. Stage this component from a target Flight Plan
+  2. Enter manual component values
+  3. Restore this component to current Flight Plan baseline
+  p. Preview pending changes
+  a. Apply pending version changes
+
+  b. Back
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1)
+                target_plan=""
+                flight_plan_choose_menu target_plan all || continue
+                [ -n "$target_plan" ] || continue
+                section "Component impact"
+                flight_plan_print_component_impact "$component" "$target_plan"
+                if confirm "Stage $(flight_plan_component_label "$component") values from $target_plan?"; then
+                    flight_plan_stage_component_from_plan "$array_name" "$component" "$target_plan"
+                    flight_plan_stage_drift_marker "$array_name" "$component"
+                    note "$(flight_plan_component_label "$component") staged from $target_plan and marked as Flight Plan drift."
+                fi
+                press_any
+                ;;
+            2) flight_plan_component_manual_values "$array_name" "$component"; press_any ;;
+            3)
+                section "Restore baseline"
+                flight_plan_print_component_impact "$component" "$(flight_plan_selected_id)"
+                if confirm "Restore $(flight_plan_component_label "$component") to current Flight Plan baseline?"; then
+                    flight_plan_restore_component_baseline "$array_name" "$component" "$(flight_plan_selected_id)"
+                    flight_plan_clear_drift_marker "$array_name" "$component"
+                    note "$(flight_plan_component_label "$component") restore staged."
+                fi
+                press_any
+                ;;
+            [Pp])
+                local -n pending_ref="$array_name"
+                [ "${#pending_ref[@]}" -gt 0 ] && env_preview_changes "${pending_ref[@]}" || note "No pending changes."
+                press_any
+                ;;
+            [Aa]) env_section_apply_pending flight-plan-component "$array_name"; press_any ;;
+            [Bb]|"") return 0 ;;
+            *) error "Invalid selection"; sleep 1 ;;
         esac
     done
 }
@@ -1942,13 +2276,16 @@ Impact
   separately because application upgrades and database rollback are different risks.
 
 Options
-  1. Select Fortify Flight Plan
-  2. Override individual Fortify component versions
-  3. Manage database versions
-  4. Compare .env to selected Flight Plan
-  5. Discover candidate Flight Plan tags (repo owner)
-  6. Preview pending .env changes
-  7. Apply pending version changes
+  1. Upgrade full Flight Plan
+  2. Advanced individual component override
+  3. Select Fortify Flight Plan
+  4. Override all Fortify component version fields
+  5. Manage database versions
+  6. Compare .env to selected Flight Plan
+  7. Show candidate Flight Plans
+  8. Refresh/discover candidate Flight Plan tags (repo owner)
+  9. Preview pending .env changes
+  10. Apply pending version changes
 
   r. Return
   q. Quit safely
@@ -1956,13 +2293,16 @@ EOF
         echo
         ask choice "Select:"
         case "$choice" in
-            1) flight_plan_select_menu pending_updates ;;
-            2) env_guided_section_editor "Individual Fortify component versions" versions || return $? ;;
-            3) env_guided_section_editor "Database versions" database_versions || return $? ;;
-            4) flight_plan_show_comparison; press_any ;;
-            5) flight_plan_discovery_menu ;;
-            6) [ "${#pending_updates[@]}" -gt 0 ] && env_preview_changes "${pending_updates[@]}" || note "No pending changes."; press_any ;;
-            7) env_section_apply_pending flight-plan pending_updates; press_any ;;
+            1) flight_plan_full_upgrade_flow pending_updates; press_any ;;
+            2) flight_plan_component_override_menu pending_updates || return $? ;;
+            3) flight_plan_select_menu pending_updates ;;
+            4) env_guided_section_editor "Individual Fortify component versions" versions || return $? ;;
+            5) env_guided_section_editor "Database versions" database_versions || return $? ;;
+            6) flight_plan_show_comparison; press_any ;;
+            7) flight_plan_show_candidates; press_any ;;
+            8) flight_plan_discovery_menu ;;
+            9) [ "${#pending_updates[@]}" -gt 0 ] && env_preview_changes "${pending_updates[@]}" || note "No pending changes."; press_any ;;
+            10) env_section_apply_pending flight-plan pending_updates; press_any ;;
             [Rr]) env_section_prompt_return pending_updates && return 0 ;;
             [Qq]) env_section_prompt_return pending_updates && return 130 ;;
             *) error "Invalid selection"; sleep 1 ;;

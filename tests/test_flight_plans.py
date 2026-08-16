@@ -82,6 +82,29 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("FORTIFY_MYSQL_IMAGE_TAG", database_section)
         self.assertIn("FORTIFY_POSTGRES_IMAGE_TAG", database_section)
 
+    def test_operations_docs_cover_flight_plan_upgrade_and_override_workflows(self) -> None:
+        guide = (ROOT / "docs" / "operations" / "versions-and-compatibility.md").read_text(encoding="utf-8")
+        troubleshooting = (ROOT / "docs" / "operations" / "troubleshooting.md").read_text(encoding="utf-8")
+        for phrase in (
+            "Guided Flight Plan upgrade workflow",
+            "upgrade plan preview",
+            "current-vs-target comparison",
+            "database versions remain separate",
+            "snapshot any data you intend to keep",
+            "snapshots as a data-safety boundary",
+            "Post-upgrade verification",
+            "configuration rollback, not data rollback",
+            "Advanced component override workflow",
+            "individual component override is drift",
+            "Restore to the Flight Plan baseline",
+            "known-issue guidance",
+            "DAST upgrade job artifact permission issue",
+            "sanitized diagnostics bundle",
+            "audit trail",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, guide + troubleshooting)
+
     def test_env_updates_stage_fortify_component_versions_without_database_versions(self) -> None:
         result = self.run_tool("env-updates", "fortify-26.2")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -469,6 +492,43 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("syntax error", result.stderr)
         self.assertIn("RC=1", result.stdout)
 
+    def test_upgrade_plan_reports_target_overlays_and_rollback_boundaries(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$PWD"; ENV_FILE="$tmp/.env"; '
+            'cp .env.example "$ENV_FILE"; source "$ENV_FILE"; read -r _lab_ack; '
+            'flight_plan_print_upgrade_impact fortify-26.2; flight_plan_upgrade_safety_note'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Current Flight Plan:", result.stdout)
+        self.assertIn("Target Flight Plan:  fortify-26.2", result.stdout)
+        self.assertIn("Database versions:   managed separately", result.stdout)
+        self.assertIn("Target release overlays:", result.stdout)
+        self.assertIn("Restoring .env is configuration rollback only", result.stdout)
+
+    def test_component_override_can_stage_values_from_target_plan(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$PWD"; ENV_FILE="$tmp/.env"; '
+            'cp .env.example "$ENV_FILE"; source "$ENV_FILE"; read -r _lab_ack; pending=(); '
+            'flight_plan_stage_component_from_plan pending ssc fortify-26.2; '
+            'printf "%s\n" "${pending[@]}"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("FORTIFY_SSC_CHART_VERSION=26.2.0-1", result.stdout)
+        self.assertIn("FORTIFY_SSC_IMAGE_TAG=26.2.0.0183", result.stdout)
+        self.assertNotIn("FORTIFY_LIM_CHART_VERSION", result.stdout)
+
+    def test_component_override_restore_to_flight_plan_baseline_replaces_pending_drift(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$PWD"; ENV_FILE="$tmp/.env"; '
+            'cp .env.example "$ENV_FILE"; source "$ENV_FILE"; read -r _lab_ack; pending=(); '
+            'env_pending_set pending FORTIFY_SSC_IMAGE_TAG custom-hotfix; '
+            'flight_plan_restore_component_baseline pending ssc fortify-26.2; '
+            'printf "%s\n" "${pending[@]}"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("FORTIFY_SSC_IMAGE_TAG=26.2.0.0183", result.stdout)
+        self.assertNotIn("custom-hotfix", result.stdout)
+
     def test_deployment_inputs_and_diagnostics_surface_flight_plan_context(self) -> None:
         guided = (ROOT / "scripts/wizard/guided.sh").read_text(encoding="utf-8")
         operations = (ROOT / "scripts/wizard/operations.sh").read_text(encoding="utf-8")
@@ -479,6 +539,10 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("release_overlay_report", guided)
         self.assertIn("release_overlay_validate_selected", guided)
         self.assertIn("release_overlay_report", operations)
+        self.assertIn("Upgrade full Flight Plan", operations)
+        self.assertIn("Advanced individual component override", operations)
+        self.assertIn("flight_plan_full_upgrade_flow", operations)
+        self.assertIn("flight_plan_component_override_menu", operations)
 
 
 if __name__ == "__main__":
