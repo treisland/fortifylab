@@ -24,9 +24,10 @@ class DashboardContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_dashboard_is_deployed_after_certs_before_application_secrets(self) -> None:
-        certs = self.wizard.index('guided_run_and_verify certs "Certs"')
-        dashboard = self.wizard.index('guided_run_and_verify dashboard "Dashboard"')
-        secrets = self.wizard.index('guided_run_and_verify secrets "Secrets"')
+        guided_registry = self.wizard.split("GUIDED_ALL_STEP_ID=", 1)[1].split("GUIDED_ALL_STEP_LABEL=", 1)[0]
+        certs = guided_registry.index('"certs"')
+        dashboard = guided_registry.index('"dashboard"')
+        secrets = guided_registry.index('"secrets"')
         self.assertLess(certs, dashboard)
         self.assertLess(dashboard, secrets)
 

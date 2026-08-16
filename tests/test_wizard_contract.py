@@ -51,8 +51,8 @@ class WizardContractTests(unittest.TestCase):
             "health_lim_ingress_probe && health_lim_http_probe",
         ):
             self.assertIn(probe, wizard)
-        self.assertIn("guided_run_and_verify mysql", wizard)
-        self.assertIn("guided_run_and_verify ssc", wizard)
+        self.assertIn('guided_run_and_verify "$step"', wizard)
+        self.assertIn("mysql|postgresql|ssc|lim)", wizard)
         self.assertNotIn('"pod/$pod" || true', wizard)
 
     def test_fresh_install_refuses_existing_managed_releases(self) -> None:
