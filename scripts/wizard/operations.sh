@@ -2203,33 +2203,285 @@ env_section_keys() {
     esac
 }
 
-env_guided_section_editor() {
-    local section_name="$1" reason="$2" key current value updates=() keys=()
-    title "Configuration editor"
-    section "$section_name"
-    mapfile -t keys < <(env_section_keys "$reason")
-    for key in "${keys[@]}"; do
+
+deployment_version_cache_dir() {
+    printf '%s\n' "${FORTIFY_HOME_K8S:-.}/.fortifylab/version-cache"
+}
+
+deployment_version_recommended_value() {
+    local key="$1"
+    sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?$key=\"?([^\"]*)\"?[[:space:]]*$/\2/p" "$FORTIFY_HOME_K8S/.env.example" 2>/dev/null | tail -n 1
+}
+
+deployment_version_repo_for_key() {
+    case "$1" in
+        FORTIFY_SSC_CHART_VERSION) printf '%s\n' fortifydocker/helm-ssc ;;
+        FORTIFY_SSC_IMAGE_TAG) printf '%s\n' fortifydocker/ssc-webapp ;;
+        FORTIFY_SCSAST_CHART_VERSION) printf '%s\n' fortifydocker/helm-scancentral-sast ;;
+        FORTIFY_SCDAST_CHART_VERSION) printf '%s\n' fortifydocker/helm-scancentral-dast-core ;;
+        FORTIFY_LIM_CHART_VERSION) printf '%s\n' fortifydocker/helm-lim ;;
+        FORTIFY_MYSQL_CHART_VERSION) printf '%s\n' bitnamicharts/mysql ;;
+        FORTIFY_POSTGRES_CHART_VERSION) printf '%s\n' bitnamicharts/postgresql ;;
+        FORTIFY_MYSQL_IMAGE_TAG) printf '%s\n' bitnamilegacy/mysql ;;
+        FORTIFY_POSTGRES_IMAGE_TAG) printf '%s\n' bitnamilegacy/postgresql ;;
+        *) return 1 ;;
+    esac
+}
+
+deployment_version_cached_latest() {
+    local key="$1" file
+    file="$(deployment_version_cache_dir)/$key.latest"
+    [ -s "$file" ] && sed -n '1p' "$file"
+}
+
+deployment_version_cache_latest() {
+    local key="$1" value="$2" dir
+    [ -n "$value" ] || return 0
+    dir=$(deployment_version_cache_dir)
+    mkdir -p "$dir" || return 0
+    printf '%s\n' "$value" >"$dir/$key.latest" 2>/dev/null || true
+}
+
+deployment_version_query_dockerhub_latest() {
+    local repo="$1"
+    command -v curl >/dev/null 2>&1 || return 1
+    command -v python3 >/dev/null 2>&1 || return 1
+    curl -fsSL "https://registry.hub.docker.com/v2/repositories/$repo/tags?page_size=25&ordering=last_updated" 2>/dev/null | python3 -c '
+import json, re, sys
+try:
+    data=json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+for item in data.get("results", []):
+    name=item.get("name", "")
+    if name and name != "latest" and re.search(r"[0-9]", name):
+        print(name)
+        sys.exit(0)
+sys.exit(1)
+'
+}
+
+deployment_version_latest_for_key() {
+    local key="$1" repo latest
+    repo=$(deployment_version_repo_for_key "$key" 2>/dev/null) || return 1
+    latest=$(deployment_version_query_dockerhub_latest "$repo" 2>/dev/null || true)
+    if [ -n "$latest" ]; then
+        deployment_version_cache_latest "$key" "$latest"
+        printf '%s\n' "$latest"
+        return 0
+    fi
+    deployment_version_cached_latest "$key"
+}
+
+deployment_versions_status() {
+    local key current recommended cached repo
+    section "Deployment version guidance"
+    printf '  %-36s %-20s %-20s %-20s\n' "Key" "Current" "Recommended" "Cached/latest"
+    while IFS= read -r key; do
         current=$(env_current_value "$key")
-        printf '\n%s [%s]\n' "$key" "$(env_display_value "$key" "$current")"
-        if env_is_secret_key "$key"; then
-            read -rsp "New value (empty to keep current): " value
-            echo
+        recommended=$(deployment_version_recommended_value "$key")
+        cached=$(deployment_version_cached_latest "$key")
+        repo=$(deployment_version_repo_for_key "$key" 2>/dev/null || true)
+        [ -n "$cached" ] || cached="<not checked>"
+        [ -n "$recommended" ] || recommended="<unknown>"
+        printf '  %-36s %-20s %-20s %-20s\n' "$key" "${current:-<unset>}" "$recommended" "$cached"
+        [ -n "$repo" ] || printf '    note: no online source is mapped for %s; use manual entry.\n' "$key"
+    done < <(env_section_keys versions)
+    cat <<'EOF'
+
+Use 'u' in the Deployment versions editor to check available Docker Hub tags.
+Newest available is not automatically compatible; review Fortify release notes
+and database upgrade boundaries before applying version changes.
+EOF
+}
+
+deployment_versions_discover_into() {
+    local array_name="$1" key latest found=0 keys=()
+    section "Checking available deployment versions"
+    mapfile -t keys < <(env_section_keys versions)
+    for key in "${keys[@]}"; do
+        latest=$(deployment_version_latest_for_key "$key" 2>/dev/null || true)
+        if [ -n "$latest" ]; then
+            printf '  %-36s latest available: %s
+' "$key" "$latest"
+            if confirm "Queue $key=$latest?"; then
+                env_pending_set "$array_name" "$key" "$latest"
+            fi
+            found=1
         else
-            read -rp "New value (empty to keep current): " value
+            printf '  %-36s no online value found; use manual entry.
+' "$key"
         fi
-        [ -z "$value" ] && continue
-        updates+=("$key=$value")
     done
-    [ "${#updates[@]}" -gt 0 ] || { note "No changes selected."; press_any; return 0; }
+    [ "$found" -eq 1 ] || note "No online version data was available. Manual entry remains available by selecting a numbered field."
+}
+
+env_pending_value() {
+    local key="$1" fallback="${2:-}" pair
+    shift 2 || true
+    for pair in "$@"; do
+        [ "${pair%%=*}" = "$key" ] || continue
+        printf '%s\n' "${pair#*=}"
+        return 0
+    done
+    printf '%s\n' "$fallback"
+}
+
+env_pending_has_key() {
+    local key="$1" pair
+    shift
+    for pair in "$@"; do
+        [ "${pair%%=*}" = "$key" ] && return 0
+    done
+    return 1
+}
+
+env_pending_set() {
+    local array_name="$1" key="$2" value="$3" pair updated=0 next=()
+    local -n pending_ref="$array_name"
+    for pair in "${pending_ref[@]}"; do
+        if [ "${pair%%=*}" = "$key" ]; then
+            next+=("$key=$value")
+            updated=1
+        else
+            next+=("$pair")
+        fi
+    done
+    [ "$updated" -eq 1 ] || next+=("$key=$value")
+    pending_ref=("${next[@]}")
+}
+
+env_section_editor_row() {
+    local idx="$1" key="$2" current pending display_current display_pending marker=""
+    shift 2
+    current=$(env_current_value "$key")
+    pending=$(env_pending_value "$key" "$current" "$@")
+    display_current=$(env_display_value "$key" "$current")
+    display_pending=$(env_display_value "$key" "$pending")
+    if env_pending_has_key "$key" "$@"; then
+        marker="*"
+        printf '  %2d. %-32s %s -> %s %s\n' "$idx" "$key" "$display_current" "$display_pending" "$marker"
+    else
+        printf '  %2d. %-32s %s\n' "$idx" "$key" "$display_current"
+    fi
+}
+
+env_edit_section_field() {
+    local key="$1" array_name="$2" current value
+    local -n pending_ref="$array_name"
+    current=$(env_current_value "$key")
+    printf '\n%s [%s]\n' "$key" "$(env_display_value "$key" "$current")"
+    if env_is_secret_key "$key"; then
+        read -rsp "New value (empty to keep current): " value
+        echo
+    else
+        read -rp "New value (empty to keep current): " value
+    fi
+    [ -n "$value" ] || { note "No change queued."; return 0; }
+    env_pending_set "$array_name" "$key" "$value"
+    note "Queued change for $key."
+}
+
+env_section_apply_pending() {
+    local reason="$1" array_name="$2"
+    local -n pending_ref="$array_name"
+    [ "${#pending_ref[@]}" -gt 0 ] || { note "No pending changes to apply."; return 0; }
     section "Pending .env changes"
-    env_preview_changes "${updates[@]}"
+    env_preview_changes "${pending_ref[@]}"
     echo
     if confirm "Apply these .env changes with a backup first?"; then
-        env_apply_updates "$reason" "${updates[@]}"
+        env_apply_updates "$reason" "${pending_ref[@]}" || return 1
+        pending_ref=()
+        echo
+        if confirm "Roll back this change now?"; then
+            env_rollback_last
+        fi
     else
-        note "Configuration changes cancelled."
+        note "Configuration changes remain pending."
     fi
-    press_any
+}
+
+env_section_validate() {
+    local reason="$1"
+    case "$reason" in
+        urls) env_diagnostics ;;
+        versions) deployment_versions_status ;;
+        *)
+            if env_config_valid; then
+                note "Configuration host and URL values look valid."
+            else
+                env_config_issue_lines | awk '{ printf "  - %s\n", $0 }'
+            fi
+            ;;
+    esac
+}
+
+env_section_prompt_return() {
+    local array_name="$1"
+    local -n pending_ref="$array_name"
+    [ "${#pending_ref[@]}" -eq 0 ] && return 0
+    confirm "Discard pending changes and return?"
+}
+
+env_guided_section_editor() {
+    local section_name="$1" reason="$2" choice idx key keys=() pending_updates=()
+    while true; do
+        title "Configuration editor"
+        section "$section_name"
+        mapfile -t keys < <(env_section_keys "$reason")
+        for idx in "${!keys[@]}"; do
+            env_section_editor_row "$((idx + 1))" "${keys[$idx]}" "${pending_updates[@]}"
+        done
+        cat <<EOF
+
+  p. Preview pending changes
+  a. Apply pending changes
+  d. Discard pending changes
+  v. Validate / show guidance
+EOF
+        if [ "$reason" = versions ]; then
+            printf "  u. Check available versions\n"
+        fi
+        cat <<EOF
+  r. Return
+  q. Quit safely
+EOF
+        echo
+        ask choice "Select field or action:"
+        case "$choice" in
+            [0-9]*)
+                if [ "$choice" -ge 1 ] && [ "$choice" -le "${#keys[@]}" ]; then
+                    key="${keys[$((choice - 1))]}"
+                    env_edit_section_field "$key" pending_updates
+                else
+                    error "Out of range"; sleep 1
+                fi
+                ;;
+            [Pp])
+                if [ "${#pending_updates[@]}" -gt 0 ]; then
+                    section "Pending .env changes"
+                    env_preview_changes "${pending_updates[@]}"
+                else
+                    note "No pending changes."
+                fi
+                press_any
+                ;;
+            [Aa]) env_section_apply_pending "$reason" pending_updates; press_any ;;
+            [Dd]) pending_updates=(); note "Pending changes discarded."; press_any ;;
+            [Vv]) env_section_validate "$reason"; press_any ;;
+            [Uu])
+                if [ "$reason" = versions ]; then
+                    deployment_versions_discover_into pending_updates
+                    press_any
+                else
+                    error "Invalid"; sleep 1
+                fi
+                ;;
+            [Rr]) env_section_prompt_return pending_updates && return 0 ;;
+            [Qq]) env_section_prompt_return pending_updates && return 130 ;;
+            *) error "Invalid"; sleep 1 ;;
+        esac
+    done
 }
 
 env_valid_domain() {
@@ -2554,22 +2806,24 @@ edit_env() {
     10. Restore selected .env backup
     11. Open raw .env editor
 
+  q. Quit safely
   r. Return
 EOF
         echo
         ask choice "Select:"
         case "$choice" in
-            1) env_guided_section_editor "Kubernetes namespace" identity ;;
+            1) env_guided_section_editor "Kubernetes namespace" identity || return $? ;;
             2) domain_url_assistant ;;
-            3) env_guided_section_editor "Deployment versions" versions ;;
-            4) env_guided_section_editor "Credentials, users, and passwords" credentials ;;
-            5) env_guided_section_editor "Advanced service URLs" urls ;;
+            3) env_guided_section_editor "Deployment versions" versions || return $? ;;
+            4) env_guided_section_editor "Credentials, users, and passwords" credentials || return $? ;;
+            5) env_guided_section_editor "Advanced service URLs" urls || return $? ;;
             6) env_diagnostics; press_any ;;
             7) env_repair_domain_urls; press_any ;;
             8) mkcert_root_ca_menu ;;
             9) env_rollback_last; press_any ;;
             10) env_restore_selected; press_any ;;
             11) raw_edit_env; press_any ;;
+            [Qq]) clear; exit 0 ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
         esac
