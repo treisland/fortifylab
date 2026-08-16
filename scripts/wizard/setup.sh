@@ -9,6 +9,7 @@ SETUP_STEP_LABEL=(
     "Welcome and scope"
     "Lab identity and domain"
     "Deployment profile"
+    "Fortify Flight Plan"
     "License file"
     "Registry login"
     "TLS certificates and root CA"
@@ -51,12 +52,13 @@ guided_setup_help_topic() {
         0) printf '%s\n' overview ;;
         1) printf '%s\n' urls ;;
         2) printf '%s\n' lab-scope ;;
-        3) printf '%s\n' troubleshooting/license ;;
-        4) printf '%s\n' troubleshooting/registry ;;
-        5) printf '%s\n' troubleshooting/tls ;;
-        6) printf '%s\n' urls ;;
-        7) printf '%s\n' troubleshooting/tls ;;
-        8) printf '%s\n' guided/configuration ;;
+        3) printf '%s\n' guided/configuration ;;
+        4) printf '%s\n' troubleshooting/license ;;
+        5) printf '%s\n' troubleshooting/registry ;;
+        6) printf '%s\n' troubleshooting/tls ;;
+        7) printf '%s\n' urls ;;
+        8) printf '%s\n' troubleshooting/tls ;;
+        9) printf '%s\n' guided/configuration ;;
         *) printf '%s\n' overview ;;
     esac
 }
@@ -131,6 +133,34 @@ setup_profile_label() {
     guided_profile_label "$(setup_profile_value)"
 }
 
+setup_flight_plan_value() {
+    env_pending_value FORTIFY_FLIGHT_PLAN "$(flight_plan_selected_id)" "${SETUP_PENDING_UPDATES[@]}"
+}
+
+setup_flight_plan_ready() {
+    flight_plan_tool validate >/dev/null 2>&1 || return 1
+    flight_plan_tool show "$(setup_flight_plan_value)" >/dev/null 2>&1
+}
+
+setup_license_ready() {
+    ( source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh" &&
+      fortify_resolve_license_file ) >/dev/null 2>&1
+}
+
+setup_flight_plan_status() {
+    local current pending
+    current="$(flight_plan_selected_id)"
+    pending="$(setup_flight_plan_value)"
+    printf '  Current Flight Plan: %s\n' "$current"
+    printf '  Pending Flight Plan: %s\n' "$pending"
+    printf '  Current alignment:   %s\n' "$(flight_plan_alignment_summary "$current")"
+    if setup_flight_plan_ready; then
+        printf '  Catalog status:      selected plan exists\n'
+    else
+        printf '  Catalog status:      selected plan needs review\n'
+    fi
+}
+
 setup_profile_preview() {
     local profile="${1:-$(setup_profile_value)}" saved_profile saved_components saved_label id idx active_ids=" "
     saved_profile="$GUIDED_DEPLOYMENT_PROFILE"
@@ -195,11 +225,12 @@ setup_fcli_trust_ready() {
 }
 
 setup_readiness_score() {
-    local total=10 ready=0
+    local total=11 ready=0
     [ -s "$ENV_FILE" ] && ready=$((ready + 1))
     env_config_valid && ready=$((ready + 1))
     [ -n "$(setup_profile_value)" ] && ready=$((ready + 1))
-    inputs_complete && ready=$((ready + 1))
+    setup_flight_plan_ready && ready=$((ready + 1))
+    setup_license_ready && ready=$((ready + 1))
     setup_docker_auth_ready && ready=$((ready + 1))
     setup_regcred_ready && ready=$((ready + 1))
     certs_ready && ready=$((ready + 1))
@@ -213,7 +244,8 @@ setup_readiness_items() {
     [ -s "$ENV_FILE" ] && setup_status_line ready ".env file exists" "$ENV_FILE" || setup_status_line warn ".env file exists" "copy .env.example first"
     env_config_valid && setup_status_line ready "Domain and URLs are valid" || setup_status_line warn "Domain and URLs are valid" "repair derived values from DOMAIN"
     [ -n "$(setup_profile_value)" ] && setup_status_line ready "Deployment profile selected" "$(setup_profile_label)" || setup_status_line warn "Deployment profile selected" "choose a profile"
-    inputs_complete && setup_status_line ready "Fortify license is readable" || setup_status_line warn "Fortify license is readable" "add or point to fortify.license"
+    setup_flight_plan_ready && setup_status_line ready "Fortify Flight Plan selected" "$(setup_flight_plan_value)" || setup_status_line warn "Fortify Flight Plan selected" "choose a curated plan or repair the catalog"
+    setup_license_ready && setup_status_line ready "Fortify license is readable" || setup_status_line warn "Fortify license is readable" "add or point to fortify.license"
     setup_docker_auth_ready && setup_status_line ready "Docker registry auth is usable" || setup_status_line warn "Docker registry auth is usable" "run Docker login or refresh credentials"
     setup_regcred_ready && setup_status_line ready "Kubernetes image pull secret exists" || setup_status_line warn "Kubernetes image pull secret exists" "refresh regcred after cluster is ready"
     certs_ready && setup_status_line ready "Lab TLS artifacts exist" || setup_status_line warn "Lab TLS artifacts exist" "generate TLS certificates"
@@ -231,7 +263,7 @@ License
 '
     printf '  Configured: %s
 ' "$(setup_pending_license_value)"
-    inputs_complete && printf '  Verified:   readable, non-empty license file
+    setup_license_ready && printf '  Verified:   readable, non-empty license file
   Next:       continue
 ' || printf '  Verified:   missing or unreadable
   Impact:     deployment cannot create complete Fortify secrets
@@ -279,6 +311,10 @@ Setup readiness: %s
 Selected deployment profile
 '
     setup_profile_preview "$(setup_profile_value)"
+    printf '
+Selected Fortify Flight Plan
+'
+    setup_flight_plan_status
 }
 
 setup_license_assistant() {
@@ -353,6 +389,38 @@ setup_registry_login() {
     echo
     [ -n "$secret" ] || { note "Docker login cancelled."; return 0; }
     printf '%s\n' "$secret" | docker login --username "$username" --password-stdin
+}
+
+setup_flight_plan_assistant() {
+    local choice
+    while true; do
+        title "Fortify Flight Plan"
+        printf '\nPurpose\n  Select the curated Fortify product-version bundle before deployment.\n'
+        printf '\nCurrent status\n'
+        setup_flight_plan_status
+        cat <<'EOF'
+
+Impact
+  Flight Plans align SSC, ScanCentral, LIM, and DAST versions. Database versions
+  stay separate because database rollback and app rollback carry different risks.
+
+Options
+  1. Select a Fortify Flight Plan
+  2. Compare .env to selected Flight Plan
+  3. Preview staged setup changes
+
+  b. Back
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) flight_plan_select_menu SETUP_PENDING_UPDATES ;;
+            2) flight_plan_show_comparison "$(setup_flight_plan_value)"; press_any ;;
+            3) [ "${#SETUP_PENDING_UPDATES[@]}" -gt 0 ] && env_preview_changes "${SETUP_PENDING_UPDATES[@]}" || note "No pending setup changes."; press_any ;;
+            [Bb]|"") return 0 ;;
+            *) error "Invalid Flight Plan action"; sleep 1 ;;
+        esac
+    done
 }
 
 setup_tls_mode_label() {
@@ -634,34 +702,41 @@ guided_setup_step_screen() {
             ;;
         3)
             setup_guidance_block \
+                "Select the Fortify product-version bundle used by deployment menus and diagnostics." \
+                "$(setup_flight_plan_status)" \
+                "A mismatched plan can deploy mixed Fortify versions and make troubleshooting harder. Database versions remain separately controlled." \
+                "Use the recommended Flight Plan unless you are testing a specific Fortify release family."
+            ;;
+        4)
+            setup_guidance_block \
                 "Point the lab at a readable Fortify license file without printing license contents." \
                 "$(setup_license_status)" \
                 "A missing or unreadable license blocks complete Kubernetes secret creation and prevents licensed Fortify services from starting correctly." \
                 "Edit to choose or import a license file before deployment."
             ;;
-        4)
+        5)
             printf '\nPurpose\n  Prepare Docker Hub credentials and the Kubernetes image pull secret used for Fortify images.\n'
             printf '\nCurrent status\n'
             setup_registry_status
             printf '\nImpact\n  If Docker credentials are stale or the Kubernetes regcred secret is missing, pods can fail with ImagePullBackOff even when manual docker pull works.\n'
             printf '\nRecommended next action\n  Run Docker login if needed, then stage a Kubernetes registry secret refresh after cluster access is ready.\n'
             ;;
-        5) setup_tls_status ;;
-        6)
+        6) setup_tls_status ;;
+        7)
             printf '\nPurpose\n  Show the hostnames clients must resolve to reach Fortify Lab services on the LAN.\n'
             printf '\nCurrent guidance\n'
             setup_hosts_guidance
             printf '\nImpact\n  DNS or hosts-file drift causes browsers and fcli to hit the wrong endpoint, Traefik default routes, or certificate names that do not match.\n'
             printf '\nRecommended next action\n  Add these names to DNS or each client hosts file, then test from the client machine.\n'
             ;;
-        7)
+        8)
             setup_guidance_block \
                 "Prepare fcli to trust the lab certificate chain for local SSC and ScanCentral runbooks." \
                 "$(setup_fcli_status)" \
                 "Without fcli trust, browser access may work while fcli login fails with PKIX certificate validation errors." \
                 "Stage fcli trust configuration after TLS artifacts exist, or continue if your shell already has the truststore configured."
             ;;
-        8)
+        9)
             printf '\nPurpose\n  Review staged .env changes and setup actions before anything is applied.\n'
             printf '\nCurrent status\n'
             setup_readiness_items
@@ -691,16 +766,17 @@ guided_setup_edit_step() {
             setup_pending_set FORTIFY_DEPLOYMENT_COMPONENTS ""
             note "Deployment profile staged: $(guided_profile_label "$profile")"
             ;;
-        3) setup_license_assistant ;;
-        4)
+        3) setup_flight_plan_assistant ;;
+        4) setup_license_assistant ;;
+        5)
             wizard_vertical_footer "Registry actions" "1. Run Docker login" "2. Stage Kubernetes registry secret refresh" "b. Back"
             ask value "Select:"
             case "$value" in 1) setup_registry_login ;; 2) setup_pending_action_add refresh-registry; note "Registry secret refresh staged." ;; [Bb]|"") return 0 ;; *) error "Invalid registry action"; return 1 ;; esac
             ;;
-        5) setup_tls_assistant ;;
-        6) setup_hosts_guidance; press_any ;;
-        7) setup_pending_action_add configure-fcli-trust; note "fcli trust configuration staged." ;;
-        8) setup_apply_pending ;;
+        6) setup_tls_assistant ;;
+        7) setup_hosts_guidance; press_any ;;
+        8) setup_pending_action_add configure-fcli-trust; note "fcli trust configuration staged." ;;
+        9) setup_apply_pending ;;
         *) note "Nothing to edit on this step." ;;
     esac
 }
