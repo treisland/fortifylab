@@ -2195,7 +2195,7 @@ env_restore_selected() {
 
 env_section_keys() {
     case "$1" in
-        identity) printf '%s\n' NAMESPACE DOMAIN ;;
+        identity) printf '%s\n' NAMESPACE ;;
         urls) printf '%s\n' SSC LIM SCDAST SCSAST SSC_URL LIM_URL LIM_API_URL SCDAST_URL SCSAST_URL SCSAST_CTRL_URL ;;
         versions) printf '%s\n' FORTIFY_SSC_CHART_VERSION FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION FORTIFY_SCSAST_CTRL_IMAGE_TAG FORTIFY_SCSAST_WORKER_IMAGE_TAG FORTIFY_SCDAST_CHART_VERSION FORTIFY_LIM_CHART_VERSION FORTIFY_MYSQL_CHART_VERSION FORTIFY_POSTGRES_CHART_VERSION FORTIFY_POSTGRES_IMAGE_TAG FORTIFY_MYSQL_IMAGE_TAG ;;
         credentials) printf '%s\n' DEFAULT_PASS SCDAST_SSC_USER SCDAST_SSC_PASS SCDAST_DB_OWNER_USER SCDAST_DB_OWNER_PASS SCDAST_DB_STANDARD_USER SCDAST_DB_STANDARD_PASS LIM_POOL_NAME LIM_POOL_PASS ;;
@@ -2204,10 +2204,11 @@ env_section_keys() {
 }
 
 env_guided_section_editor() {
-    local section_name="$1" reason="$2" key current value updates=()
+    local section_name="$1" reason="$2" key current value updates=() keys=()
     title "Configuration editor"
     section "$section_name"
-    while IFS= read -r key; do
+    mapfile -t keys < <(env_section_keys "$reason")
+    for key in "${keys[@]}"; do
         current=$(env_current_value "$key")
         printf '\n%s [%s]\n' "$key" "$(env_display_value "$key" "$current")"
         if env_is_secret_key "$key"; then
@@ -2218,7 +2219,7 @@ env_guided_section_editor() {
         fi
         [ -z "$value" ] && continue
         updates+=("$key=$value")
-    done < <(env_section_keys "$reason")
+    done
     [ "${#updates[@]}" -gt 0 ] || { note "No changes selected."; press_any; return 0; }
     section "Pending .env changes"
     env_preview_changes "${updates[@]}"
@@ -2532,28 +2533,37 @@ edit_env() {
         title "Configuration editor"
         cat <<EOF
 
-  1. Lab identity and domain
-  2. URLs
-  3. Image/chart versions
-  4. Credentials and passwords
-  5. Domain and URL assistant
-  6. Configuration diagnostics
-  7. Repair derived host and URL values from DOMAIN
-  8. mkcert root CA export and trust help
-  9. Roll back last wizard .env change
-  10. Restore selected .env backup
-  11. Open raw .env in editor (backup first)
+  Lab Settings
+    1. Kubernetes namespace
+    2. Change lab domain and derived URLs
+
+  Deployment Settings
+    3. Deployment versions
+    4. Credentials, users, and passwords
+    5. Advanced service URLs
+
+  Validation and Repair
+    6. Validate configuration
+    7. Repair derived URLs from domain
+
+  Certificates and Trust
+    8. Export root CA and trust instructions
+
+  Backups and Advanced
+    9. Roll back last .env change
+    10. Restore selected .env backup
+    11. Open raw .env editor
 
   r. Return
 EOF
         echo
         ask choice "Select:"
         case "$choice" in
-            1) env_guided_section_editor "Lab identity and domain" identity ;;
-            2) env_guided_section_editor "URLs" urls ;;
-            3) env_guided_section_editor "Image/chart versions" versions ;;
-            4) env_guided_section_editor "Credentials and passwords" credentials ;;
-            5) domain_url_assistant ;;
+            1) env_guided_section_editor "Kubernetes namespace" identity ;;
+            2) domain_url_assistant ;;
+            3) env_guided_section_editor "Deployment versions" versions ;;
+            4) env_guided_section_editor "Credentials, users, and passwords" credentials ;;
+            5) env_guided_section_editor "Advanced service URLs" urls ;;
             6) env_diagnostics; press_any ;;
             7) env_repair_domain_urls; press_any ;;
             8) mkcert_root_ca_menu ;;

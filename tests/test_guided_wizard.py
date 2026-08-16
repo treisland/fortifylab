@@ -384,6 +384,53 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("DOMAIN=old.test", result.stdout)
 
+    def test_configuration_editor_menu_uses_sectioned_operator_labels(self) -> None:
+        menu = WIZARD.split("edit_env()", 1)[1].split("ask choice", 1)[0]
+        for expected in (
+            "Lab Settings",
+            "Kubernetes namespace",
+            "Change lab domain and derived URLs",
+            "Deployment Settings",
+            "Deployment versions",
+            "Credentials, users, and passwords",
+            "Advanced service URLs",
+            "Validation and Repair",
+            "Validate configuration",
+            "Repair derived URLs from domain",
+            "Certificates and Trust",
+            "Export root CA and trust instructions",
+            "Backups and Advanced",
+        ):
+            self.assertIn(expected, menu)
+        for retired in (
+            "Lab identity and domain",
+            "Image/chart versions",
+            "  2. URLs",
+            "Configuration diagnostics",
+            "mkcert root CA export and trust help",
+        ):
+            self.assertNotIn(retired, menu)
+
+    def test_configuration_editor_namespace_option_does_not_edit_domain(self) -> None:
+        result = self.run_wizard_functions(
+            "tmp=$(mktemp -d); FORTIFY_HOME_K8S=\"$tmp\"; ENV_FILE=\"$tmp/.env\"; ENV_BACKUP_DIR=\"$tmp/.env.backups\"; "
+            "printf \"%s\\n\" \"export NAMESPACE=\\\"oldns\\\"\" \"export DOMAIN=\\\"old.test\\\"\" >\"$ENV_FILE\"; "
+            "press_any() { :; }; "
+            "read -r _lab_ack; env_guided_section_editor \"Kubernetes namespace\" identity; "
+            "source \"$ENV_FILE\"; printf \"NAMESPACE=%s DOMAIN=%s\n\" \"$NAMESPACE\" \"$DOMAIN\"",
+            user_input="newns\ny\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("NAMESPACE=newns DOMAIN=old.test", result.stdout)
+        self.assertNotIn("DOMAIN [old.test]", result.stdout)
+
+    def test_domain_changes_are_only_exposed_through_domain_url_assistant(self) -> None:
+        identity_keys = WIZARD.split("identity) printf", 1)[1].split(";;", 1)[0]
+        self.assertIn("NAMESPACE", identity_keys)
+        self.assertNotIn("DOMAIN", identity_keys)
+        self.assertIn("2) domain_url_assistant", WIZARD)
+        self.assertNotIn("env_guided_section_editor \"Lab identity and domain\" identity", WIZARD)
+
     def test_domain_assistant_updates_domain_and_derived_urls(self) -> None:
         result = self.run_wizard_functions(
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
@@ -430,7 +477,7 @@ class GuidedWizardTests(unittest.TestCase):
 
     def test_config_validation_flags_placeholder_host_and_url_drift(self) -> None:
         result = self.run_wizard_functions(
-            'DOMAIN=fortifydemo.com; SSC=LIM; LIM=lim.fortifydemo.com; '
+            'python_config_available() { return 1; }; DOMAIN=fortifydemo.com; SSC=LIM; LIM=lim.fortifydemo.com; '
             'SCDAST=dast.fortifydemo.com; SCSAST=sast.fortifydemo.com; '
             'SSC_URL=LIM_URL; LIM_URL=https://lim.fortifydemo.com; '
             'SCDAST_URL=https://dast.fortifydemo.com; SCSAST_URL=https://sast.fortifydemo.com; '
