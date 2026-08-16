@@ -49,17 +49,45 @@ without printing secrets.
 
 ## Repo-owner discovery workflow
 
-Repo owners can draft new plan candidates with the discovery helper:
+Repo owners can draft and curate new plan candidates with the discovery helper.
+Fortify commonly publishes tags with a release-family prefix such as `25.2` or
+`26.2`, so the helper can scan known repositories and score candidate families:
+
+```bash
+./scripts/tools/flight-plans.py discover-families --years 25,26
+./scripts/tools/flight-plans.py curate --years 25,26
+```
+
+To write complete candidate drafts for review:
+
+```bash
+./scripts/tools/flight-plans.py discover-families --years 25,26 --write-complete
+```
+
+To inspect or regenerate one family explicitly:
 
 ```bash
 ./scripts/tools/discover-flight-plans.sh --family 26.2
 ```
 
-The helper queries known Docker Hub repositories and writes a candidate TOML file
-under `tmp/flight-plan-candidates/` by default. It does not promote the candidate
-into `config/flight-plans.toml`. Promotion is a manual owner step after reviewing
-the generated versions, filling any unknown component values, testing a lab
-deployment, and updating docs or release notes.
+Discovery prints the selected component candidates to the terminal and writes a
+TOML draft under `tmp/flight-plan-candidates/` by default. It prefers Docker Hub
+tag listings, falls back to the authenticated Docker Registry API when needed,
+and reuses existing catalog values when a repository cannot be listed.
+
+Promotion remains an owner-controlled step. Use a dry run first, then write the
+catalog only after reviewing the candidate and testing the deployment path:
+
+```bash
+./scripts/tools/flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
+./scripts/tools/flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status recommended --yes
+./scripts/tools/flight-plans.py validate
+```
+
+Promoting a plan as `recommended` also makes it the catalog default and demotes
+the previous recommended plan to `known-good`. ScanCentral DAST Core and Scanner
+container images are currently chart-managed in this lab; add explicit `.env`
+keys before curating them as separate Flight Plan fields.
 
 ## Rollback expectations
 

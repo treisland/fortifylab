@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -43,6 +44,21 @@ class FlightPlansTests(unittest.TestCase):
                 text=True,
                 env=env,
             )
+
+    def write_discovery_fixtures(self, fixture_dir: Path, family: str = "25.2") -> None:
+        fixture_dir.mkdir(parents=True, exist_ok=True)
+        hub_payload = {"results": [{"name": f"{family}.0-1"}, {"name": "latest"}], "next": None}
+        registry_payload = {"name": "fortifydocker/ssc-webapp", "tags": [f"{family}.1.00010", f"{family}.2.0005", f"{family}.2.0005.518"]}
+        for repo in (
+            "fortifydocker__helm-ssc__page1.json",
+            "fortifydocker__helm-scancentral-sast__page1.json",
+            "fortifydocker__scancentral-sast-controller__page1.json",
+            "fortifydocker__scancentral-sast-sensor__page1.json",
+            "fortifydocker__helm-scancentral-dast-core__page1.json",
+            "fortifydocker__helm-lim__page1.json",
+        ):
+            (fixture_dir / repo).write_text(json.dumps(hub_payload), encoding="utf-8")
+        (fixture_dir / "registry__fortifydocker__ssc-webapp__page1.json").write_text(json.dumps(registry_payload), encoding="utf-8")
 
     def test_catalog_validates_and_lists_only_curated_user_plans_by_default(self) -> None:
         validation = self.run_tool("validate")
@@ -184,6 +200,89 @@ class FlightPlansTests(unittest.TestCase):
         tool = TOOL.read_text(encoding="utf-8")
         self.assertIn('"FORTIFY_SCSAST_CTRL_IMAGE_TAG": "fortifydocker/scancentral-sast-controller"', tool)
         self.assertIn('"FORTIFY_SCSAST_WORKER_IMAGE_TAG": "fortifydocker/scancentral-sast-sensor"', tool)
+
+    def test_discover_families_scores_release_family_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_dir = Path(directory) / "fixtures"
+            self.write_discovery_fixtures(fixture_dir, family="25.2")
+            result = self.run_tool("discover-families", "--years", "25", "--fixture-dir", str(fixture_dir))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Discovered Fortify release families", result.stdout)
+        self.assertIn("25.2", result.stdout)
+        self.assertIn("7/7", result.stdout)
+        self.assertIn("candidate ready", result.stdout)
+        self.assertNotIn("26.2", result.stdout)
+
+    def test_discover_families_can_write_complete_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_dir = Path(directory) / "fixtures"
+            output_dir = Path(directory) / "candidates"
+            self.write_discovery_fixtures(fixture_dir, family="25.2")
+            result = self.run_tool(
+                "discover-families",
+                "--years",
+                "25",
+                "--write-complete",
+                "--output-dir",
+                str(output_dir),
+                "--fixture-dir",
+                str(fixture_dir),
+            )
+            candidate = output_dir / "fortify-25.2.toml"
+            candidate_exists = candidate.exists()
+            candidate_text = candidate.read_text(encoding="utf-8") if candidate_exists else ""
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(candidate_exists)
+        self.assertIn("Candidate files written: 1", result.stdout)
+        self.assertIn('FORTIFY_SSC_IMAGE_TAG = "25.2.2.0005.518"', candidate_text)
+        self.assertIn('FORTIFY_SCSAST_WORKER_IMAGE_TAG = "25.2.0-1"', candidate_text)
+
+    def test_curate_prints_repo_owner_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_dir = Path(directory) / "fixtures"
+            self.write_discovery_fixtures(fixture_dir, family="25.2")
+            result = self.run_tool("curate", "--years", "25", "--fixture-dir", str(fixture_dir))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Curator workflow", result.stdout)
+        self.assertIn("flight-plans.py discover --family <family>", result.stdout)
+        self.assertIn("flight-plans.py promote tmp/flight-plan-candidates/fortify-<family>.toml --status candidate --yes", result.stdout)
+        self.assertIn("Complete candidate families: 25.2", result.stdout)
+
+    def test_promote_candidate_supports_dry_run_without_catalog_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_dir = Path(directory) / "fixtures"
+            self.write_discovery_fixtures(fixture_dir, family="25.2")
+            candidate = Path(directory) / "fortify-25.2.toml"
+            discover = self.run_tool("discover", "--family", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(candidate))
+            catalog = Path(directory) / "flight-plans.toml"
+            shutil.copyfile(CATALOG, catalog)
+            before = catalog.read_text(encoding="utf-8")
+            result = self.run_tool("--catalog", str(catalog), "promote", str(candidate), "--status", "candidate")
+            after = catalog.read_text(encoding="utf-8")
+        self.assertEqual(discover.returncode, 0, discover.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, after)
+        self.assertIn("Dry run only", result.stdout)
+
+    def test_promote_candidate_can_update_temp_catalog_and_default(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_dir = Path(directory) / "fixtures"
+            self.write_discovery_fixtures(fixture_dir, family="25.2")
+            candidate = Path(directory) / "fortify-25.2.toml"
+            discover = self.run_tool("discover", "--family", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(candidate))
+            catalog = Path(directory) / "flight-plans.toml"
+            shutil.copyfile(CATALOG, catalog)
+            result = self.run_tool("--catalog", str(catalog), "promote", str(candidate), "--status", "recommended", "--yes")
+            validation = self.run_tool("--catalog", str(catalog), "validate")
+            updated = catalog.read_text(encoding="utf-8")
+        self.assertEqual(discover.returncode, 0, discover.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(validation.returncode, 0, validation.stderr)
+        self.assertIn('default_flight_plan = "fortify-25.2"', updated)
+        self.assertIn('[flight_plans."fortify-25.2"]', updated)
+        self.assertIn('status = "recommended"', updated)
+        self.assertIn('[flight_plans."fortify-26.2"]', updated)
+        self.assertIn('status = "known-good"', updated)
 
     def test_shell_wrappers_delegate_to_single_catalog_implementation(self) -> None:
         result = subprocess.run(
