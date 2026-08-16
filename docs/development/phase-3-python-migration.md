@@ -17,15 +17,14 @@ manual recovery over unattended production automation.
 
 ## Branching model
 
-`agent/phase-3.7-3.10-python-cli-tui` is the active CLI/TUI-focused Python migration runway. It starts from current `dev` after the accepted Phase 3.0-3.6 work and carries the next Python console foundation slices.
+`agent/phase-3.11-interactive-operator-console` is the active CLI/TUI-focused Python migration branch. It starts from current `dev` after the accepted Phase 3.7-3.10 console foundation and makes the operator menu operational.
 
-`dev` and `main` stay untouched until manual testing accepts the integrated
-Phase 3 branch.
+`dev` and `main` stay untouched until manual testing accepts each Phase 3 branch.
 
 Promotion flow:
 
 ```text
-agent/phase-3.x-* -> agent/phase-3.7-3.10-python-cli-tui -> dev -> main
+agent/phase-3.x-* -> dev -> main
 ```
 
 ## Runtime direction
@@ -120,6 +119,20 @@ lifecycle scripts, pod logs, and safe runbook previews. Mutating operations are
 dry-run by default and require explicit execution, which lets later work replace
 Bash operation internals incrementally without surprising operators.
 
+## Interactive operator console
+
+Phase 3.11 turns `./bin/fortifylab menu` from a render-only preview into an
+interactive terminal entry point. Operators can select numbered workspaces for
+the live dashboard, configuration, logs, diagnostics, runbooks, certificates,
+tools, and help. `./bin/fortifylab menu --preview` remains available for tests,
+documentation, and non-interactive rendering.
+
+The menu does not silently mutate the lab. Read-only Python screens run directly,
+while deployment, application lifecycle, certificate, and wizard handoffs show
+the command and ask for confirmation before calling existing Bash scripts. This
+keeps the CLI focused and useful now without pretending the Python guided
+deployment engine has already replaced the Bash implementation.
+
 ## Entry points
 
 `./start_wizard.sh` remains the friendly command for existing users. As Python
@@ -152,9 +165,9 @@ replacement for Kubernetes-native operator consoles. Browser-based Fortify Lab m
 
 The mature menu direction is task-oriented rather than script-oriented:
 Dashboard, Deploy / Resume, Applications, Configuration, Runbooks, Logs,
-Diagnostics, Certificates & Trust, Tools, and Help. The first implementation
-slices should establish structure, dependency boundaries, and read-only previews
-before moving live deployment execution from Bash into Python.
+Diagnostics, Certificates & Trust, Tools, and Help. Phase 3.11 makes that menu
+interactive and useful while keeping live deployment mutation behind explicit
+Bash handoffs until native Python replacements reach parity.
 
 ## Manual test gates
 

@@ -29,12 +29,15 @@ OPERATOR_MENU: tuple[MenuItem, ...] = (
 )
 
 
-def render_operator_menu(*, style: TerminalStyle | None = None) -> str:
-    """Render the preview operator menu without requiring optional TUI libraries."""
+def render_operator_menu(*, style: TerminalStyle | None = None, preview: bool = True) -> str:
+    """Render the operator menu without requiring optional TUI libraries."""
 
     style = style or TerminalStyle.from_environment()
     lines = [style.heading("Fortify Lab Operator Console"), "", "Task workspaces:"]
     for index, item in enumerate(OPERATOR_MENU, start=1):
         lines.append(f"  {index:2d}. {item.label:<22} {style.muted(item.description)}")
-    lines.extend(("", style.muted("Preview only: Bash wizard remains the production entrypoint.")))
+    if preview:
+        lines.extend(("", style.muted("Preview only: Bash wizard remains the production entrypoint.")))
+    else:
+        lines.extend(("", style.muted("Select a workspace number, or q to quit.")))
     return "\n".join(lines) + "\n"

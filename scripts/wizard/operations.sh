@@ -2328,21 +2328,23 @@ env_config_valid() {
 
 deployment_config_guard() {
     local issues
+    issues=$(env_config_issue_lines)
+    if [ -n "$issues" ]; then
+        error "Configuration has invalid host or URL values; deployment is blocked before Kubernetes changes."
+        printf '%s\n' "$issues" | awk '{ printf "  - %s\n", $0 }'
+        printf '%s\n' 'Use Configuration editor -> Repair derived host and URL values from DOMAIN, or edit .env manually, then retry.'
+        if [ -t 0 ] && confirm "Repair derived host and URL values from DOMAIN now?"; then
+            env_repair_domain_urls --yes
+            printf '%s\n' 'Repair applied. Retry the start operation.'
+        fi
+        return 1
+    fi
     if python_config_available; then
         python_config_validate && return 0
         printf '%s\n' 'Use Configuration editor -> Repair derived host and URL values from DOMAIN, or edit .env manually, then retry.'
         return 1
     fi
-    issues=$(env_config_issue_lines)
-    [ -z "$issues" ] && return 0
-    error "Configuration has invalid host or URL values; deployment is blocked before Kubernetes changes."
-    printf '%s\n' "$issues" | awk '{ printf "  - %s\n", $0 }'
-    printf '%s\n' 'Use Configuration editor -> Repair derived host and URL values from DOMAIN, or edit .env manually, then retry.'
-    if [ -t 0 ] && confirm "Repair derived host and URL values from DOMAIN now?"; then
-        env_repair_domain_urls --yes
-        printf '%s\n' 'Repair applied. Retry the start operation.'
-    fi
-    return 1
+    return 0
 }
 
 app_start_config_guard() {

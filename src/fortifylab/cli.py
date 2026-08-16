@@ -11,7 +11,7 @@ from .dependencies import dependency_checks, migration_status_lines
 from .diagnostics import ClusterCollector, write_bundle
 from .operations import OperationCatalog, OperationRunner
 from .orchestration import BashOperationAdapter
-from .tui import TerminalStyle, build_demo_snapshot, build_profile, render_guided_step, render_operator_menu
+from .tui import OperatorConsole, TerminalStyle, build_demo_snapshot, build_profile, render_guided_step, render_operator_menu
 from .version import __version__
 
 _COMMAND_MESSAGES = {
@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--dependencies", action="store_true", help="include optional dependency availability")
         if name == "menu":
             sub.add_argument("--plain", action="store_true", help="render without ANSI color or symbols")
+            sub.add_argument("--preview", action="store_true", help="render the menu without entering the interactive loop")
         if name == "dashboard":
             sub.add_argument("--demo", action="store_true", help="render deterministic demo dashboard data")
             sub.add_argument("--namespace", default="fortify", help="Kubernetes namespace to inspect")
@@ -112,8 +113,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {check.name:<10} {check.state:<9} {check.purpose}")
         return 0
     if args.command == "menu":
-        print(render_operator_menu(style=TerminalStyle.from_environment(plain=args.plain)), end="")
-        return 0
+        style = TerminalStyle.from_environment(plain=args.plain)
+        if args.preview:
+            print(render_operator_menu(style=style, preview=True), end="")
+            return 0
+        return OperatorConsole(style=style).run()
     if args.command == "dashboard":
         snapshot = collect_dashboard(demo=args.demo, namespace=args.namespace, kubectl=args.kubectl)
         print(render_dashboard(snapshot, style=TerminalStyle.from_environment(plain=args.plain)), end="")

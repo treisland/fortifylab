@@ -9,6 +9,7 @@ from .guided import (
     render_guided_step,
 )
 from .menu import MenuItem, OPERATOR_MENU, render_operator_menu
+from .operator_console import ConsoleCommand, OperatorConsole
 from .profiles import DeploymentProfile, build_profile, expand_components, profile_components_for
 from .theme import TerminalStyle
 
@@ -18,6 +19,8 @@ __all__ = [
     "GuidedStep",
     "MenuItem",
     "OPERATOR_MENU",
+    "ConsoleCommand",
+    "OperatorConsole",
     "StepSnapshot",
     "StepState",
     "TerminalStyle",

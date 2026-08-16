@@ -60,16 +60,26 @@ clone with the Python standard library only:
 ./bin/fortifylab --version
 ```
 
-The initial Python commands are intentionally lightweight previews for
-`doctor`, `config`, `deploy`, `logs`, `runbook`, and `tui`; migration work will
-replace Bash logic in controlled slices while preserving clone-and-run setup. The
+The Python command shell now includes an operational terminal menu:
+
+```bash
+./bin/fortifylab menu
+```
+
+The menu is task-oriented and routes to the live Python dashboard, configuration
+commands, diagnostics, logs, runbooks, tools, and help. Mutating deployment
+workflows still hand off to the proven Bash scripts after explicit confirmation,
+so `./start_wizard.sh` remains the authoritative guided deployment engine while
+Python reaches parity. Use `./bin/fortifylab menu --preview` when you only want
+to render the menu without entering the input loop.
+
+Other Python commands remain available for direct use. The
 `./bin/fortifylab tui --demo-screen` command renders the Phase 3.2 guided
-deployment prototype, and `./bin/fortifylab config diagnostics --env .env`
-previews the Phase 3.4 configuration engine. `./bin/fortifylab doctor
---bundle-dir ./diagnostics-out` writes a sanitized Phase 3.5 diagnostics bundle.
+deployment prototype, `./bin/fortifylab config diagnostics --env .env` runs the
+Phase 3.4 configuration engine, `./bin/fortifylab doctor --bundle-dir
+./diagnostics-out` writes a sanitized Phase 3.5 diagnostics bundle, and
 `./bin/fortifylab deploy --operation secrets` previews the Phase 3.6 operation
-command layer as a dry run. Bash remains the production guided wizard and
-compatibility entrypoint.
+command layer as a dry run. Bash remains the production guided wizard for deployment mutation.
 
 Phase 3.8 records the richer Python console dependency posture in
 `requirements-python.txt`. Install it only when developing or previewing the next

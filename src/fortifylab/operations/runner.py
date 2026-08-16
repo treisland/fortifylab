@@ -37,4 +37,4 @@ class OperationRunner:
 
     @staticmethod
     def _default_runner(command: tuple[str, ...]) -> CommandResult:
-        return run_command(command, timeout_seconds=600)
+        return run_command(command, timeout=600)
