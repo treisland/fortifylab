@@ -66,6 +66,8 @@ source "$FORTIFY_HOME_K8S/scripts/lib/lab-disclaimer.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/operational-help.sh"
 # shellcheck source=scripts/lib/registry-credentials.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
+# shellcheck source=scripts/lib/tls.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/tls.sh"
 # shellcheck source=scripts/lib/wizard-logging.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/wizard-logging.sh"
 # shellcheck source=scripts/lib/coredns-lab-hosts.sh

@@ -40,6 +40,34 @@ class GuidedWizardTests(unittest.TestCase):
                 env=environment,
             )
 
+    def make_lab_cert(self, directory: Path, name: str = "tls") -> tuple[Path, Path]:
+        cert = directory / f"{name}.crt"
+        key = directory / f"{name}.key"
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-days",
+                "1",
+                "-subj",
+                "/CN=ssc.example.test",
+                "-addext",
+                "subjectAltName=DNS:ssc.example.test,DNS:lim.example.test,DNS:sast.example.test,DNS:dast.example.test,DNS:dashboard.example.test",
+                "-keyout",
+                str(key),
+                "-out",
+                str(cert),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return cert, key
+
     def test_main_menu_preserves_all_deployment_personas(self) -> None:
         for label in (
             "Guided deployment (recommended)",
@@ -482,6 +510,67 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("missing, unreadable, or empty", combined)
         self.assertIn("PENDING=0", result.stdout)
 
+    def test_guided_setup_stages_byo_tls_paths_after_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cert, key = self.make_lab_cert(Path(directory))
+            result = self.run_wizard_functions(
+                f'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp/lab"; ENV_FILE="$tmp/lab/.env"; ENV_BACKUP_DIR="$tmp/lab/.env.backups"; '
+                f'mkdir -p "$FORTIFY_HOME_K8S"; printf "export DOMAIN=example.test\n" >"$ENV_FILE"; source "$ENV_FILE"; '
+                f'DOMAIN=example.test; SSC=ssc.example.test; LIM=lim.example.test; SCSAST=sast.example.test; SCDAST=dast.example.test; '
+                f'read -r _lab_ack; answers=(2 "{cert}" "{key}" "{cert}" b); '
+                f'ask() {{ local __target="$1"; shift || true; printf -v "$__target" "%s" "${{answers[0]}}"; answers=("${{answers[@]:1}}"); }}; '
+                f'setup_tls_assistant; setup_review_pending; setup_apply_pending <<<"y" >/dev/null; source "$ENV_FILE"; '
+                f'printf "MODE=%s CERT=%s KEY=%s CA=%s\n" "$FORTIFY_TLS_MODE" "$FORTIFY_BYO_TLS_CERT" "$FORTIFY_BYO_TLS_KEY" "$FORTIFY_BYO_TLS_CA_CERT"',
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("BYO TLS certificate, key, and CA chain staged", result.stdout)
+        self.assertIn("FORTIFY_TLS_MODE", result.stdout)
+        self.assertIn("MODE=byo", result.stdout)
+        self.assertIn(str(cert), result.stdout)
+        self.assertNotIn("PRIVATE KEY", result.stdout + result.stderr)
+
+    def test_guided_setup_rejects_mismatched_byo_tls_key_without_pending_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            tmpdir = Path(directory)
+            cert, _key = self.make_lab_cert(tmpdir)
+            _other_cert, other_key = self.make_lab_cert(tmpdir, "other")
+            result = self.run_wizard_functions(
+                f'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp/lab"; ENV_FILE="$tmp/lab/.env"; ENV_BACKUP_DIR="$tmp/lab/.env.backups"; '
+                f'mkdir -p "$FORTIFY_HOME_K8S"; printf "export DOMAIN=example.test\n" >"$ENV_FILE"; source "$ENV_FILE"; '
+                f'DOMAIN=example.test; SSC=ssc.example.test; LIM=lim.example.test; SCSAST=sast.example.test; SCDAST=dast.example.test; '
+                f'read -r _lab_ack; answers=(2 "{cert}" "{other_key}" "{cert}" b); '
+                f'ask() {{ local __target="$1"; shift || true; printf -v "$__target" "%s" "${{answers[0]}}"; answers=("${{answers[@]:1}}"); }}; '
+                f'setup_tls_assistant; printf "PENDING=%s\n" "${{#SETUP_PENDING_UPDATES[@]}}"',
+            )
+        combined = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("do not match", combined)
+        self.assertIn("BYO TLS inputs did not validate", combined)
+        self.assertIn("PENDING=0", result.stdout)
+        self.assertNotIn("PRIVATE KEY", combined)
+
+    def test_guided_setup_tls_status_explains_trust_and_next_actions(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp/lab"; ENV_FILE="$tmp/lab/.env"; ENV_BACKUP_DIR="$tmp/lab/.env.backups"; '
+            'mkdir -p "$FORTIFY_HOME_K8S"; DOMAIN=example.test; FORTIFY_TLS_MODE=mkcert; read -r _lab_ack; setup_tls_status'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for expected in ("Purpose", "Current configuration", "Verification", "Impact", "Recommended next action", "Browser trust is client-side", "fcli trust"):
+            self.assertIn(expected, result.stdout)
+
+    def test_guided_setup_mkcert_mode_stages_tls_mode_without_private_key_copy(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp/lab"; ENV_FILE="$tmp/lab/.env"; ENV_BACKUP_DIR="$tmp/lab/.env.backups"; '
+            'mkdir -p "$FORTIFY_HOME_K8S"; printf "export FORTIFY_TLS_MODE=byo\nexport FORTIFY_BYO_TLS_KEY=/private/key.pem\n" >"$ENV_FILE"; source "$ENV_FILE"; '
+            'read -r _lab_ack; answers=(1 b); ask() { local __target="$1"; shift || true; printf -v "$__target" "%s" "${answers[0]}"; answers=("${answers[@]:1}"); }; '
+            'setup_tls_assistant; setup_review_pending',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("mkcert TLS mode staged", result.stdout)
+        self.assertIn("FORTIFY_TLS_MODE", result.stdout)
+        self.assertIn("FORTIFY_BYO_TLS_KEY", result.stdout)
+        self.assertNotIn("PRIVATE KEY", result.stdout + result.stderr)
+
     def test_guided_setup_applies_staged_domain_with_backup(self) -> None:
         result = self.run_wizard_functions(
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
@@ -547,6 +636,45 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Reset cancelled", result.stdout)
         self.assertIn("RC=1", result.stdout)
         self.assertNotIn("BAD_RESET", result.stdout)
+
+    def test_guided_setup_help_uses_help_center_topics(self) -> None:
+        result = self.run_wizard_functions(
+            'guided_setup_step_screen() { :; }; guided_setup_footer() { :; }; '
+            'answers=(h q); ask() { local __target="$1"; shift || true; printf -v "$__target" "%s" "${answers[0]}"; answers=("${answers[@]:1}"); }; '
+            'help_show_topic() { printf "HELP:%s\n" "$1"; }; '
+            'guided_setup_menu; printf "RC=%s\n" "$?"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("HELP:overview", result.stdout)
+        self.assertIn("Guided Setup cancelled", result.stdout)
+        self.assertIn("RC=130", result.stdout)
+
+    def test_guided_setup_welcome_footer_only_shows_relevant_actions(self) -> None:
+        result = self.run_wizard_functions('guided_setup_footer 0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("  c. Continue", result.stdout)
+        self.assertIn("  q. Cancel setup", result.stdout)
+        for hidden in ("Edit values", "Skip", "Back", "Help"):
+            self.assertNotIn(hidden, result.stdout)
+
+    def test_guided_setup_steps_explain_purpose_impact_and_next_action(self) -> None:
+        result = self.run_wizard_functions(
+            'setup_profile_preview() { printf "  Profile preview\n"; }; '
+            'setup_registry_status() { printf "  Registry status\n"; }; '
+            'setup_tls_status() { printf "\nPurpose\n  TLS purpose\n\nCurrent configuration\n  TLS current\n\nImpact\n  TLS impact\n\nRecommended next action\n  TLS next\n"; }; '
+            'setup_hosts_guidance() { printf "  host.example.test\n"; }; '
+            'setup_readiness_items() { printf "  readiness item\n"; }; '
+            'setup_review_pending() { printf "  pending item\n"; }; '
+            'for step in 0 1 2 3 4 5 6 7 8; do guided_setup_step_screen "$step"; done'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for expected in ("Purpose", "Impact", "Recommended next action"):
+            self.assertGreaterEqual(result.stdout.count(expected), 9)
+        self.assertIn("Orient the setup flow", result.stdout)
+        self.assertIn("Define the lab identity", result.stdout)
+        self.assertIn("Choose which Fortify Lab components", result.stdout)
+        self.assertIn("Prepare Docker Hub credentials", result.stdout)
+        self.assertIn("Prepare fcli", result.stdout)
 
     def test_guided_setup_and_deployment_footers_render_vertical_options(self) -> None:
         result = self.run_wizard_functions('guided_setup_footer; guided_deployment_footer')
