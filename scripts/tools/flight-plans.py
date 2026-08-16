@@ -43,6 +43,29 @@ DISCOVERY_REPOSITORIES = {
     "FORTIFY_SCDAST_CHART_VERSION": "fortifydocker/helm-scancentral-dast-core",
     "FORTIFY_LIM_CHART_VERSION": "fortifydocker/helm-lim",
 }
+HELP_EPILOG = """
+Common workflows:
+  Review curated Flight Plans:
+    flight-plans.py list
+    flight-plans.py show fortify-26.2
+
+  Compare the current .env to a Flight Plan:
+    flight-plans.py compare-env fortify-26.2
+
+  Discover repo-owner release candidates:
+    flight-plans.py discover-releases --years 25,26
+    flight-plans.py discover --release 26.2
+    flight-plans.py curate --years 25,26
+
+  Promote a reviewed candidate:
+    flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
+    flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status recommended --yes
+
+Vocabulary:
+  Release      A Fortify yy.quarter line such as 25.2 or 26.2 discovered from tags.
+  Flight Plan  A curated, deployable bundle of Fortify component versions.
+  Candidate    A generated Flight Plan draft that still needs owner review and testing.
+"""
 
 
 @dataclass(frozen=True)
@@ -545,9 +568,9 @@ def discover_family_scores(catalog: Catalog, fixture_dir: Path | None, years: se
 
 
 def print_family_scores(scores: list[FamilyScore]) -> None:
-    print("Discovered Fortify release families")
+    print("Discovered Fortify releases")
     print()
-    print(f"  {'Family':<8} {'Coverage':<10} Status")
+    print(f"  {'Release':<8} {'Coverage':<10} Status")
     for score in scores:
         print(f"  {score.family:<8} {score.found}/{score.total:<8} {score.status}")
 
@@ -556,7 +579,7 @@ def discover_families(catalog: Catalog, years_text: str, min_coverage: int, writ
     years = {item.strip() for item in years_text.split(",") if item.strip()} if years_text else None
     scores = discover_family_scores(catalog, fixture_dir=fixture_dir, years=years)
     if not scores:
-        print("No Fortify release families discovered.")
+        print("No Fortify releases discovered.")
         return 1
     print_family_scores(scores)
     wrote = 0
@@ -572,7 +595,7 @@ def discover_families(catalog: Catalog, years_text: str, min_coverage: int, writ
         print(f"Candidate files written: {wrote}")
     else:
         print()
-        print("Next: run discover --family <family> to draft one candidate, or add --write-complete to write complete candidates.")
+        print("Next: run discover --release <release> to draft one candidate, or add --write-complete to write complete candidates.")
     return 0
 
 
@@ -649,55 +672,90 @@ def curate(catalog: Catalog, years_text: str, fixture_dir: Path | None) -> int:
     years = {item.strip() for item in years_text.split(",") if item.strip()} if years_text else None
     scores = discover_family_scores(catalog, fixture_dir=fixture_dir, years=years)
     if not scores:
-        print("No Fortify release families discovered.")
+        print("No Fortify releases discovered.")
         return 1
     print_family_scores(scores)
     print()
     print("Curator workflow")
-    print("  1. Draft:    flight-plans.py discover --family <family>")
-    print("  2. Review:   inspect tmp/flight-plan-candidates/fortify-<family>.toml")
-    print("  3. Promote:  flight-plans.py promote tmp/flight-plan-candidates/fortify-<family>.toml --status candidate --yes")
+    print("  1. Draft:    flight-plans.py discover --release <release>")
+    print("  2. Review:   inspect tmp/flight-plan-candidates/fortify-<release>.toml")
+    print("  3. Promote:  flight-plans.py promote tmp/flight-plan-candidates/fortify-<release>.toml --status candidate --yes")
     print("  4. Validate: flight-plans.py validate")
     print()
     ready = [score.family for score in scores if score.complete]
     if ready:
-        print("Complete candidate families: " + ", ".join(ready))
+        print("Complete candidate releases: " + ", ".join(ready))
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--catalog", type=Path, default=default_catalog_path())
+    parser = argparse.ArgumentParser(description=__doc__, epilog=HELP_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--catalog", type=Path, default=default_catalog_path(), help="Flight Plan catalog path")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("validate")
-    sub.add_parser("default")
-    list_parser = sub.add_parser("list")
-    list_parser.add_argument("--include-candidates", action="store_true")
-    show_parser = sub.add_parser("show")
+    sub.add_parser("validate", help="Validate catalog structure and curated plan requirements")
+    sub.add_parser("default", help="Print the default Flight Plan id")
+    list_parser = sub.add_parser("list", help="List curated Flight Plans")
+    list_parser.add_argument("--include-candidates", action="store_true", help="Include candidate plans normally hidden from lab users")
+    show_parser = sub.add_parser("show", help="Show one Flight Plan and its component versions")
     show_parser.add_argument("plan_id")
-    updates_parser = sub.add_parser("env-updates")
+    updates_parser = sub.add_parser("env-updates", help="Print .env updates for a selected Flight Plan")
     updates_parser.add_argument("plan_id")
     updates_parser.add_argument("--include-empty", action="store_true")
-    compare_parser = sub.add_parser("compare-env")
+    compare_parser = sub.add_parser("compare-env", help="Compare the current .env to a Flight Plan")
     compare_parser.add_argument("plan_id")
     compare_parser.add_argument("--env-file", type=Path, default=repo_root() / ".env")
-    discover_parser = sub.add_parser("discover")
-    discover_parser.add_argument("--family", required=True)
+    discover_parser = sub.add_parser(
+        "discover",
+        help="Draft one candidate Flight Plan from a Fortify release",
+        description="Discover one Fortify release such as 26.2 and write a candidate Flight Plan TOML file.",
+        epilog="""Examples:
+  flight-plans.py discover --release 26.2
+  flight-plans.py discover --release 25.2 --output tmp/flight-plan-candidates/fortify-25.2.toml
+
+Compatibility:
+  --family is accepted as an alias for --release.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    discover_parser.add_argument("--release", "--family", dest="release", required=True, help="Fortify release line such as 25.2 or 26.2")
     discover_parser.add_argument("--output", type=Path)
     discover_parser.add_argument("--fixture-dir", type=Path)
-    families_parser = sub.add_parser("discover-families")
-    families_parser.add_argument("--years", default="", help="Comma-separated release years such as 25,26")
-    families_parser.add_argument("--min-coverage", type=int, default=len(FORTIFY_KEYS))
-    families_parser.add_argument("--write-complete", action="store_true")
-    families_parser.add_argument("--write-all", action="store_true")
-    families_parser.add_argument("--output-dir", type=Path)
-    families_parser.add_argument("--fixture-dir", type=Path)
-    promote_parser = sub.add_parser("promote")
+    releases_parser = sub.add_parser(
+        "discover-releases",
+        aliases=["discover-families"],
+        help="Scan Docker tags for Fortify yy.quarter releases",
+        description="Scan known Fortify Docker repositories for release lines such as 25.2 or 26.2 and score candidate Flight Plan coverage.",
+        epilog="""Examples:
+  flight-plans.py discover-releases --years 25,26
+  flight-plans.py discover-releases --years 25,26 --write-complete
+
+Compatibility:
+  discover-families is accepted as an alias for discover-releases.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    releases_parser.add_argument("--years", default="", help="Comma-separated release years such as 25,26")
+    releases_parser.add_argument("--min-coverage", type=int, default=len(FORTIFY_KEYS), help="Minimum discovered component count before --write-complete writes a candidate")
+    releases_parser.add_argument("--write-complete", action="store_true", help="Write candidate files for releases meeting --min-coverage")
+    releases_parser.add_argument("--write-all", action="store_true", help="Write candidate files for every discovered release, including incomplete ones")
+    releases_parser.add_argument("--output-dir", type=Path)
+    releases_parser.add_argument("--fixture-dir", type=Path)
+    promote_parser = sub.add_parser(
+        "promote",
+        help="Promote a reviewed candidate into the catalog",
+        description="Promote one reviewed candidate Flight Plan into the catalog. Dry run is the default; --yes writes the catalog.",
+        epilog="""Examples:
+  flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
+  flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status recommended --yes
+
+Safety:
+  --yes writes config/flight-plans.toml and creates a backup.
+  --status recommended also updates the default plan and demotes the previous recommended plan.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     promote_parser.add_argument("candidate", type=Path)
-    promote_parser.add_argument("--status", default="candidate")
+    promote_parser.add_argument("--status", choices=sorted(VALID_STATUSES), default="candidate")
     promote_parser.add_argument("--set-default", action="store_true")
     promote_parser.add_argument("--yes", action="store_true")
-    curate_parser = sub.add_parser("curate")
+    curate_parser = sub.add_parser("curate", help="Print the repo-owner Flight Plan curation workflow")
     curate_parser.add_argument("--years", default="", help="Comma-separated release years such as 25,26")
     curate_parser.add_argument("--fixture-dir", type=Path)
     args = parser.parse_args(argv)
@@ -722,9 +780,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "compare-env":
         return compare_env(catalog, args.plan_id, args.env_file)
     if args.command == "discover":
-        out = args.output or candidate_output_path(args.family)
-        return discover(catalog, args.family, out, args.fixture_dir)
-    if args.command == "discover-families":
+        out = args.output or candidate_output_path(args.release)
+        return discover(catalog, args.release, out, args.fixture_dir)
+    if args.command in {"discover-releases", "discover-families"}:
         return discover_families(catalog, args.years, args.min_coverage, args.write_complete, args.write_all, args.output_dir, args.fixture_dir)
     if args.command == "promote":
         return promote_candidate(catalog, args.candidate, args.status, args.set_default, args.yes)

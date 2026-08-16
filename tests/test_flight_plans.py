@@ -136,7 +136,7 @@ class FlightPlansTests(unittest.TestCase):
             ):
                 (fixture_dir / repo).write_text(json.dumps(payload), encoding="utf-8")
             output = Path(directory) / "candidate.toml"
-            result = self.run_tool("discover", "--family", "26.2", "--fixture-dir", str(fixture_dir), "--output", str(output))
+            result = self.run_tool("discover", "--release", "26.2", "--fixture-dir", str(fixture_dir), "--output", str(output))
             candidate = output.read_text(encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('status = "candidate"', candidate)
@@ -161,7 +161,7 @@ class FlightPlansTests(unittest.TestCase):
             ):
                 (fixture_dir / repo).write_text(json.dumps(payload), encoding="utf-8")
             output = Path(directory) / "candidate.toml"
-            result = self.run_tool("discover", "--family", "26.2", "--fixture-dir", str(fixture_dir), "--output", str(output))
+            result = self.run_tool("discover", "--release", "26.2", "--fixture-dir", str(fixture_dir), "--output", str(output))
             candidate = output.read_text(encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('FORTIFY_SSC_IMAGE_TAG = "26.2.0.0183"', candidate)
@@ -187,7 +187,7 @@ class FlightPlansTests(unittest.TestCase):
                 (fixture_dir / repo).write_text(json.dumps(payload), encoding="utf-8")
             (fixture_dir / "registry__fortifydocker__ssc-webapp__page1.json").write_text(json.dumps(registry_payload), encoding="utf-8")
             output = Path(directory) / "candidate.toml"
-            result = self.run_tool("discover", "--family", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(output))
+            result = self.run_tool("discover", "--release", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(output))
             candidate = output.read_text(encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('FORTIFY_SSC_IMAGE_TAG = "25.2.2.0005.518"', candidate)
@@ -201,25 +201,25 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn('"FORTIFY_SCSAST_CTRL_IMAGE_TAG": "fortifydocker/scancentral-sast-controller"', tool)
         self.assertIn('"FORTIFY_SCSAST_WORKER_IMAGE_TAG": "fortifydocker/scancentral-sast-sensor"', tool)
 
-    def test_discover_families_scores_release_family_candidates(self) -> None:
+    def test_discover_releases_scores_release_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture_dir = Path(directory) / "fixtures"
             self.write_discovery_fixtures(fixture_dir, family="25.2")
-            result = self.run_tool("discover-families", "--years", "25", "--fixture-dir", str(fixture_dir))
+            result = self.run_tool("discover-releases", "--years", "25", "--fixture-dir", str(fixture_dir))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Discovered Fortify release families", result.stdout)
+        self.assertIn("Discovered Fortify releases", result.stdout)
         self.assertIn("25.2", result.stdout)
         self.assertIn("7/7", result.stdout)
         self.assertIn("candidate ready", result.stdout)
         self.assertNotIn("26.2", result.stdout)
 
-    def test_discover_families_can_write_complete_candidates(self) -> None:
+    def test_discover_releases_can_write_complete_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture_dir = Path(directory) / "fixtures"
             output_dir = Path(directory) / "candidates"
             self.write_discovery_fixtures(fixture_dir, family="25.2")
             result = self.run_tool(
-                "discover-families",
+                "discover-releases",
                 "--years",
                 "25",
                 "--write-complete",
@@ -237,6 +237,17 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn('FORTIFY_SSC_IMAGE_TAG = "25.2.2.0005.518"', candidate_text)
         self.assertIn('FORTIFY_SCSAST_WORKER_IMAGE_TAG = "25.2.0-1"', candidate_text)
 
+    def test_old_discovery_names_remain_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_dir = Path(directory) / "fixtures"
+            self.write_discovery_fixtures(fixture_dir, family="25.2")
+            candidate = Path(directory) / "fortify-25.2.toml"
+            discover = self.run_tool("discover", "--family", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(candidate))
+            releases = self.run_tool("discover-families", "--years", "25", "--fixture-dir", str(fixture_dir))
+        self.assertEqual(discover.returncode, 0, discover.stderr)
+        self.assertEqual(releases.returncode, 0, releases.stderr)
+        self.assertIn("Discovered Fortify releases", releases.stdout)
+
     def test_curate_prints_repo_owner_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture_dir = Path(directory) / "fixtures"
@@ -244,16 +255,16 @@ class FlightPlansTests(unittest.TestCase):
             result = self.run_tool("curate", "--years", "25", "--fixture-dir", str(fixture_dir))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Curator workflow", result.stdout)
-        self.assertIn("flight-plans.py discover --family <family>", result.stdout)
-        self.assertIn("flight-plans.py promote tmp/flight-plan-candidates/fortify-<family>.toml --status candidate --yes", result.stdout)
-        self.assertIn("Complete candidate families: 25.2", result.stdout)
+        self.assertIn("flight-plans.py discover --release <release>", result.stdout)
+        self.assertIn("flight-plans.py promote tmp/flight-plan-candidates/fortify-<release>.toml --status candidate --yes", result.stdout)
+        self.assertIn("Complete candidate releases: 25.2", result.stdout)
 
     def test_promote_candidate_supports_dry_run_without_catalog_write(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture_dir = Path(directory) / "fixtures"
             self.write_discovery_fixtures(fixture_dir, family="25.2")
             candidate = Path(directory) / "fortify-25.2.toml"
-            discover = self.run_tool("discover", "--family", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(candidate))
+            discover = self.run_tool("discover", "--release", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(candidate))
             catalog = Path(directory) / "flight-plans.toml"
             shutil.copyfile(CATALOG, catalog)
             before = catalog.read_text(encoding="utf-8")
@@ -269,7 +280,7 @@ class FlightPlansTests(unittest.TestCase):
             fixture_dir = Path(directory) / "fixtures"
             self.write_discovery_fixtures(fixture_dir, family="25.2")
             candidate = Path(directory) / "fortify-25.2.toml"
-            discover = self.run_tool("discover", "--family", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(candidate))
+            discover = self.run_tool("discover", "--release", "25.2", "--fixture-dir", str(fixture_dir), "--output", str(candidate))
             catalog = Path(directory) / "flight-plans.toml"
             shutil.copyfile(CATALOG, catalog)
             result = self.run_tool("--catalog", str(catalog), "promote", str(candidate), "--status", "recommended", "--yes")

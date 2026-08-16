@@ -50,24 +50,24 @@ without printing secrets.
 ## Repo-owner discovery workflow
 
 Repo owners can draft and curate new plan candidates with the discovery helper.
-Fortify commonly publishes tags with a release-family prefix such as `25.2` or
-`26.2`, so the helper can scan known repositories and score candidate families:
+Fortify commonly publishes tags with a release prefix such as `25.2` or
+`26.2`, so the helper can scan known repositories and score candidate releases:
 
 ```bash
-./scripts/tools/flight-plans.py discover-families --years 25,26
+./scripts/tools/flight-plans.py discover-releases --years 25,26
 ./scripts/tools/flight-plans.py curate --years 25,26
 ```
 
 To write complete candidate drafts for review:
 
 ```bash
-./scripts/tools/flight-plans.py discover-families --years 25,26 --write-complete
+./scripts/tools/flight-plans.py discover-releases --years 25,26 --write-complete
 ```
 
-To inspect or regenerate one family explicitly:
+To inspect or regenerate one release explicitly:
 
 ```bash
-./scripts/tools/discover-flight-plans.sh --family 26.2
+./scripts/tools/discover-flight-plans.sh --release 26.2
 ```
 
 Discovery prints the selected component candidates to the terminal and writes a
