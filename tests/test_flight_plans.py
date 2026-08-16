@@ -436,6 +436,28 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("ARGS=--set-string release.overlay=26.2", result.stdout)
         self.assertIn("apps/ssc/releases/26.2/overrides.sh", result.stdout)
 
+    def test_ssc_25_2_overlay_maps_required_secretref_keys(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'FORTIFY_HOME_K8S="$PWD" FORTIFY_FLIGHT_PLAN=fortify-25.2; '
+                'source scripts/lib/release-overlays.sh; '
+                'release_overlay_load ssc; printf "%s\n" "${RELEASE_OVERLAY_HELM_ARGS[@]}"',
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("secretRef.name=fortify-secrets", result.stdout)
+        self.assertIn("secretRef.keys.sscLicenseEntry=fortify.license", result.stdout)
+        self.assertIn("secretRef.keys.sscAutoconfigEntry=ssc.autoconfig", result.stdout)
+        self.assertIn("secretRef.keys.httpCertificateKeystoreFileEntry=keystore.jks", result.stdout)
+        self.assertIn("secretRef.keys.httpCertificateKeyPasswordEntry=key_password", result.stdout)
+        self.assertIn("secretRef.keys.httpCertificateKeystorePasswordEntry=keystore_password", result.stdout)
+
     def test_release_overlay_validate_selected_detects_shell_syntax_errors(self) -> None:
         result = self.run_wizard_functions(
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; FORTIFY_FLIGHT_PLAN=fortify-26.2; '
