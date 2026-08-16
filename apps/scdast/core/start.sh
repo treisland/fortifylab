@@ -14,6 +14,12 @@ source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
 # shellcheck source=../../../scripts/lib/coredns-lab-hosts.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+RELEASE_OVERLAY_HELM_ARGS=()
+if [ -f "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh" ]; then
+    # shellcheck source=../../../scripts/lib/release-overlays.sh
+    source "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh"
+    release_overlay_load scdast/core
+fi
 
 fortify_require_k8s_hostname SCDAST "$SCDAST"
 fortify_ensure_coredns_lab_hosts
@@ -58,7 +64,8 @@ microk8s helm -n "$NAMESPACE" upgrade -i \
 	--set api.ingress.tls[0].secretName=tls \
 	--set api.ingress.tls[0].hosts[0]=$SCDAST \
 	--set-string api.ingress.annotations."traefik\.ingress\.kubernetes\.io/router\.tls"=true \
-	-f $CURRENT_DIR/resource_override.yaml
+	-f $CURRENT_DIR/resource_override.yaml \
+	"${RELEASE_OVERLAY_HELM_ARGS[@]}"
 
 microk8s kubectl -n "$NAMESPACE" scale statefulset sdast-core-scancentral-dast-core-api --replicas=1
 microk8s kubectl -n "$NAMESPACE" scale statefulset sdast-core-scancentral-dast-core-globalservice --replicas=1

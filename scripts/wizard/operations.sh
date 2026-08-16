@@ -2867,6 +2867,8 @@ env_diagnostics() {
     if python_config_available; then
         python_config_diagnostics || rc=$?
         flight_plan_show_comparison "$(flight_plan_selected_id)" || rc=$?
+        release_overlay_report
+        release_overlay_validate_selected || rc=$?
         return "$rc"
     fi
     title "Configuration diagnostics"
@@ -2887,6 +2889,8 @@ env_diagnostics() {
         printf '%s\n' "$issues" | awk '{ printf "  - %s\n", $0 }'
     fi
     flight_plan_show_comparison "$(flight_plan_selected_id)" || return $?
+    release_overlay_report
+    release_overlay_validate_selected || return $?
     return 0
 }
 

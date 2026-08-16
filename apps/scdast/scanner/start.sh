@@ -12,6 +12,12 @@ source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
 # shellcheck source=../../../scripts/lib/coredns-lab-hosts.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+RELEASE_OVERLAY_HELM_ARGS=()
+if [ -f "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh" ]; then
+    # shellcheck source=../../../scripts/lib/release-overlays.sh
+    source "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh"
+    release_overlay_load scdast/scanner
+fi
 
 fortify_ensure_coredns_lab_hosts
 
@@ -25,6 +31,7 @@ microk8s helm -n "$NAMESPACE" upgrade -i sdast-scanner oci://registry-1.docker.i
 	--set dastApiServiceURL=$SCDAST_URL \
 	--set serviceTokenSecretName=scdast-service-token \
 	--set allowNonTrustedServerCertificate=true \
-	-f $CURRENT_DIR/resource_override.yaml
+	-f $CURRENT_DIR/resource_override.yaml \
+	"${RELEASE_OVERLAY_HELM_ARGS[@]}"
 
 microk8s kubectl -n "$NAMESPACE" scale statefulset sdast-scanner-scancentral-dast-scanner --replicas=1

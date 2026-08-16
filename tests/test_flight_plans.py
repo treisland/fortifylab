@@ -413,6 +413,40 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("FORTIFY_FLIGHT_PLAN", result.stdout)
         self.assertIn("FORTIFY_SSC_IMAGE_TAG", result.stdout)
 
+
+    def test_release_overlay_report_treats_missing_overlays_as_normal(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; FORTIFY_FLIGHT_PLAN=fortify-26.2; release_overlay_report'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Selected Flight Plan: fortify-26.2", result.stdout)
+        self.assertIn("Selected release overlay baseline: 26.2", result.stdout)
+        self.assertIn("Release overlays:", result.stdout)
+        self.assertIn("SSC", result.stdout)
+        self.assertIn("none for release 26.2", result.stdout)
+
+    def test_release_overlay_loads_selected_shell_overlay_helm_args(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; FORTIFY_FLIGHT_PLAN=fortify-26.2; '
+            'mkdir -p "$tmp/apps/ssc/releases/26.2"; '
+            'printf "%s\n" "RELEASE_OVERLAY_HELM_ARGS+=(--set-string release.overlay=26.2)" >"$tmp/apps/ssc/releases/26.2/overrides.sh"; '
+            'release_overlay_load ssc; printf "ARGS=%s\n" "${RELEASE_OVERLAY_HELM_ARGS[*]}"; release_overlay_report'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ARGS=--set-string release.overlay=26.2", result.stdout)
+        self.assertIn("apps/ssc/releases/26.2/overrides.sh", result.stdout)
+
+    def test_release_overlay_validate_selected_detects_shell_syntax_errors(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; FORTIFY_FLIGHT_PLAN=fortify-26.2; '
+            'mkdir -p "$tmp/apps/ssc/releases/26.2"; '
+            'printf "%s\n" "if then" >"$tmp/apps/ssc/releases/26.2/overrides.sh"; '
+            'release_overlay_validate_selected; printf "RC=%s\n" "$?"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("syntax error", result.stderr)
+        self.assertIn("RC=1", result.stdout)
+
     def test_deployment_inputs_and_diagnostics_surface_flight_plan_context(self) -> None:
         guided = (ROOT / "scripts/wizard/guided.sh").read_text(encoding="utf-8")
         operations = (ROOT / "scripts/wizard/operations.sh").read_text(encoding="utf-8")
@@ -420,6 +454,9 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("Flight Plan:", guided)
         self.assertIn('section "Flight Plan"', guided)
         self.assertIn("flight_plan_show_comparison", operations)
+        self.assertIn("release_overlay_report", guided)
+        self.assertIn("release_overlay_validate_selected", guided)
+        self.assertIn("release_overlay_report", operations)
 
 
 if __name__ == "__main__":

@@ -64,6 +64,10 @@ source "$FORTIFY_HOME_K8S/scripts/lib/help.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/lab-disclaimer.sh"
 # shellcheck source=scripts/lib/operational-help.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/operational-help.sh"
+# shellcheck source=scripts/lib/flight-plans.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/flight-plans.sh"
+# shellcheck source=scripts/lib/release-overlays.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh"
 # shellcheck source=scripts/lib/registry-credentials.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
 # shellcheck source=scripts/lib/tls.sh

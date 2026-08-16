@@ -15,6 +15,12 @@ source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
 # shellcheck source=../../scripts/lib/coredns-lab-hosts.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+RELEASE_OVERLAY_HELM_ARGS=()
+if [ -f "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh" ]; then
+    # shellcheck source=../../scripts/lib/release-overlays.sh
+    source "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh"
+    release_overlay_load lim
+fi
 
 fortify_require_k8s_hostname LIM "$LIM"
 fortify_ensure_coredns_lab_hosts
@@ -35,7 +41,8 @@ microk8s helm -n "$NAMESPACE" upgrade -i lim oci://registry-1.docker.io/fortifyd
  --set serverCertificate.certificateSecretName=lim-server-certificate \
  --set signingCertificate.certificateSecretName=lim-signing-certificate \
  --set signingCertificate.certificatePasswordSecretName=lim-signing-certificate-password \
- --set dataPersistence.existingClaim=lim-pvc  
+ --set dataPersistence.existingClaim=lim-pvc \
+ "${RELEASE_OVERLAY_HELM_ARGS[@]}"
 
 envsubst '${LIM} ${NAMESPACE}' < "$CURRENT_DIR/ingress.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
 fortify_annotate_traefik_https_service "$NAMESPACE" lim

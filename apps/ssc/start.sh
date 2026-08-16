@@ -16,6 +16,12 @@ source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
 # shellcheck source=../../scripts/lib/coredns-lab-hosts.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+RELEASE_OVERLAY_HELM_ARGS=()
+if [ -f "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh" ]; then
+    # shellcheck source=../../scripts/lib/release-overlays.sh
+    source "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh"
+    release_overlay_load ssc
+fi
 
 fortify_require_k8s_hostname SSC "$SSC"
 fortify_ensure_coredns_lab_hosts
@@ -57,7 +63,8 @@ microk8s helm -n "$NAMESPACE" upgrade -i ssc \
 		--set persistentVolumeClaim.storageClassName=nfs \
 		--set resources.limits.memory=8Gi \
 		--set resources.limits.cpu=1 \
-		--set service.type=ClusterIP
+		--set service.type=ClusterIP \
+		"${RELEASE_OVERLAY_HELM_ARGS[@]}"
 
 if microk8s kubectl get crd middlewares.traefik.io >/dev/null 2>&1; then
 	envsubst '${NAMESPACE}' < "$CURRENT_DIR/traefik-upload-middleware.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
