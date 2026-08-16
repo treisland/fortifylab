@@ -24,6 +24,7 @@ venv/
 # Environment config (contains passwords)
 .env
 .env.backups/
+.fortifylab/
 .env.*.bak
 .env.bak
 .env.tmp
