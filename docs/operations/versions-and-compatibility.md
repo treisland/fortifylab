@@ -45,7 +45,65 @@ need different decisions than an application version selection.
 Use the recommended Flight Plan for normal labs. Use individual overrides only
 when testing a specific compatibility issue or preparing a new catalog entry.
 Diagnostics compare the current `.env` against the selected plan and report drift
-without printing secrets.
+without printing secrets. Intentional component overrides are tracked with
+`FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS` so operators can tell the difference
+between a normal curated bundle and an advanced compatibility exception.
+
+### Guided Flight Plan upgrade workflow
+
+Use the guided Flight Plan path when the goal is to move the whole Fortify lab to
+a curated release bundle.
+
+1. Open Guided Setup or **Operational guidance -> Deployment versions and Flight
+   Plan** before starting or upgrading components.
+2. Select the target Flight Plan and review the upgrade plan preview. The wizard
+   shows the current-vs-target comparison for each Fortify component before it
+   stages changes.
+3. Confirm that MySQL and PostgreSQL database versions remain separate from the
+   Flight Plan. Change database versions only as an explicit database operation
+   with separate migration and rollback notes.
+4. Let the wizard create the normal `.env` backup and stage the selected Flight
+   Plan values. Do not hand-edit `.env` during the same upgrade window unless
+   you are intentionally testing drift.
+5. Start or upgrade components in dependency order from the guided workflow.
+   Watch the live wait screen, readiness probes, and known-issue hints before
+   moving to the next component.
+6. Export a sanitized diagnostics bundle after the upgrade if you need an audit
+   trail or support evidence. Review the archive locally before sharing it.
+
+### Advanced component override workflow
+
+Use individual component overrides only for a deliberate exception: reproducing a
+compatibility issue, validating a vendor hotfix, or preparing a new Flight Plan
+candidate.
+
+1. Record the selected Flight Plan baseline and the exact component key you are
+   overriding, such as `FORTIFY_SSC_IMAGE_TAG` or
+   `FORTIFY_SCDAST_CHART_VERSION`.
+2. Compare `.env` to the selected Flight Plan before changing values so the
+   starting drift is visible.
+3. Change only the component under test. The resulting individual component override is drift from the curated bundle even if the app starts.
+4. Run configuration diagnostics and the Flight Plan comparison again. Keep the
+   diagnostic output or sanitized bundle as the audit trail for why the override
+   exists.
+5. Restore to the Flight Plan baseline as soon as the exception is no longer
+   needed by reselecting the Flight Plan or reapplying its environment updates.
+   Confirm the comparison no longer reports that component as drift.
+
+## Post-upgrade verification
+
+After a Flight Plan upgrade or advanced override, verify more than pod readiness:
+
+- Run the wizard's configuration diagnostics and confirm the selected Flight
+  Plan, current-vs-target comparison, database-separate entries, and release
+  overlay status are visible.
+- Check each upgraded Fortify component through its application URL or expected
+  API path, not only Kubernetes readiness.
+- Review release overlay output and known-issue guidance. Missing overlays are
+  normal; selected overlays must be readable, syntax-valid, and release-specific.
+- For DAST upgrades, stay aware of the documented known issue: DAST upgrade job artifact permission issue. Confirm the configured resource override is still in place when that release path needs it.
+- Keep the `.env` backup path, diagnostics bundle path, and wizard log excerpt
+  together as the upgrade audit trail.
 
 ## Release-aware deployment overlays
 
@@ -140,6 +198,12 @@ Changing Flight Plans is configuration rollback, not data rollback. Restoring an
 older `.env` backup returns version settings to previous values, but it does not
 undo database schema migrations, Helm release history, Kubernetes Secrets, PVC
 contents, or application-generated data.
+
+Treat snapshots as a data-safety boundary, not as permission to experiment
+without a rollback plan. A filesystem, VM, or PVC snapshot can preserve bytes
+while still capturing an in-flight database or incompatible schema state. Record
+what was snapshot, when it was taken, and which database/application versions it
+belongs to before applying the upgrade plan.
 
 Before moving to an older Fortify version after a deployment has run:
 
