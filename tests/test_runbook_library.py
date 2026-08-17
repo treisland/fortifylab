@@ -53,7 +53,7 @@ class RunbookLibraryTests(unittest.TestCase):
         self.assertIn("source_wizard_module runbooks.sh", (ROOT / "start_wizard.sh").read_text(encoding="utf-8"))
         self.assertIn("runbooks_menu()", WIZARD)
         self.assertIn("Runbook Library", WIZARD)
-        self.assertIn("15)  runbooks_menu ;;", WIZARD)
+        self.assertIn("16)  runbooks_menu ;;", WIZARD)
 
     def test_template_and_local_folder_contract_are_documented(self) -> None:
         template = (ROOT / "runbooks/templates/shell-runbook.sh").read_text(encoding="utf-8")

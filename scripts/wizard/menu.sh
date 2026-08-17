@@ -144,23 +144,23 @@ main_menu() {
         echo "   1. Guided deployment (recommended)"
         echo "   2. Express deployment"
         echo "   3. Resume or repair deployment"
-        echo "   4. Manage individual components (expert)"
-        echo "   5. Sample applications"
-        echo "   6. Kubernetes Dashboard access"
+        echo "   4. Flight Plans and upgrades"
+        echo "   5. Manage individual components (expert)"
+        echo "   6. Sample applications"
+        echo "   7. Kubernetes Dashboard access"
 
         section "Diagnostics and advanced"
-        echo "   7. Diagnostics / live status"
-        echo "   8. Advanced setup and configuration"
+        echo "   8. Diagnostics / live status"
+        echo "   9. Advanced setup and configuration"
 
         section "Operations"
-        echo "   9. Lab lifecycle controls"
-        echo "  10. Stream logs (all pods)"
-        echo "  11. Cluster snapshot"
-        echo "  12. Tail one pod"
-        echo "  13. URLs & credentials"
-        echo "  14. Tools and FCLI readiness"
-        echo "  15. Runbook Library"
-        echo "  16. Image versions"
+        echo "  10. Lab lifecycle controls"
+        echo "  11. Stream logs (all pods)"
+        echo "  12. Cluster snapshot"
+        echo "  13. Tail one pod"
+        echo "  14. URLs & credentials"
+        echo "  15. Tools and FCLI readiness"
+        echo "  16. Runbook Library"
         echo "  17. Configuration editor"
 
         section "Learn"
@@ -178,19 +178,19 @@ main_menu() {
             1)  guided_deployment_menu ;;
             2)  deploy_from_scratch ;;
             3)  resume_repair ;;
-            4)  apps_menu ;;
-            5)  sample_apps_menu ;;
-            6)  dashboard_access_menu ;;
-            7)  live_status ;;
-            8)  advanced_menu ;;
-            9)  lab_lifecycle_menu ;;
-           10)  stream_logs ;;
-           11)  cluster_status ;;
-           12)  logs_menu ;;
-           13)  urls_creds ;;
-           14)  fcli_tools_menu ;;
-           15)  runbooks_menu ;;
-           16)  versions_menu ;;
+            4)  versions_menu ;;
+            5)  apps_menu ;;
+            6)  sample_apps_menu ;;
+            7)  dashboard_access_menu ;;
+            8)  live_status ;;
+            9)  advanced_menu ;;
+           10)  lab_lifecycle_menu ;;
+           11)  stream_logs ;;
+           12)  cluster_status ;;
+           13)  logs_menu ;;
+           14)  urls_creds ;;
+           15)  fcli_tools_menu ;;
+           16)  runbooks_menu ;;
            17)  edit_env ;;
            18)  help_center ;;
            19)  operational_guidance_menu ;;

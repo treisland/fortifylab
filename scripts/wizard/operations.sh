@@ -2865,7 +2865,7 @@ deployment_versions_status() {
     done < <(env_section_keys versions)
     cat <<'EOF'
 
-Use 'u' in the Deployment versions editor to check available Docker Hub tags.
+Use 'u' in the Flight Plans and upgrades editor to check available Docker Hub tags.
 Newest available is not automatically compatible; review Fortify release notes
 and database upgrade boundaries before applying version changes.
 EOF
@@ -3372,7 +3372,7 @@ edit_env() {
     2. Change lab domain and derived URLs
 
   Deployment Settings
-    3. Deployment versions
+    3. Deployment versions and Flight Plans
     4. Credentials, users, and passwords
     5. Advanced service URLs
 

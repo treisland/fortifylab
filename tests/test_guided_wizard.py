@@ -73,6 +73,7 @@ class GuidedWizardTests(unittest.TestCase):
             "Guided deployment (recommended)",
             "Express deployment",
             "Resume or repair deployment",
+            "Flight Plans and upgrades",
             "Manage individual components (expert)",
             "Sample applications",
             "Kubernetes Dashboard access",
@@ -125,7 +126,8 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertNotIn("ControllerToken", result.stdout)
 
     def test_sample_apps_have_visible_top_level_menu(self) -> None:
-        self.assertIn('5)  sample_apps_menu ;;', WIZARD)
+        self.assertIn('4)  versions_menu ;;', WIZARD)
+        self.assertIn('6)  sample_apps_menu ;;', WIZARD)
         self.assertIn('sample_apps_menu()', WIZARD)
         self.assertIn('apps_menu_for_scope "samples"', WIZARD)
         self.assertIn('title "$heading"', WIZARD)
@@ -434,7 +436,7 @@ class GuidedWizardTests(unittest.TestCase):
             "Kubernetes namespace",
             "Change lab domain and derived URLs",
             "Deployment Settings",
-            "Deployment versions",
+            "Deployment versions and Flight Plans",
             "Credentials, users, and passwords",
             "Advanced service URLs",
             "Validation and Repair",
