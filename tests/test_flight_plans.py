@@ -422,7 +422,7 @@ class FlightPlansTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("FORTIFY_FLIGHT_PLAN", result.stdout)
         self.assertIn("FORTIFY_SSC_IMAGE_TAG", result.stdout)
-        self.assertIn("COUNT=8", result.stdout)
+        self.assertIn("COUNT=9", result.stdout)
 
     def test_guided_setup_can_stage_flight_plan_selection_without_immediate_apply(self) -> None:
         result = self.run_wizard_functions(

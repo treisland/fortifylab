@@ -339,6 +339,9 @@ lab_lifecycle_step_stop_destroy_script() {
         stop:sast_controller|stop:sast_sensor) printf '%s\n' "apps/scsast/stop.sh" ;;
         stop:dast_core) printf '%s\n' "apps/scdast/core/stop.sh" ;;
         stop:dast_scanner) printf '%s\n' "apps/scdast/scanner/stop.sh" ;;
+        stop:sample_juice_shop) printf '%s\n' "apps/samples/juice-shop/stop.sh" ;;
+        stop:sample_webgoat) printf '%s\n' "apps/samples/webgoat/stop.sh" ;;
+        stop:sample_dvwa) printf '%s\n' "apps/samples/dvwa/stop.sh" ;;
         destroy:mysql) printf '%s\n' "apps/mysql/destroy.sh" ;;
         destroy:postgresql) printf '%s\n' "apps/postgresql/destroy.sh" ;;
         destroy:ssc) printf '%s\n' "apps/ssc/destroy.sh" ;;
@@ -346,6 +349,9 @@ lab_lifecycle_step_stop_destroy_script() {
         destroy:sast_controller|destroy:sast_sensor) printf '%s\n' "apps/scsast/destroy.sh" ;;
         destroy:dast_core) printf '%s\n' "apps/scdast/core/destroy.sh" ;;
         destroy:dast_scanner) printf '%s\n' "apps/scdast/scanner/destroy.sh" ;;
+        destroy:sample_juice_shop) printf '%s\n' "apps/samples/juice-shop/destroy.sh" ;;
+        destroy:sample_webgoat) printf '%s\n' "apps/samples/webgoat/destroy.sh" ;;
+        destroy:sample_dvwa) printf '%s\n' "apps/samples/dvwa/destroy.sh" ;;
         *) return 1 ;;
     esac
 }
@@ -354,7 +360,6 @@ lab_lifecycle_script_list() {
     local operation="$1" scope="${2:-selected}" idx field script seen="" step
     if [ "$scope" = "all" ]; then
         for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
-            app_index_in_full_lifecycle "$idx" || continue
             case "$operation" in
                 destroy) field="${APP_DESTROY[$idx]}" ;;
                 stop) field="${APP_STOP[$idx]}" ;;
@@ -379,20 +384,22 @@ lab_lifecycle_script_list() {
 }
 
 lab_shutdown_deployments() {
-    local scope="${1:-selected}" idx rc=0 script step seen=""
+    local scope="${1:-selected}" idx rc=0 script step seen="" stopped="" failed=""
     section "Shutdown lab deployments"
     if [ "$scope" = "all" ]; then
         note "Stopping all lab workloads in dependency-safe order. Persistent data is preserved."
         wizard_log_event "action=lab_lifecycle_start operation=shutdown scope=all mode=non_destructive"
         for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
-            app_index_in_full_lifecycle "$idx" || continue
             note "Stopping ${APP_LABEL[$idx]}..."
             wizard_log_event "action=lab_lifecycle_component operation=shutdown scope=all component=${APP_GUIDED_STEP[$idx]}"
             run_app_scripts "${APP_STOP[$idx]}"
             rc=$?
             if [ "$rc" -ne 0 ]; then
-                wizard_log_event "action=lab_lifecycle_finish operation=shutdown scope=all state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
-                return "$rc"
+                wizard_log_event "action=lab_lifecycle_component_failed operation=shutdown scope=all component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+                error "Failed to stop ${APP_LABEL[$idx]} (exit $rc); continuing with remaining components."
+                failed="${failed:+$failed, }${APP_LABEL[$idx]}"
+            else
+                stopped="${stopped:+$stopped, }${APP_LABEL[$idx]}"
             fi
         done
     else
@@ -412,10 +419,20 @@ lab_shutdown_deployments() {
             run_app_scripts "$script"
             rc=$?
             if [ "$rc" -ne 0 ]; then
-                wizard_log_event "action=lab_lifecycle_finish operation=shutdown scope=selected state=failed component=$step exit_code=$rc"
-                return "$rc"
+                wizard_log_event "action=lab_lifecycle_component_failed operation=shutdown scope=selected component=$step exit_code=$rc"
+                error "Failed to stop ${GUIDED_STEP_LABEL[${_lab_lifecycle_indexes[$idx]}]} (exit $rc); continuing with remaining components."
+                failed="${failed:+$failed, }${GUIDED_STEP_LABEL[${_lab_lifecycle_indexes[$idx]}]}"
+            else
+                stopped="${stopped:+$stopped, }${GUIDED_STEP_LABEL[${_lab_lifecycle_indexes[$idx]}]}"
             fi
         done
+    fi
+    if [ -n "$failed" ]; then
+        wizard_log_event "action=lab_lifecycle_finish operation=shutdown scope=$scope state=failed failed=$failed"
+        error "Failed to stop: $failed"
+        [ -n "$stopped" ] && note "Stopped successfully: $stopped"
+        note "Data volumes and configuration remain in place. Retry the failed component(s) individually from the Apps menu."
+        return 1
     fi
     wizard_log_event "action=lab_lifecycle_finish operation=shutdown scope=$scope state=complete"
     note "Lab workloads stopped. Data volumes and configuration remain in place."
@@ -485,7 +502,7 @@ EOF
 }
 
 lab_destroy_deployments() {
-    local scope="${1:-selected}" idx rc=0 confirmation expected script step seen=""
+    local scope="${1:-selected}" idx rc=0 confirmation expected script step seen="" destroyed="" failed=""
     if [ "$scope" = "all" ]; then
         expected="DESTROY FORTIFY LAB"
     else
@@ -503,14 +520,16 @@ lab_destroy_deployments() {
     wizard_log_event "action=lab_lifecycle_start operation=destroy scope=$scope mode=destructive"
     if [ "$scope" = "all" ]; then
         for ((idx=${#APP_LABEL[@]} - 1; idx >= 0; idx--)); do
-            app_index_in_full_lifecycle "$idx" || continue
             note "Destroying ${APP_LABEL[$idx]}..."
             wizard_log_event "action=lab_lifecycle_component operation=destroy scope=all component=${APP_GUIDED_STEP[$idx]}"
             run_app_scripts "${APP_DESTROY[$idx]}"
             rc=$?
             if [ "$rc" -ne 0 ]; then
-                wizard_log_event "action=lab_lifecycle_finish operation=destroy scope=all state=failed component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
-                return "$rc"
+                wizard_log_event "action=lab_lifecycle_component_failed operation=destroy scope=all component=${APP_GUIDED_STEP[$idx]} exit_code=$rc"
+                error "Failed to destroy ${APP_LABEL[$idx]} (exit $rc); continuing with remaining components."
+                failed="${failed:+$failed, }${APP_LABEL[$idx]}"
+            else
+                destroyed="${destroyed:+$destroyed, }${APP_LABEL[$idx]}"
             fi
         done
     else
@@ -527,10 +546,20 @@ lab_destroy_deployments() {
             run_app_scripts "$script"
             rc=$?
             if [ "$rc" -ne 0 ]; then
-                wizard_log_event "action=lab_lifecycle_finish operation=destroy scope=selected state=failed component=$step exit_code=$rc"
-                return "$rc"
+                wizard_log_event "action=lab_lifecycle_component_failed operation=destroy scope=selected component=$step exit_code=$rc"
+                error "Failed to destroy ${GUIDED_STEP_LABEL[${_lab_lifecycle_indexes[$idx]}]} (exit $rc); continuing with remaining components."
+                failed="${failed:+$failed, }${GUIDED_STEP_LABEL[${_lab_lifecycle_indexes[$idx]}]}"
+            else
+                destroyed="${destroyed:+$destroyed, }${GUIDED_STEP_LABEL[${_lab_lifecycle_indexes[$idx]}]}"
             fi
         done
+    fi
+    if [ -n "$failed" ]; then
+        wizard_log_event "action=lab_lifecycle_finish operation=destroy scope=$scope state=failed failed=$failed"
+        error "Failed to destroy: $failed"
+        [ -n "$destroyed" ] && note "Destroyed successfully: $destroyed"
+        note "Retry the failed component(s) individually from the Apps menu."
+        return 1
     fi
     wizard_log_event "action=lab_lifecycle_finish operation=destroy scope=$scope state=complete"
     note "Lab deployments and data have been destroyed for the requested scope."
@@ -1869,7 +1898,7 @@ flight_plan_component_keys() {
         ssc) printf '%s\n' FORTIFY_SSC_CHART_VERSION FORTIFY_SSC_IMAGE_TAG ;;
         lim) printf '%s\n' FORTIFY_LIM_CHART_VERSION ;;
         sast) printf '%s\n' FORTIFY_SCSAST_CHART_VERSION FORTIFY_SCSAST_CTRL_IMAGE_TAG FORTIFY_SCSAST_WORKER_IMAGE_TAG ;;
-        dast) printf '%s\n' FORTIFY_SCDAST_CHART_VERSION ;;
+        dast) printf '%s\n' FORTIFY_SCDAST_CHART_VERSION FORTIFY_SCDAST_IMAGE_TAG ;;
         *) return 1 ;;
     esac
 }
@@ -2772,7 +2801,7 @@ env_section_keys() {
     case "$1" in
         identity) printf '%s\n' NAMESPACE ;;
         urls) printf '%s\n' SSC LIM SCDAST SCSAST SSC_URL LIM_URL LIM_API_URL SCDAST_URL SCSAST_URL SCSAST_CTRL_URL ;;
-        versions) printf '%s\n' FORTIFY_FLIGHT_PLAN FORTIFY_SSC_CHART_VERSION FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION FORTIFY_SCSAST_CTRL_IMAGE_TAG FORTIFY_SCSAST_WORKER_IMAGE_TAG FORTIFY_SCDAST_CHART_VERSION FORTIFY_LIM_CHART_VERSION ;;
+        versions) printf '%s\n' FORTIFY_FLIGHT_PLAN FORTIFY_SSC_CHART_VERSION FORTIFY_SSC_IMAGE_TAG FORTIFY_SCSAST_CHART_VERSION FORTIFY_SCSAST_CTRL_IMAGE_TAG FORTIFY_SCSAST_WORKER_IMAGE_TAG FORTIFY_SCDAST_CHART_VERSION FORTIFY_SCDAST_IMAGE_TAG FORTIFY_LIM_CHART_VERSION ;;
         database_versions) printf '%s\n' FORTIFY_MYSQL_CHART_VERSION FORTIFY_POSTGRES_CHART_VERSION FORTIFY_POSTGRES_IMAGE_TAG FORTIFY_MYSQL_IMAGE_TAG ;;
         credentials) printf '%s\n' DEFAULT_PASS SCDAST_SSC_USER SCDAST_SSC_PASS SCDAST_DB_OWNER_USER SCDAST_DB_OWNER_PASS SCDAST_DB_STANDARD_USER SCDAST_DB_STANDARD_PASS LIM_POOL_NAME LIM_POOL_PASS ;;
         *) return 1 ;;

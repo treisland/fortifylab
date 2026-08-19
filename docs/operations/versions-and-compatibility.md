@@ -188,9 +188,12 @@ catalog only after reviewing the candidate and testing the deployment path:
 ```
 
 Promoting a plan as `recommended` also makes it the catalog default and demotes
-the previous recommended plan to `known-good`. ScanCentral DAST Core and Scanner
-container images are currently chart-managed in this lab; add explicit `.env`
-keys before curating them as separate Flight Plan fields.
+the previous recommended plan to `known-good`. `FORTIFY_SCDAST_IMAGE_TAG` sets
+the ScanCentral DAST Core and Scanner container image tag independently of
+`FORTIFY_SCDAST_CHART_VERSION`, the same way SSC and ScanCentral SAST already
+separate chart version from image tag. LIM's container image remains
+chart-managed; add an explicit `.env` key before curating it as a separate
+Flight Plan field.
 
 ## Rollback expectations
 

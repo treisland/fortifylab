@@ -37,6 +37,10 @@ microk8s helm -n "$NAMESPACE" upgrade -i \
 	--timeout 15m \
 	--version "$FORTIFY_SCDAST_CHART_VERSION" \
 	--set imagePullSecrets[0].name=regcred \
+	--set api.image.tag="$FORTIFY_SCDAST_IMAGE_TAG" \
+	--set globalService.image.tag="$FORTIFY_SCDAST_IMAGE_TAG" \
+	--set utilityService.image.tag="$FORTIFY_SCDAST_IMAGE_TAG" \
+	--set upgradejob.image.tag="$FORTIFY_SCDAST_IMAGE_TAG" \
 	--set upgradejob.prepJob.image.repository=bitnamilegacy/kubectl \
 	--set appsettings.lIMSettings.limUrl="$LIM_URL" \
 	--set appsettings.sSCSettings.sSCRootUrl="$SSC_URL" \

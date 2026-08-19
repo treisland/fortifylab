@@ -1516,6 +1516,51 @@ class GuidedWizardTests(unittest.TestCase):
         )
         self.assertIn("Persistent data is preserved", result.stdout)
 
+    def test_lab_shutdown_continues_past_a_failed_component_and_reports_summary(self) -> None:
+        result = self.run_wizard_functions(
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; '
+            'case "$1" in *scdast/scanner*) return 1 ;; *) return 0 ;; esac; }; '
+            'wizard_log_event() { :; }; '
+            'lab_shutdown_deployments'
+        )
+        self.assertEqual(result.returncode, 1)
+        runs = [line.removeprefix("RUN:") for line in result.stdout.splitlines() if line.startswith("RUN:")]
+        self.assertEqual(
+            runs,
+            [
+                "apps/scdast/scanner/stop.sh",
+                "apps/scdast/core/stop.sh",
+                "apps/scsast/stop.sh",
+                "apps/lim/stop.sh",
+                "apps/ssc/stop.sh",
+                "apps/postgresql/stop.sh",
+                "apps/mysql/stop.sh",
+            ],
+        )
+        combined = result.stdout + result.stderr
+        self.assertIn("Failed to stop: ScanCentral DAST Scanner", combined)
+        self.assertIn("Stopped successfully:", combined)
+        self.assertIn("ScanCentral DAST Core", combined)
+        self.assertIn("MySQL", combined)
+
+    def test_lab_shutdown_stops_sample_apps_when_selected_profile_includes_them(self) -> None:
+        result = self.run_wizard_functions(
+            'FORTIFY_DEPLOYMENT_PROFILE=sample_apps; guided_apply_deployment_profile sample_apps; '
+            'run_app_scripts() { printf "RUN:%s\n" "$1"; }; '
+            'wizard_log_event() { :; }; '
+            'lab_shutdown_deployments selected'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runs = [line.removeprefix("RUN:") for line in result.stdout.splitlines() if line.startswith("RUN:")]
+        self.assertEqual(
+            runs,
+            [
+                "apps/samples/dvwa/stop.sh",
+                "apps/samples/webgoat/stop.sh",
+                "apps/samples/juice-shop/stop.sh",
+            ],
+        )
+
     def test_lab_start_runs_forward_and_verifies_each_component(self) -> None:
         result = self.run_wizard_functions(
             'guided_run_and_verify() { printf "VERIFY:%s:%s:%s\n" "$1" "$2" "$GUIDED_MODE_CONTEXT"; }; '
@@ -1564,6 +1609,9 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertEqual(
             runs,
             [
+                "apps/samples/dvwa/destroy.sh",
+                "apps/samples/webgoat/destroy.sh",
+                "apps/samples/juice-shop/destroy.sh",
                 "apps/scdast/core/destroy.sh apps/scdast/scanner/destroy.sh",
                 "apps/scsast/destroy.sh",
                 "apps/lim/destroy.sh",

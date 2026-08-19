@@ -26,6 +26,7 @@ FORTIFY_KEYS = (
     "FORTIFY_SCSAST_CTRL_IMAGE_TAG",
     "FORTIFY_SCSAST_WORKER_IMAGE_TAG",
     "FORTIFY_SCDAST_CHART_VERSION",
+    "FORTIFY_SCDAST_IMAGE_TAG",
     "FORTIFY_LIM_CHART_VERSION",
 )
 DATABASE_KEYS = (
@@ -43,6 +44,13 @@ DISCOVERY_REPOSITORIES = {
     "FORTIFY_SCDAST_CHART_VERSION": (
         "fortifydocker/helm-scancentral-dast-core",
         "fortifydocker/helm-scancentral-dast-scanner",
+    ),
+    "FORTIFY_SCDAST_IMAGE_TAG": (
+        "fortifydocker/scancentral-dast-api",
+        "fortifydocker/scancentral-dast-globalservice",
+        "fortifydocker/dast-scanner",
+        "fortifydocker/scancentral-dast-config",
+        "fortifydocker/wise",
     ),
     "FORTIFY_LIM_CHART_VERSION": ("fortifydocker/helm-lim",),
 }
@@ -157,6 +165,11 @@ def validate_catalog(catalog: Catalog) -> list[str]:
         issues.append("schema_version must be 1")
     if not catalog.flight_plans:
         issues.append("at least one flight plan is required")
+    default_plan = catalog.data.get("default_flight_plan", "")
+    if not default_plan:
+        issues.append("default_flight_plan is required")
+    elif default_plan not in catalog.flight_plans:
+        issues.append(f"default_flight_plan {default_plan!r} is not a defined flight plan")
     recommended = 0
     for plan_id, plan in catalog.flight_plans.items():
         status = plan.get("status", "")
@@ -176,12 +189,41 @@ def validate_catalog(catalog: Catalog) -> list[str]:
         for key in components:
             if key not in FORTIFY_KEYS:
                 issues.append(f"{plan_id}: unsupported component key {key}")
+        if status in {"recommended", "known-good"}:
+            blank = [key for key in FORTIFY_KEYS if key not in missing and not components.get(key)]
+            for key in blank:
+                issues.append(f"{plan_id}: {key} must not be blank for a {status} plan")
     if recommended != 1:
         issues.append(f"exactly one recommended Flight Plan is required; found {recommended}")
     for key in DATABASE_KEYS:
         if key not in catalog.database_defaults:
             issues.append(f"database_defaults: missing {key}")
     return issues
+
+
+def validate_catalog_warnings(catalog: Catalog) -> list[str]:
+    """Non-fatal review flags: a component version whose release line does not
+    match its plan's declared family. Some lag is expected and legitimate (a
+    vendor release not yet available for every component), so this never fails
+    `validate` or blocks promotion — it only makes the drift visible instead of
+    letting it hide behind a clean `validate` result."""
+    warnings: list[str] = []
+    for plan_id, plan in catalog.flight_plans.items():
+        family = str(plan.get("family", ""))
+        if not re.fullmatch(r"\d{2,4}\.\d+", family):
+            continue
+        components = plan.get("components", {})
+        for key in FORTIFY_KEYS:
+            value = str(components.get(key, ""))
+            if not value:
+                continue
+            component_family = release_family_from_tag(value)
+            if component_family and component_family != family:
+                warnings.append(
+                    f"{plan_id}: {key}={value!r} looks like release {component_family}, "
+                    f"not the plan's family {family!r}"
+                )
+    return warnings
 
 
 def print_list(catalog: Catalog, include_candidates: bool) -> int:
@@ -428,7 +470,13 @@ def family_tag_candidates(tags: list[dict[str, Any]], family: str) -> set[str]:
     candidates: set[str] = set()
     for record in tags:
         name = str(record.get("name", ""))
-        if name and name != "latest" and name.startswith(family):
+        if not name or name == "latest" or not name.startswith(family):
+            continue
+        # Anchor the match so family "24.4" cannot match a tag like "24.40.1":
+        # the character right after the family prefix must end the family
+        # segment (end of string, or a "." / "-" separator), not another digit.
+        boundary = name[len(family):len(family) + 1]
+        if boundary in ("", ".", "-"):
             candidates.add(name)
     return candidates
 
@@ -886,6 +934,8 @@ Safety:
     catalog = load_catalog(args.catalog)
     if args.command == "validate":
         issues = validate_catalog(catalog)
+        for warning in validate_catalog_warnings(catalog):
+            print(f"WARNING: {warning}", file=sys.stderr)
         if issues:
             for issue in issues:
                 print(f"ERROR: {issue}", file=sys.stderr)

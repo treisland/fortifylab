@@ -28,6 +28,8 @@ CURRENT_DIR="$( dirname "${BASH_SOURCE[0]}" )"
 microk8s helm -n "$NAMESPACE" upgrade -i sdast-scanner oci://registry-1.docker.io/fortifydocker/helm-scancentral-dast-scanner --version "$FORTIFY_SCDAST_CHART_VERSION" --timeout 60m \
 	--create-namespace \
 	--set imagePullSecrets[0].name=regcred \
+	--set image.tag="$FORTIFY_SCDAST_IMAGE_TAG" \
+	--set wise.image.tag="$FORTIFY_SCDAST_IMAGE_TAG" \
 	--set dastApiServiceURL=$SCDAST_URL \
 	--set serviceTokenSecretName=scdast-service-token \
 	--set allowNonTrustedServerCertificate=true \
