@@ -392,8 +392,21 @@ def registry_bearer_token(repo: str) -> str:
     if credential:
         raw = f"{credential[0]}:{credential[1]}".encode("utf-8")
         request.add_header("Authorization", "Basic " + base64.b64encode(raw).decode("ascii"))
-    with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - fixed Docker auth endpoint
-        data = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - fixed Docker auth endpoint
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            hint = (
+                "the found local Docker credential was rejected"
+                if credential
+                else "no local Docker credential was found (run `docker login`)"
+            )
+            raise urllib.error.URLError(
+                f"Docker registry token request for {repo} was denied ({hint}); "
+                f"verify the account has the required Fortify entitlement"
+            ) from exc
+        raise
     token = str(data.get("token") or data.get("access_token") or "")
     if not token:
         raise urllib.error.URLError("Docker registry token response did not include a token")
@@ -415,8 +428,16 @@ def registry_tags(repo: str, page_size: int = 1000, fixture_dir: Path | None = N
         query = urllib.parse.urlencode({"n": str(page_size), **({"last": last} if last else {})})
         request = urllib.request.Request(f"https://registry-1.docker.io/v2/{repo}/tags/list?{query}")
         request.add_header("Authorization", f"Bearer {token}")
-        with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - fixed Docker registry endpoint
-            data = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - fixed Docker registry endpoint
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code in {401, 403}:
+                raise urllib.error.URLError(
+                    f"Docker registry denied tags/list for {repo} even with an issued token; "
+                    f"verify the logged-in account has the required Fortify entitlement"
+                ) from exc
+            raise
         page_tags = [str(tag) for tag in data.get("tags", []) if tag]
         tags.extend(page_tags)
         if len(page_tags) < page_size:
