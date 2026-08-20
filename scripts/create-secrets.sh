@@ -84,8 +84,24 @@ configure_microk8s_ingress_default_tls() {
     fi
   else
     echo "⚠️ This MicroK8s ingress addon build does not support --default-ssl-certificate."
-    echo "   Traefik's default certificate cannot be refreshed automatically here; if it"
-    echo "   still serves TRAEFIK DEFAULT CERT after a cert rotation, restart it manually."
+    echo "   Best-effort fallback: restarting Traefik so it re-reads its mounted certificate."
+    # fortify_traefik_rollout_restart doesn't depend on the addon flag at
+    # all -- it finds Traefik by container image and does a plain rollout
+    # restart, so it's still worth trying here rather than telling the
+    # operator to "restart it manually" with no command. This branch stays
+    # best-effort either way (unlike the two branches above, it does not
+    # set TRAEFIK_DEFAULT_CERT_REFRESH_FAILED): on an addon build that
+    # never exposed --default-ssl-certificate, a successful restart still
+    # can't confirm the addon is serving this Secret as its default, so
+    # treating a failed restart here as a hard failure would block secret
+    # creation on older tracks over something we were never able to fix.
+    if fortify_traefik_rollout_restart; then
+      echo "✅ Restarted MicroK8s ingress (Traefik). If it still serves TRAEFIK DEFAULT CERT,"
+      echo "   this addon build has no supported way to set a default certificate."
+    else
+      echo "⚠️ Could not find or restart the MicroK8s ingress (Traefik) workload."
+      echo "   If Traefik still serves TRAEFIK DEFAULT CERT, restart it manually."
+    fi
   fi
 }
 
