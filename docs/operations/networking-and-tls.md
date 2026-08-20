@@ -45,11 +45,21 @@ Traefik-native configuration:
 
 That default-certificate hook is what prevents browsers from seeing
 `TRAEFIK DEFAULT CERT` for valid lab hostnames. If certificates were regenerated
-or the ingress addon was recreated, rerun the Secrets step or run:
+or the ingress addon was recreated, rerun the Secrets step, or run the same
+command it uses:
 
 ```bash
 microk8s enable ingress --default-ssl-certificate fortify/tls
 ```
+
+Some MicroK8s ingress addon builds do not expose `--default-ssl-certificate`
+at all (the Secrets step detects this via `microk8s enable ingress --help`
+and tells you so). On those builds the command above will not work; the
+Secrets step instead falls back to a plain `kubectl rollout restart` of the
+Traefik workload so it re-reads its mounted certificate. If that doesn't
+clear a stale `TRAEFIK DEFAULT CERT`, this addon build has no supported way
+to set a default certificate, and TLS routing depends entirely on
+per-Ingress TLS blocks resolving correctly instead.
 
 Then verify the served certificate with SNI:
 

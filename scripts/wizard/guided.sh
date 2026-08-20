@@ -43,6 +43,25 @@ GUIDED_STEP_TIMEOUT=()
 GUIDED_STEP_MANUAL=()
 GUIDED_STEP_PROBE=()
 GUIDED_STEP_HELP=()
+
+# Live run-time status board (see guided_wait_render). Keyed by step id, not
+# array index, so callers can touch a step's state without it needing to be a
+# member of whatever profile happens to be active in GUIDED_STEP_ID right now.
+#
+# Must be -gA (global), not just -A: this file is sourced from inside
+# source_wizard_module() in start_wizard.sh, a bash function. A bare
+# `declare -A` inside a function creates a variable local to that function's
+# call frame, which is destroyed the instant sourcing finishes. Every
+# subsequent `GUIDED_STEP_BOARD_STATE[$id]=...` assignment then silently
+# auto-vivifies a *new*, plain (non-associative) global array instead --
+# and since bash evaluates non-numeric subscripts on a plain array as
+# arithmetic (an unrecognized name reads as 0), every string key collapses
+# onto index 0. The practical symptom was every row on the status board
+# showing the same (last-write) state, which reads as "everything pending".
+declare -gA GUIDED_STEP_BOARD_STATE=()
+declare -gA GUIDED_STEP_STARTED_AT=()
+declare -gA GUIDED_STEP_ELAPSED_FINAL=()
+
 GUIDED_DEPLOYMENT_PROFILE="${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
 GUIDED_DEPLOYMENT_PROFILE_LABEL="Full lab"
 GUIDED_DEPLOYMENT_COMPONENTS="full_lab"
@@ -240,6 +259,7 @@ guided_profile_menu() {
     printf '  5. Full lab\n'
     printf '  6. Sample applications only\n'
     printf '  7. Custom\n\n'
+    printf '  r. Return\n\n'
     guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
     printf 'Current saved profile:\n'
     guided_print_profile_summary
@@ -253,6 +273,7 @@ guided_profile_menu() {
         5|"") profile=full_lab ;;
         6) fortify_lab_show_action_warning vulnerable-sample; profile=sample_apps ;;
         7) guided_custom_component_prompt; return $? ;;
+        [Rr]|[Qq]) return 1 ;;
         *) error "Invalid profile selection"; sleep 1; return 1 ;;
     esac
     guided_apply_deployment_profile "$profile"
@@ -765,6 +786,8 @@ guided_status_render() {
         complete) printf '%scomplete%s' "$GREEN" "$RESET" ;;
         in_progress) printf '%sin progress%s' "$YELLOW" "$RESET" ;;
         manual) printf '%smanual%s' "$DIM" "$RESET" ;;
+        failed) printf '%sfailed%s' "$RED" "$RESET" ;;
+        skipped) printf '%sskipped%s' "$DIM" "$RESET" ;;
         *) printf '%spending%s' "$YELLOW" "$RESET" ;;
     esac
 }
@@ -795,6 +818,10 @@ guided_collect_step_statuses() {
         fi
         state=$(guided_step_live_state "$id")
         GUIDED_STEP_STATUS_CACHE[$idx]="$state"
+        # Also populate the persistent board from this same derivation pass,
+        # so resume's summary and the board guided_deployment shows next
+        # can't disagree with each other.
+        guided_board_touch "$id" "$state"
         case "$state" in
             complete) GUIDED_STEP_COMPLETE_CACHE[$idx]=1 ;;
             *) GUIDED_STEP_COMPLETE_CACHE[$idx]=0 ;;
@@ -822,6 +849,84 @@ guided_cached_step_complete() {
         return
     fi
     guided_step_live_complete "${GUIDED_STEP_ID[$idx]}"
+}
+
+# ---- Persistent run status board -------------------------------------------
+# A step only appears as a board row once it has been reset/touched below; the
+# wait-loop renderer skips ids with no board entry. That means a full guided
+# run (which resets the whole GUIDED_STEP_ID list up front) shows every step,
+# while a narrower caller that only touches a handful of ids naturally shows
+# just those rows instead of a misleading "pending" line for unrelated steps.
+
+guided_board_reset() {
+    # Reuse guided_step_live_state's complete/in_progress/manual/pending
+    # classification rather than re-deriving a narrower copy here. The
+    # earlier inline version had no in_progress branch, so any step that was
+    # genuinely mid-flight from a prior/interrupted session (e.g. resume)
+    # was misreported as pending until this session happened to touch it.
+    local ids=("$@") id
+    [ "${#ids[@]}" -gt 0 ] || ids=("${GUIDED_STEP_ID[@]}")
+    GUIDED_STEP_BOARD_STATE=()
+    GUIDED_STEP_STARTED_AT=()
+    GUIDED_STEP_ELAPSED_FINAL=()
+    for id in "${ids[@]}"; do
+        GUIDED_STEP_BOARD_STATE[$id]=$(guided_step_live_state "$id")
+    done
+}
+
+guided_board_touch() {
+    local id="$1" state="$2"
+    GUIDED_STEP_BOARD_STATE[$id]="$state"
+    case "$state" in
+        in_progress)
+            GUIDED_STEP_STARTED_AT[$id]="$SECONDS"
+            ;;
+        complete|failed)
+            if [ -n "${GUIDED_STEP_STARTED_AT[$id]:-}" ]; then
+                GUIDED_STEP_ELAPSED_FINAL[$id]=$((SECONDS - GUIDED_STEP_STARTED_AT[$id]))
+            fi
+            ;;
+    esac
+}
+
+guided_board_duration() {
+    local id="$1" state="${GUIDED_STEP_BOARD_STATE[$1]:-pending}"
+    case "$state" in
+        in_progress)
+            if [ -n "${GUIDED_STEP_STARTED_AT[$id]:-}" ]; then
+                printf '%ss' "$((SECONDS - GUIDED_STEP_STARTED_AT[$id]))"
+            else
+                printf -- '--'
+            fi
+            ;;
+        complete|failed)
+            if [ -n "${GUIDED_STEP_ELAPSED_FINAL[$id]:-}" ]; then
+                printf '%ss' "${GUIDED_STEP_ELAPSED_FINAL[$id]}"
+            else
+                printf -- '--'
+            fi
+            ;;
+        *) printf -- '--' ;;
+    esac
+}
+
+guided_board_row_line() {
+    local idx="$1" active_id="$2" id label state marker
+    id="${GUIDED_STEP_ID[$idx]}"
+    label="${GUIDED_STEP_LABEL[$idx]}"
+    state="${GUIDED_STEP_BOARD_STATE[$id]:-pending}"
+    marker=' '
+    [ "$id" = "$active_id" ] && marker='>'
+    printf '%s %-30s %-14s %s' "$marker" "$label" "$(guided_status_render "$state")" "$(guided_board_duration "$id")"
+}
+
+guided_board_render_rows() {
+    local active_id="$1" idx row_id
+    for idx in "${!GUIDED_STEP_ID[@]}"; do
+        row_id="${GUIDED_STEP_ID[$idx]}"
+        [ -n "${GUIDED_STEP_BOARD_STATE[$row_id]+set}" ] || continue
+        printf '  %s\n' "$(guided_board_row_line "$idx" "$active_id")"
+    done
 }
 
 guided_step_in_progress() {
@@ -1142,17 +1247,16 @@ guided_wait_screen_leave() {
 
 guided_wait_render() {
     local id="$1" label="$2" elapsed="$3" remaining="$4" interval="$5" timeout="$6" probe="$7"
-    printf '\n%s%s%s\n' "$BOLD" "Verifying $label" "$RESET"
+    printf '\n%s%s%s\n' "$BOLD" "Guided deployment" "$RESET"
+    printf '  %s\n' "$(guided_mode_context_text "$GUIDED_MODE_CONTEXT")"
     hr
-    printf '\n  State:   %s\n' "$(guided_step_live_status "$id")"
+    guided_board_render_rows "$id"
+    printf '\n%s%s%s\n' "$BOLD" "Now: $label" "$RESET"
+    printf '  State:   %s\n' "$(guided_step_live_status "$id")"
     printf '  Probe:   %s\n' "$probe"
     printf '  Elapsed: %ss' "$elapsed"
     [ "$timeout" -gt 0 ] && printf ' / %ss' "$timeout"
     printf '\n  Detail:  %s\n\n' "$(guided_step_progress_message "$id")"
-    section "Pods"
-    guided_print_pods "$id"
-    section "Recent events"
-    guided_print_recent_events
     if declare -F guided_deployment_footer >/dev/null 2>&1; then
         guided_deployment_footer
     else
@@ -1191,6 +1295,7 @@ guided_wait_for_step() {
 
     if guided_step_is_manual "$id"; then
         GUIDED_WAIT_LAST_STATE="manual"
+        guided_board_touch "$id" manual
         note "$label needs operator action; automatic verification is not available."
         return 0
     fi
@@ -1198,9 +1303,11 @@ guided_wait_for_step() {
     guided_wait_screen_enter
 
     started=$SECONDS
+    guided_board_touch "$id" in_progress
     while true; do
         if guided_step_complete "$id"; then
             GUIDED_WAIT_LAST_STATE="complete"
+            guided_board_touch "$id" complete
             guided_wait_screen_leave
             wizard_log_event "action=verification_finish step=$id probe=$probe state=complete elapsed=$((SECONDS - started))"
             note "$label verified ready."
@@ -1211,6 +1318,7 @@ guided_wait_for_step() {
         if [ "$timeout" -gt 0 ] && [ "$elapsed" -ge "$timeout" ]; then
             GUIDED_WAIT_LAST_STATE="failed"
             GUIDED_WAIT_LAST_FAILURE="$label did not verify ready within ${timeout}s; probe $probe is still failing."
+            guided_board_touch "$id" failed
             error "$GUIDED_WAIT_LAST_FAILURE"
             guided_wait_screen_leave
             wizard_log_event "action=verification_finish step=$id probe=$probe state=failed elapsed=$elapsed detail=$GUIDED_WAIT_LAST_FAILURE"
@@ -1232,7 +1340,7 @@ guided_wait_for_step() {
                     wizard_log_event "action=user_control step=$id control=retry"
                     return 4
                     ;;
-                [Ii])
+                ""|[Ii])
                     GUIDED_WAIT_LAST_STATE="interactive"
                     guided_wait_screen_leave
                     note "Interactive control requested."
@@ -1278,6 +1386,12 @@ guided_wait_for_step() {
                     note "No wizard state or secrets were written. Live resources will be detected when you resume."
                     wizard_log_event "action=user_control step=$id control=quit_safely"
                     return 3
+                    ;;
+                *)
+                    guided_wait_screen_leave
+                    error "Unrecognized key; see options above."
+                    sleep 1
+                    guided_wait_screen_enter
                     ;;
             esac
         fi
@@ -1438,10 +1552,12 @@ guided_run_and_verify() {
     section "$label"
     started=$SECONDS
     GUIDED_WAIT_LAST_STATE="running"
+    guided_board_touch "$id" in_progress
     wizard_log_event "action=step_enter step=$id label=$label mode=${GUIDED_MODE_CONTEXT:-unknown} profile=$(guided_step_action_profile "$id")"
     if ! run_deployment_operation "$id"; then
         GUIDED_WAIT_LAST_STATE="failed"
         GUIDED_WAIT_LAST_FAILURE="$label operation failed before verification."
+        guided_board_touch "$id" failed
         error "$GUIDED_WAIT_LAST_FAILURE"
         error "The step is still incomplete. Correct the issue, then choose Retry."
         guided_repair_recommendation "$id" >&2
@@ -1488,11 +1604,15 @@ guided_countdown() {
             "$next_num" "$total" "$next_label" "$remaining"
         if read -rsn1 -t 1 control; then
             case "$control" in
-                [Ii])
+                ""|[Ii])
                     printf '\r\033[K'
                     GUIDED_AUTO_ADVANCE=0
                     note "[$next_num/$total] Auto-advance paused: staying interactive at $next_label."
                     return 1
+                    ;;
+                *)
+                    printf '\r\033[K'
+                    error "Unrecognized key; see options above."
                     ;;
             esac
         fi
@@ -1661,13 +1781,14 @@ guided_deployment_menu() {
     fi
     GUIDED_MODE_CONTEXT=fresh
     guided_profile_menu || return
-    title "Guided deployment mode"
-    printf '\n  %s\n' "$(guided_mode_context_text fresh)"
-    guided_print_profile_summary
-    section "Flight Plan"
-    flight_plan_current_status
-    release_overlay_report
-    cat <<EOF
+    while true; do
+        title "Guided deployment mode"
+        printf '\n  %s\n' "$(guided_mode_context_text fresh)"
+        guided_print_profile_summary
+        section "Flight Plan"
+        flight_plan_current_status
+        release_overlay_report
+        cat <<EOF
 
   1. Interactive guided deployment
   2. Auto-advance after each verified step
@@ -1675,17 +1796,51 @@ guided_deployment_menu() {
   Auto-advance still pauses for manual configuration and lets you press i
   during wait screens or countdowns to take interactive control.
 
+  r. Return
 EOF
-    ask choice "Select:"
-    case "$choice" in
-        2) GUIDED_AUTO_ADVANCE=1; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=auto"; guided_deployment 0 ;;
-        *) GUIDED_AUTO_ADVANCE=0; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=fresh"; guided_deployment 0 ;;
-    esac
+        ask choice "Select:"
+        case "$choice" in
+            1) GUIDED_AUTO_ADVANCE=0; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=fresh"; guided_deployment 0; return ;;
+            2)
+                printf '\n'
+                note "Auto-advance readiness:"
+                prereqs_status_table
+                printf '  %-24s %s\n' "Configuration and license" "$(prereq_status inputs_complete)"
+                if [ "$(prereqs_ready_count)" -lt 4 ] || ! inputs_complete; then
+                    printf '\n'
+                    note "Auto-advance will pause for interactive input until the items above are ready."
+                fi
+                confirm "This will deploy $GUIDED_DEPLOYMENT_PROFILE_LABEL unattended, stopping only for required manual input or a failure. Continue?" || { note "Auto-advance not started."; continue; }
+                GUIDED_AUTO_ADVANCE=1
+                GUIDED_MODE_CONTEXT=fresh
+                wizard_log_event "action=guided_mode_start mode=auto"
+                guided_deployment 0
+                return
+                ;;
+            [Rr]|[Qq]) return ;;
+            *) error "Invalid selection"; sleep 1 ;;
+        esac
+    done
 }
 
 guided_deployment() {
-    local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label transition_reason completed_idx
+    local idx="${1:-0}" skip_board_reset="${2:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label transition_reason completed_idx
     fortify_lab_require_acknowledgement || return 1
+    # guided_board_reset re-derives live state for every step, and for any
+    # not-yet-complete step that now includes an in_progress probe
+    # (statefulset_in_progress etc.), each of which shells out to kubectl
+    # up to twice. resume_repair() already just did this exact derivation,
+    # with visible per-step progress, via guided_collect_step_statuses. If
+    # we unconditionally reset again here, entering the step loop from
+    # Resume/Repair means silently repeating every one of those kubectl
+    # calls a second time before the first screen can draw -- that's the
+    # multi-kubectl-call, no-feedback pause after pressing Enter on the
+    # resume summary. Callers that already primed the board (resume_repair)
+    # pass skip_board_reset=1; callers starting a fresh session (where the
+    # board is empty anyway) still get the normal full reset.
+    if [ "$skip_board_reset" != 1 ]; then
+        guided_board_reset
+    fi
     wizard_log_event "action=guided_session_start mode=${GUIDED_MODE_CONTEXT:-fresh} start_index=$idx auto_advance=${GUIDED_AUTO_ADVANCE:-0}"
     while [ "$idx" -lt "$total" ]; do
         id="${GUIDED_STEP_ID[$idx]}"
@@ -1693,6 +1848,9 @@ guided_deployment() {
         if [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && ! guided_step_is_manual "$id"; then
             transition_reason="already complete"
             if ! guided_step_live_complete "$id"; then
+                if [ "$id" = prereqs ]; then
+                    printf '  Auto-advance paused: host prerequisites need attention.\n'
+                fi
                 guided_run_and_verify "$id" "${GUIDED_STEP_LABEL[$idx]}"
                 result=$?
                 case "$result" in
@@ -1714,6 +1872,12 @@ guided_deployment() {
 
         title "Guided deployment - Step $((idx + 1)) of $total"
         printf '\n  %s\n' "$(guided_mode_context_text "$GUIDED_MODE_CONTEXT")"
+        # Keep the persistent status board visible on the normal per-step
+        # screen, not just while a step is actively being watched/verified
+        # (guided_wait_render) -- otherwise resume/repair and interactive
+        # navigation only ever show this one step's single-line status.
+        guided_board_render_rows "$id"
+        hr
         printf '\n  %s%s%s\n\n  %s\n' "$BOLD" "${GUIDED_STEP_LABEL[$idx]}" "$RESET" "${GUIDED_STEP_HELP[$idx]}"
         printf '  Step type: %s\n' "$(guided_step_action_profile "$id")"
         printf '\n  Current status: %s\n' "$(guided_step_live_status "$id")"
@@ -1798,6 +1962,7 @@ guided_deployment() {
             [Ss])
                 if guided_step_is_optional "$id"; then
                     GUIDED_WAIT_LAST_STATE="skipped"
+                    guided_board_touch "$id" skipped
                     note "Skipped optional step; you can return to it later."
                     wizard_log_event "action=step_exit step=$id state=skipped"
                     idx=$((idx + 1))
@@ -1818,7 +1983,7 @@ guided_deployment() {
 
 
 resume_repair() {
-    local idx id start=0 found=0 total="${#GUIDED_STEP_ID[@]}"
+    local idx start=0 found=0 total="${#GUIDED_STEP_ID[@]}"
     fortify_lab_require_acknowledgement || return 1
     GUIDED_MODE_CONTEXT=resume
     guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
@@ -1836,10 +2001,12 @@ resume_repair() {
     guided_collect_step_statuses
     echo
     section "Deployment state"
+    # Render from the same GUIDED_STEP_BOARD_STATE that guided_deployment's
+    # per-step screen and wait screen use, rather than a separate printed
+    # loop over the status cache -- one state, one rendering, so this
+    # summary and the board it hands off to can't drift out of sync.
+    guided_board_render_rows ""
     for idx in "${!GUIDED_STEP_ID[@]}"; do
-        id="${GUIDED_STEP_ID[$idx]}"
-        printf '  %2d. %-30s %s
-' "$((idx + 1))" "${GUIDED_STEP_LABEL[$idx]}" "$(guided_cached_step_status "$idx")"
         if [ "$found" -eq 0 ] && [ "${GUIDED_STEP_OPTIONAL[$idx]}" -eq 0 ] && ! guided_cached_step_complete "$idx"; then
             start="$idx"
             found=1
@@ -1849,7 +2016,10 @@ resume_repair() {
     note "Guided mode will start at the first incomplete required step; completed steps remain available for repair."
     note "$(guided_repair_recommendation "${GUIDED_STEP_ID[$start]}")"
     press_any
-    guided_deployment "$start"
+    # guided_collect_step_statuses above already derived and touched live
+    # state for every step (with visible progress); tell guided_deployment
+    # not to silently redo that same set of kubectl calls on entry.
+    guided_deployment "$start" 1
 }
 
 express_step_runnable() {
@@ -1892,6 +2062,7 @@ deploy_from_scratch() {
     express_deployment_plan
     confirm "Proceed with Express deployment for $GUIDED_DEPLOYMENT_PROFILE_LABEL?" || return
 
+    guided_board_reset
     for idx in "${!GUIDED_STEP_ID[@]}"; do
         step="${GUIDED_STEP_ID[$idx]}"
         express_step_runnable "$step" || continue

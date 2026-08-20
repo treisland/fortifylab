@@ -428,6 +428,12 @@ lab_start_deployments() {
         note "Starting all lab workloads in dependency order and verifying readiness after each component."
         wizard_log_event "action=lab_lifecycle_start operation=start scope=all mode=non_destructive"
         GUIDED_MODE_CONTEXT=lifecycle
+        local -a _lifecycle_ids=()
+        for idx in "${!APP_LABEL[@]}"; do
+            app_index_in_full_lifecycle "$idx" || continue
+            _lifecycle_ids+=("${APP_GUIDED_STEP[$idx]}")
+        done
+        guided_board_reset "${_lifecycle_ids[@]}"
         for idx in "${!APP_LABEL[@]}"; do
             app_index_in_full_lifecycle "$idx" || continue
             guided_run_and_verify "${APP_GUIDED_STEP[$idx]}" "${APP_LABEL[$idx]}"
@@ -444,6 +450,11 @@ lab_start_deployments() {
         wizard_log_event "action=lab_lifecycle_start operation=start scope=selected profile=$GUIDED_DEPLOYMENT_PROFILE mode=non_destructive"
         GUIDED_MODE_CONTEXT=lifecycle
         mapfile -t _lab_lifecycle_indexes < <(lab_lifecycle_selected_step_indexes)
+        local -a _lifecycle_ids=()
+        for idx in "${_lab_lifecycle_indexes[@]}"; do
+            _lifecycle_ids+=("${GUIDED_STEP_ID[$idx]}")
+        done
+        guided_board_reset "${_lifecycle_ids[@]}"
         for idx in "${_lab_lifecycle_indexes[@]}"; do
             step="${GUIDED_STEP_ID[$idx]}"
             label="${GUIDED_STEP_LABEL[$idx]}"

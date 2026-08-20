@@ -47,3 +47,4 @@ apps/scdast/scanner/values_test.yaml
 # Local/private runbooks
 runbooks/local/*
 !runbooks/local/README.md
+fortify-sast-package.zip
