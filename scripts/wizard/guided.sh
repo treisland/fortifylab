@@ -1824,9 +1824,23 @@ EOF
 }
 
 guided_deployment() {
-    local idx="${1:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label transition_reason completed_idx
+    local idx="${1:-0}" skip_board_reset="${2:-0}" choice id total="${#GUIDED_STEP_ID[@]}" result next_label transition_reason completed_idx
     fortify_lab_require_acknowledgement || return 1
-    guided_board_reset
+    # guided_board_reset re-derives live state for every step, and for any
+    # not-yet-complete step that now includes an in_progress probe
+    # (statefulset_in_progress etc.), each of which shells out to kubectl
+    # up to twice. resume_repair() already just did this exact derivation,
+    # with visible per-step progress, via guided_collect_step_statuses. If
+    # we unconditionally reset again here, entering the step loop from
+    # Resume/Repair means silently repeating every one of those kubectl
+    # calls a second time before the first screen can draw -- that's the
+    # multi-kubectl-call, no-feedback pause after pressing Enter on the
+    # resume summary. Callers that already primed the board (resume_repair)
+    # pass skip_board_reset=1; callers starting a fresh session (where the
+    # board is empty anyway) still get the normal full reset.
+    if [ "$skip_board_reset" != 1 ]; then
+        guided_board_reset
+    fi
     wizard_log_event "action=guided_session_start mode=${GUIDED_MODE_CONTEXT:-fresh} start_index=$idx auto_advance=${GUIDED_AUTO_ADVANCE:-0}"
     while [ "$idx" -lt "$total" ]; do
         id="${GUIDED_STEP_ID[$idx]}"
@@ -2002,7 +2016,10 @@ resume_repair() {
     note "Guided mode will start at the first incomplete required step; completed steps remain available for repair."
     note "$(guided_repair_recommendation "${GUIDED_STEP_ID[$start]}")"
     press_any
-    guided_deployment "$start"
+    # guided_collect_step_statuses above already derived and touched live
+    # state for every step (with visible progress); tell guided_deployment
+    # not to silently redo that same set of kubectl calls on entry.
+    guided_deployment "$start" 1
 }
 
 express_step_runnable() {
