@@ -98,7 +98,9 @@ and lists useful local paths such as `.env`, `.env.backups/`, `certs/`, the
 license input, diagnostics directory, and wizard log. Set `FORTIFY_NO_BANNER=1`
 to suppress the banner or `NO_COLOR=1` for plain terminal output.
 
-Inside the wizard, the main menu is organized by task:
+Inside the wizard, the main menu opens on a small Essentials screen (Deploy,
+Lab lifecycle controls, Configuration editor, Logs), plus **m. More tools**
+for everything else. More tools is organized by task:
 
 - **Deploy:** Guided deployment, Express deployment, Resume or repair,
   individual component management, vulnerable sample applications, and
@@ -178,8 +180,8 @@ Resume later. Rendering status performs read-only file and Kubernetes queries;
 it never installs, upgrades, generates credentials, or rotates TLS material.
 
 The Dashboard is the lab's operational Web UI. Open
-`https://dashboard.$DOMAIN`, then use **Kubernetes Dashboard access** from the
-main menu, or **Advanced setup and configuration → Configure DNS, SSC token,
+`https://dashboard.$DOMAIN`, then use **More tools → Kubernetes Dashboard
+access** from the main menu, or **Advanced setup and configuration → Configure DNS, SSC token,
 LIM, and Dashboard access → Kubernetes Dashboard access**, to generate a
 one-hour token. Choose view-only access for routine monitoring. Administrator
 access is offered separately with a warning because it can modify or delete

@@ -130,8 +130,103 @@ fortifylab_first_time_welcome_menu() {
 # ============================================================
 
 main_menu() {
+    local choice
     while true; do
         title "Fortify Lab"
+        fortify_lab_menu_banner
+        section "Status"
+        printf '  %s\n' "$(status_prereqs)"
+        printf '  %s\n' "$(status_license)"
+        printf '  %s\n' "$(status_cluster)"
+        status_user
+
+        section "Essentials"
+        echo "  0. Initial setup and readiness"
+        echo "  1. Deploy (guided, express, resume)"
+        echo "  2. Lab lifecycle controls (start / stop / status)"
+        echo "  3. Configuration editor (.env)"
+        echo "  4. Logs (stream / tail / wizard log)"
+
+        echo
+        echo "  m. More tools (all wizard menus)"
+        echo "  q. Quit"
+        echo
+        ask choice "Select:"
+
+        case "$choice" in
+            0) setup_menu ;;
+            1) essentials_deploy_menu ;;
+            2) lab_lifecycle_menu ;;
+            3) edit_env ;;
+            4) essentials_logs_menu ;;
+            [Mm]) wizard_more_menu ;;
+            [Qq]) clear; exit 0 ;;
+            *) error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# Small front-screen shortcut for the three deployment entry points. Nothing
+# here is new: it just dispatches to the same functions More tools uses.
+essentials_deploy_menu() {
+    local choice
+    while true; do
+        title "Deploy"
+        echo
+        echo "  1. Guided deployment (recommended)"
+        echo "  2. Express deployment"
+        echo "  3. Resume or repair deployment"
+        echo
+        echo "  r. Return"
+        echo "  q. Quit"
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) guided_deployment_menu ;;
+            2) deploy_from_scratch ;;
+            3) resume_repair ;;
+            [Rr]) return ;;
+            [Qq]) clear; exit 0 ;;
+            *) error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# Small front-screen shortcut for the three log views. Nothing here is new:
+# it just dispatches to the same functions More tools uses.
+essentials_logs_menu() {
+    local choice
+    while true; do
+        title "Logs"
+        echo
+        echo "  1. Stream logs (all pods)"
+        echo "  2. Tail one pod"
+        echo "  3. View wizard log"
+        echo
+        echo "  r. Return"
+        echo "  q. Quit"
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) stream_logs ;;
+            2) logs_menu ;;
+            3) wizard_log_viewer ;;
+            [Rr]) return ;;
+            [Qq]) clear; exit 0 ;;
+            *) error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# The full menu the wizard showed before Essentials existed. Numbering and
+# every entry are unchanged on purpose: docs/runbooks that reference a
+# specific "More tools" option number stay correct, and this remains the one
+# place every wizard capability is reachable without guessing which
+# Essentials shortcut it might be under.
+wizard_more_menu() {
+    local choice
+    while true; do
+        title "Fortify Lab - More tools"
         fortify_lab_menu_banner
         section "Status"
         printf '  %s\n' "$(status_prereqs)"
@@ -169,6 +264,7 @@ main_menu() {
         echo "  20. View wizard log"
 
         echo
+        echo "   r. Return to essentials"
         echo "   q. Quit"
         echo
         ask choice "Select:"
@@ -195,6 +291,7 @@ main_menu() {
            18)  help_center ;;
            19)  operational_guidance_menu ;;
            20)  wizard_log_viewer ;;
+            [Rr]) return ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;
         esac

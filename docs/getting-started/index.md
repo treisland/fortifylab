@@ -76,7 +76,7 @@ domain, and deployment profile. Use it to confirm where generated files and
 logs live before you deploy. From there, start Guided deployment or continue to
 the main menu.
 
-From the main menu choose one deployment mode:
+From the main menu, choose **1. Deploy**, then pick one deployment mode:
 
 === "Guided (recommended)"
 
@@ -150,8 +150,8 @@ unhealthy dependency is more useful than restarting every pod.
 ## 3. Resume or repair safely
 
 If a step fails, read its named dependency and correct that condition. Then
-retry the same Guided step, or quit and later choose **3. Resume or repair
-deployment**. Resume inspects current files and live Kubernetes resources,
+retry the same Guided step, or quit and later choose **1. Deploy → 3. Resume
+or repair deployment**. Resume inspects current files and live Kubernetes resources,
 starts at the first incomplete required step, and does not store a separate
 progress file, password, or token.
 
@@ -195,8 +195,8 @@ Dashboard and SSC do not present `TRAEFIK DEFAULT CERT`. Follow
 
 ## 5. Open Kubernetes Dashboard
 
-Open `https://dashboard.<domain>`, then choose **5. Kubernetes Dashboard
-access** in the main menu. The same workflow is also available under
+Open `https://dashboard.<domain>`, then choose **m. More tools → 7. Kubernetes
+Dashboard access** in the main menu. The same workflow is also available under
 **Advanced setup and configuration → Configure DNS, SSC token, LIM, and
 Dashboard access**:
 
