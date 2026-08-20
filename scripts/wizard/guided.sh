@@ -47,9 +47,20 @@ GUIDED_STEP_HELP=()
 # Live run-time status board (see guided_wait_render). Keyed by step id, not
 # array index, so callers can touch a step's state without it needing to be a
 # member of whatever profile happens to be active in GUIDED_STEP_ID right now.
-declare -A GUIDED_STEP_BOARD_STATE=()
-declare -A GUIDED_STEP_STARTED_AT=()
-declare -A GUIDED_STEP_ELAPSED_FINAL=()
+#
+# Must be -gA (global), not just -A: this file is sourced from inside
+# source_wizard_module() in start_wizard.sh, a bash function. A bare
+# `declare -A` inside a function creates a variable local to that function's
+# call frame, which is destroyed the instant sourcing finishes. Every
+# subsequent `GUIDED_STEP_BOARD_STATE[$id]=...` assignment then silently
+# auto-vivifies a *new*, plain (non-associative) global array instead --
+# and since bash evaluates non-numeric subscripts on a plain array as
+# arithmetic (an unrecognized name reads as 0), every string key collapses
+# onto index 0. The practical symptom was every row on the status board
+# showing the same (last-write) state, which reads as "everything pending".
+declare -gA GUIDED_STEP_BOARD_STATE=()
+declare -gA GUIDED_STEP_STARTED_AT=()
+declare -gA GUIDED_STEP_ELAPSED_FINAL=()
 
 GUIDED_DEPLOYMENT_PROFILE="${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
 GUIDED_DEPLOYMENT_PROFILE_LABEL="Full lab"
@@ -807,6 +818,10 @@ guided_collect_step_statuses() {
         fi
         state=$(guided_step_live_state "$id")
         GUIDED_STEP_STATUS_CACHE[$idx]="$state"
+        # Also populate the persistent board from this same derivation pass,
+        # so resume's summary and the board guided_deployment shows next
+        # can't disagree with each other.
+        guided_board_touch "$id" "$state"
         case "$state" in
             complete) GUIDED_STEP_COMPLETE_CACHE[$idx]=1 ;;
             *) GUIDED_STEP_COMPLETE_CACHE[$idx]=0 ;;
@@ -844,19 +859,18 @@ guided_cached_step_complete() {
 # just those rows instead of a misleading "pending" line for unrelated steps.
 
 guided_board_reset() {
+    # Reuse guided_step_live_state's complete/in_progress/manual/pending
+    # classification rather than re-deriving a narrower copy here. The
+    # earlier inline version had no in_progress branch, so any step that was
+    # genuinely mid-flight from a prior/interrupted session (e.g. resume)
+    # was misreported as pending until this session happened to touch it.
     local ids=("$@") id
     [ "${#ids[@]}" -gt 0 ] || ids=("${GUIDED_STEP_ID[@]}")
     GUIDED_STEP_BOARD_STATE=()
     GUIDED_STEP_STARTED_AT=()
     GUIDED_STEP_ELAPSED_FINAL=()
     for id in "${ids[@]}"; do
-        if guided_step_live_complete "$id"; then
-            GUIDED_STEP_BOARD_STATE[$id]=complete
-        elif guided_step_is_manual "$id"; then
-            GUIDED_STEP_BOARD_STATE[$id]=manual
-        else
-            GUIDED_STEP_BOARD_STATE[$id]=pending
-        fi
+        GUIDED_STEP_BOARD_STATE[$id]=$(guided_step_live_state "$id")
     done
 }
 
@@ -1844,6 +1858,12 @@ guided_deployment() {
 
         title "Guided deployment - Step $((idx + 1)) of $total"
         printf '\n  %s\n' "$(guided_mode_context_text "$GUIDED_MODE_CONTEXT")"
+        # Keep the persistent status board visible on the normal per-step
+        # screen, not just while a step is actively being watched/verified
+        # (guided_wait_render) -- otherwise resume/repair and interactive
+        # navigation only ever show this one step's single-line status.
+        guided_board_render_rows "$id"
+        hr
         printf '\n  %s%s%s\n\n  %s\n' "$BOLD" "${GUIDED_STEP_LABEL[$idx]}" "$RESET" "${GUIDED_STEP_HELP[$idx]}"
         printf '  Step type: %s\n' "$(guided_step_action_profile "$id")"
         printf '\n  Current status: %s\n' "$(guided_step_live_status "$id")"
@@ -1949,7 +1969,7 @@ guided_deployment() {
 
 
 resume_repair() {
-    local idx id start=0 found=0 total="${#GUIDED_STEP_ID[@]}"
+    local idx start=0 found=0 total="${#GUIDED_STEP_ID[@]}"
     fortify_lab_require_acknowledgement || return 1
     GUIDED_MODE_CONTEXT=resume
     guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
@@ -1967,10 +1987,12 @@ resume_repair() {
     guided_collect_step_statuses
     echo
     section "Deployment state"
+    # Render from the same GUIDED_STEP_BOARD_STATE that guided_deployment's
+    # per-step screen and wait screen use, rather than a separate printed
+    # loop over the status cache -- one state, one rendering, so this
+    # summary and the board it hands off to can't drift out of sync.
+    guided_board_render_rows ""
     for idx in "${!GUIDED_STEP_ID[@]}"; do
-        id="${GUIDED_STEP_ID[$idx]}"
-        printf '  %2d. %-30s %s
-' "$((idx + 1))" "${GUIDED_STEP_LABEL[$idx]}" "$(guided_cached_step_status "$idx")"
         if [ "$found" -eq 0 ] && [ "${GUIDED_STEP_OPTIONAL[$idx]}" -eq 0 ] && ! guided_cached_step_complete "$idx"; then
             start="$idx"
             found=1
