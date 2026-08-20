@@ -3439,7 +3439,7 @@ prereqs_menu() {
         echo "  3. mkcert (apt)"
         echo "  4. microk8s (snap) + addons (dns, ingress, nfs, dashboard, community)"
         echo "  5. All of the above"
-        echo "  g. Restart wizard with microk8s group access"
+        echo "  g. Refresh group access (microk8s/docker) now"
         echo
         echo "  r. Return"
         echo
@@ -3451,7 +3451,7 @@ prereqs_menu() {
             3) install_mkcert;     prereqs_install_summary ;;
             4) install_microk8s;   prereqs_install_summary ;;
             5) install_jdk; install_docker; install_mkcert; install_microk8s; prereqs_install_summary ;;
-            [Gg]) restart_with_microk8s_group ;;
+            [Gg]) prereqs_refresh_group_access ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
         esac
@@ -3587,10 +3587,14 @@ install_docker()   {
     else
         sudo apt install -y docker.io
     fi
+    local target_user
+    target_user="${SUDO_USER:-$(id -un)}"
+    sudo usermod -aG docker "$target_user"
     if ! [ -f "$HOME/.docker/config.json" ]; then
         note "Logging into Docker Hub (needed to pull Fortify images)..."
         docker login
     fi
+    ensure_active_groups
 }
 
 ensure_registry_credentials() {
@@ -3606,11 +3610,9 @@ install_microk8s() {
     else
         bash "$FORTIFY_HOME_K8S/scripts/install_microk8s.sh"
     fi
+    ensure_active_groups
     if microk8s_access_ready; then
         note "MicroK8s access is active in this shell."
-    else
-        note "MicroK8s installed, but this shell does not have group access yet."
-        note "Choose g to restart the wizard with microk8s group access, or run: newgrp microk8s"
     fi
 }
 
@@ -3653,36 +3655,103 @@ prereqs_ready_count() {
 }
 
 prereqs_install_summary() {
-    local ready
+    local ready pending
     ready=$(prereqs_ready_count)
     printf '\n'
     note "Host prerequisites: $ready/4 ready."
     if [ "$ready" -eq 4 ]; then
         note "All prerequisite indicators are complete."
-    elif ! microk8s_access_ready && command -v microk8s >/dev/null 2>&1; then
-        note "Next missing: MicroK8s group access in this shell."
-        note "Choose g to restart the wizard with group access, or run: newgrp microk8s"
+    else
+        pending="$(fortify_groups_pending_activation)"
+        if [ -n "$pending" ]; then
+            note "Next missing: group access in this shell for $(printf '%s' "$pending" | tr '\n' ' ')."
+            note "Choose g to refresh group access now, or start a new shell."
+        fi
     fi
     press_any
 }
-restart_with_microk8s_group() {
-    local restart_command
-    command -v microk8s >/dev/null 2>&1 || {
-        error "MicroK8s is not installed yet."
-        press_any
+
+# fortify_group_member <group> — true if $USER is listed as a supplementary
+# member of <group> in the system group database (independent of whether
+# that membership is active in *this* process's session).
+fortify_group_member() {
+    local group="$1" current_user
+    current_user="$(id -un)"
+    getent group "$group" 2>/dev/null | awk -F: -v u="$current_user" '
+        {
+            n = split($4, a, ",")
+            for (i = 1; i <= n; i++) if (a[i] == u) found = 1
+        }
+        END { exit !found }
+    '
+}
+
+# fortify_group_active <group> — true if <group> is active in this process's
+# current supplementary group list (i.e. usable without re-login/newgrp/sg).
+fortify_group_active() {
+    id -nG | tr ' ' '\n' | grep -qx "$1"
+}
+
+# Groups the user is entitled to (per /etc/group) but that are not yet
+# active in this shell — the gap that forces a manual `newgrp`/relaunch.
+# Only considers groups for tooling that is actually installed.
+fortify_groups_pending_activation() {
+    local group
+    for group in microk8s docker; do
+        command -v "$group" >/dev/null 2>&1 || continue
+        fortify_group_member "$group" || continue
+        fortify_group_active "$group" || printf '%s\n' "$group"
+    done
+}
+
+# ensure_active_groups — transparently activates any pending microk8s/docker
+# group membership by re-executing the wizard through chained `sg` calls, so
+# the user never has to notice a "needs attention" status or run a command
+# by hand. No-op if everything is already active. Guarded against re-exec
+# loops via FORTIFY_GROUP_REEXEC, in case `sg` doesn't actually grant access
+# (e.g. no controlling TTY).
+ensure_active_groups() {
+    local pending group restart_command sg_command
+    pending="$(fortify_groups_pending_activation)"
+    [ -n "$pending" ] || return 0
+
+    if [ -n "${FORTIFY_GROUP_REEXEC:-}" ]; then
+        note "Still missing group access for: $(printf '%s' "$pending" | tr '\n' ' ')"
+        note "Start a new shell (or log out and back in), then relaunch the wizard."
         return 1
-    }
-    if microk8s_access_ready; then
-        note "MicroK8s group access is already active."
+    fi
+
+    if ! command -v sg >/dev/null 2>&1; then
+        error "Could not find sg to refresh group access automatically."
+        note "Run this in your shell (one group per newgrp), then relaunch the wizard:"
+        while IFS= read -r group; do
+            note "  newgrp $group"
+        done <<< "$pending"
+        return 1
+    fi
+
+    note "Activating group access for: $(printf '%s' "$pending" | tr '\n' ' ')..."
+    printf -v restart_command '%q --accept-lab-use' "$FORTIFY_HOME_K8S/start_wizard.sh"
+    sg_command="$restart_command"
+    while IFS= read -r group; do
+        printf -v sg_command 'sg %q -c %q' "$group" "$sg_command"
+    done <<< "$pending"
+    export FORTIFY_GROUP_REEXEC=1
+    exec bash -c "$sg_command"
+}
+
+# Interactive wrapper around ensure_active_groups for the prerequisites menu:
+# gives explicit feedback either way, since a silent no-op would look like
+# the keypress did nothing.
+prereqs_refresh_group_access() {
+    if [ -z "$(fortify_groups_pending_activation)" ]; then
+        note "Group access is already active in this shell."
         press_any
         return 0
     fi
-    if command -v sg >/dev/null 2>&1; then
-        note "Restarting wizard with microk8s group access..."
-        printf -v restart_command '%q --accept-lab-use' "$FORTIFY_HOME_K8S/start_wizard.sh"
-        exec sg microk8s -c "$restart_command"
-    fi
-    error "Could not find sg to refresh group access automatically."
-    note "Run this in your shell, then relaunch the wizard: newgrp microk8s"
+    ensure_active_groups
+    # Only reached if ensure_active_groups couldn't exec (no sg, or already
+    # re-exec'd once without success) — a successful activation replaces
+    # this process and never returns here.
     press_any
 }

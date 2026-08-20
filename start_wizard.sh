@@ -165,6 +165,7 @@ if [ -z "${WIZARD_NOMAIN:-}" ]; then
     first_launch=0
     fortify_lab_is_acknowledged || first_launch=1
     fortify_lab_require_acknowledgement || exit 1
+    ensure_active_groups
     bootstrap_env
     guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
     if [ "$first_launch" -eq 1 ]; then
