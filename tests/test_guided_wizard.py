@@ -1158,14 +1158,59 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("prereqs_status_table()", WIZARD)
         self.assertIn('"Host prerequisites: $ready/4 ready."', WIZARD)
         self.assertIn("All prerequisite indicators are complete", WIZARD)
-        self.assertIn("Next missing: MicroK8s group access in this shell", WIZARD)
-        self.assertIn("Restart wizard with microk8s group access", WIZARD)
+        self.assertIn("Next missing: group access in this shell", WIZARD)
+        self.assertIn("Refresh group access (microk8s/docker) now", WIZARD)
 
     def test_prerequisite_probe_requires_microk8s_access(self) -> None:
         self.assertIn("microk8s_access_ready()", WIZARD)
         self.assertIn("id -nG | grep -qw microk8s", WIZARD)
         self.assertIn("microk8s status --wait-ready", WIZARD)
         self.assertIn("java_ready && docker_ready && mkcert_ready && microk8s_access_ready", WIZARD)
+
+    def test_group_activation_is_automatic_not_menu_gated(self) -> None:
+        # install_docker and install_microk8s both auto-activate group access
+        # instead of just telling the user to press a key.
+        self.assertIn('sudo usermod -aG docker "$target_user"', WIZARD)
+        install_docker = WIZARD.split("install_docker()", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("ensure_active_groups", install_docker)
+        install_microk8s = WIZARD.split("install_microk8s() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("ensure_active_groups", install_microk8s)
+        # The wizard also self-heals a stale shell on every launch, not just
+        # right after an install.
+        self.assertIn("fortify_lab_require_acknowledgement || exit 1\n    ensure_active_groups", WIZARD)
+
+    def test_ensure_active_groups_reexec_guard_and_fallback(self) -> None:
+        self.assertIn("FORTIFY_GROUP_REEXEC", WIZARD)
+        self.assertIn("Could not find sg to refresh group access automatically", WIZARD)
+
+    def test_fortify_groups_pending_activation_detects_gap(self) -> None:
+        result = self.run_wizard_functions(
+            "getent() { "
+            '  case "$2" in '
+            '    microk8s) printf "microk8s:x:999:%s\\n" "$(id -un)" ;; '
+            '    docker) printf "docker:x:998:%s\\n" "$(id -un)" ;; '
+            "  esac "
+            "}; "
+            "docker() { :; }; microk8s() { :; }; "
+            'printf "pending=[%s]\\n" "$(fortify_groups_pending_activation | tr \'\\n\' \',\')"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pending=[microk8s,docker,]", result.stdout)
+
+    def test_fortify_groups_pending_activation_empty_when_already_active(self) -> None:
+        result = self.run_wizard_functions(
+            "getent() { "
+            '  case "$2" in '
+            '    microk8s) printf "microk8s:x:999:%s\\n" "$(id -un)" ;; '
+            '    docker) printf "docker:x:998:%s\\n" "$(id -un)" ;; '
+            "  esac "
+            "}; "
+            'id() { if [ "$1" = "-un" ]; then command id -un; else printf "%s wheel microk8s docker\\n" "$(id -un)"; fi; }; '
+            "docker() { :; }; microk8s() { :; }; "
+            'printf "pending=[%s]\\n" "$(fortify_groups_pending_activation | tr \'\\n\' \',\')"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pending=[]", result.stdout)
 
     def test_auto_advance_mode_can_complete_without_repeated_enter(self) -> None:
         result = self.run_wizard_functions(

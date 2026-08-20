@@ -95,10 +95,13 @@ From the main menu, choose **1. Deploy**, then pick one deployment mode:
     after a 5-second countdown unless you take control.
 
     The prerequisite screen shows readiness indicators for JDK, Docker login,
-    mkcert, and MicroK8s access. When MicroK8s is installed but the current
-    shell has not picked up the `microk8s` group yet, choose `g` from that
-    screen to restart the wizard with group access, or run `newgrp microk8s`
-    before relaunching. Guided step and wait screens include Retry, Help, live
+    mkcert, and MicroK8s access. Installing Docker or MicroK8s from that
+    screen automatically activates the new `docker`/`microk8s` group
+    membership for the wizard — no manual `newgrp` or menu step needed. If a
+    shell was started before those groups existed, the wizard also refreshes
+    access automatically the next time it launches; `g` on the prerequisite
+    screen retriggers that refresh on demand. Guided step and wait screens
+    include Retry, Help, live
     diagnostics, diagnostics bundle export, interactive takeover, and
     contextual pod logs where a component owns pods. On completion, Guided
     shows a congratulations page with live service status, URLs, certificate
