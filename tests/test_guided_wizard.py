@@ -1184,6 +1184,11 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("Could not find sg to refresh group access automatically", WIZARD)
 
     def test_fortify_groups_pending_activation_detects_gap(self) -> None:
+        # Member of both groups per /etc/group, active in neither in this
+        # session -- both must be reported pending. id -nG is stubbed too:
+        # some CI runners put their user in the docker group by default, so
+        # relying on the real active-group list here would make this test
+        # depend on the host it happens to run on.
         result = self.run_wizard_functions(
             "getent() { "
             '  case "$2" in '
@@ -1191,6 +1196,7 @@ class GuidedWizardTests(unittest.TestCase):
             '    docker) printf "docker:x:998:%s\\n" "$(id -un)" ;; '
             "  esac "
             "}; "
+            'id() { if [ "$1" = "-un" ]; then command id -un; else printf "%s wheel\\n" "$(id -un)"; fi; }; '
             "docker() { :; }; microk8s() { :; }; "
             'printf "pending=[%s]\\n" "$(fortify_groups_pending_activation | tr \'\\n\' \',\')"'
         )
