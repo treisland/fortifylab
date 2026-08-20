@@ -25,6 +25,8 @@ source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/tls.sh"
+# shellcheck source=scripts/lib/traefik-backend.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
 
 # Running under sudo would create files in secrets/generated/ owned by root,
 # which then block subsequent normal-user runs from rebuilding the directory.
@@ -47,6 +49,11 @@ trap 'rm -f "$PRESERVED_SECRET_KEY"' EXIT
 
 KUBECTL="microk8s kubectl"
 
+# Set by configure_microk8s_ingress_default_tls when Traefik's default
+# certificate could not be refreshed; checked at the end of the script so a
+# stale cert isn't a console-only warning that set -euo pipefail can't catch.
+TRAEFIK_DEFAULT_CERT_REFRESH_FAILED=0
+
 configure_microk8s_ingress_default_tls() {
   local cert_ref="$NAMESPACE/tls"
 
@@ -57,11 +64,28 @@ configure_microk8s_ingress_default_tls() {
   if microk8s enable ingress --help 2>&1 | grep -q -- '--default-ssl-certificate'; then
     if microk8s enable ingress --default-ssl-certificate "$cert_ref" >/dev/null 2>&1; then
       echo "✅ MicroK8s ingress default TLS certificate set to $cert_ref"
+      # `microk8s enable` is called with this same reference on every run, so
+      # it can report success without Traefik ever re-reading a rotated tls
+      # Secret. Force it with a rollout restart of the addon's own Traefik
+      # workload, discovered by container image since its name/namespace is
+      # not stable across MicroK8s tracks.
+      if fortify_traefik_rollout_restart; then
+        echo "✅ Restarted MicroK8s ingress (Traefik) to pick up the updated certificate."
+      else
+        echo "⚠️ Could not find or restart the MicroK8s ingress (Traefik) workload."
+        echo "   If Traefik still serves TRAEFIK DEFAULT CERT, restart it manually."
+        TRAEFIK_DEFAULT_CERT_REFRESH_FAILED=1
+      fi
     else
       echo "⚠️ Could not update MicroK8s ingress default TLS certificate to $cert_ref."
       echo "   If Traefik still serves TRAEFIK DEFAULT CERT, run:"
       echo "   microk8s enable ingress --default-ssl-certificate $cert_ref"
+      TRAEFIK_DEFAULT_CERT_REFRESH_FAILED=1
     fi
+  else
+    echo "⚠️ This MicroK8s ingress addon build does not support --default-ssl-certificate."
+    echo "   Traefik's default certificate cannot be refreshed automatically here; if it"
+    echo "   still serves TRAEFIK DEFAULT CERT after a cert rotation, restart it manually."
   fi
 }
 
@@ -284,3 +308,8 @@ $KUBECTL -n "$NAMESPACE" create secret generic lim-signing-certificate-password 
 refresh_registry_credentials
 echo
 echo "✅ Secrets created in namespace '$NAMESPACE'."
+
+if [ "$TRAEFIK_DEFAULT_CERT_REFRESH_FAILED" -eq 1 ]; then
+  echo "❌ Traefik's default TLS certificate may not have refreshed; see warnings above." >&2
+  exit 1
+fi
