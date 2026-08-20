@@ -192,6 +192,32 @@ the previous recommended plan to `known-good`. ScanCentral DAST Core and Scanner
 container images are currently chart-managed in this lab; add explicit `.env`
 keys before curating them as separate Flight Plan fields.
 
+## Your own local Flight Plans
+
+Discovery and drafting are not repo-owner-only: any user can add a Flight Plan
+to their own local, gitignored catalog (`config/flight-plans.local.toml`)
+without opening a PR or touching the shared `config/flight-plans.toml`. This is
+useful for trying a release the repo owner has not reviewed yet -- for example,
+a new Fortify release the day it drops.
+
+From the wizard: **Deployment Versions and Flight Plan -> Refresh/discover
+candidate Flight Plan tags**, then **Add a discovered candidate to my local
+Flight Plans**. From the CLI:
+
+```bash
+./scripts/tools/flight-plans.py discover --release 26.3
+./scripts/tools/flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.3.toml --status candidate
+./scripts/tools/flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.3.toml --status known-good --yes
+```
+
+Local Flight Plans show up merged alongside curated ones everywhere a Flight
+Plan can be selected (`list`, `show`, `env-updates`, `compare-env`, and every
+wizard picker) -- they are never a separate mode you have to opt into. They
+cannot be set `--status recommended`, since "the recommended plan" is a
+curated-catalog-only concept. `config/flight-plans.toml` itself is never
+modified by this workflow; `validate` against the curated catalog is
+unaffected.
+
 ## Rollback expectations
 
 Changing Flight Plans is configuration rollback, not data rollback. Restoring an

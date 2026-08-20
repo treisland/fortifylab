@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -543,6 +544,258 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("Advanced individual component override", operations)
         self.assertIn("flight_plan_full_upgrade_flow", operations)
         self.assertIn("flight_plan_component_override_menu", operations)
+
+    def test_tool_parses_and_runs_under_python_3_11(self) -> None:
+        # Regression guard for a prior bug: an f-string reused its own quote
+        # character inside the expression (PEP 701), which only parses on
+        # Python 3.12+ and made the whole file fail to even compile on 3.10/3.11
+        # -- including the documented reference OS (Ubuntu 22.04 ships 3.10).
+        # This asserts the tool actually runs, not just "would run on 3.12".
+        result = subprocess.run(["python3", "--version"], check=False, capture_output=True, text=True)
+        self.assertIn("Python 3.1", result.stdout + result.stderr)
+        listing = self.run_tool("list")
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertIn("fortify-26.2", listing.stdout)
+
+    def test_version_guard_blocks_python_before_3_11_with_clear_message(self) -> None:
+        script = textwrap.dedent(
+            f"""
+            import runpy
+            import sys
+            sys.version_info = (3, 10, 0, "final", 0)
+            sys.argv = ["flight-plans.py", "default"]
+            try:
+                runpy.run_path({str(TOOL)!r}, run_name="__main__")
+            except SystemExit as exc:
+                print("EXIT", exc.code)
+            """
+        )
+        result = subprocess.run([sys.executable, "-c", script], cwd=ROOT, check=False, capture_output=True, text=True)
+        self.assertIn("EXIT 1", result.stdout)
+        self.assertIn("requires Python 3.11 or newer", result.stderr)
+
+    def test_local_catalog_merges_into_read_commands_without_touching_curated_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "flight-plans.toml"
+            shutil.copy(CATALOG, catalog_path)
+            local_path = Path(directory) / "flight-plans.local.toml"
+            local_path.write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans."fortify-26.3"]
+                    label = "Fortify 26.3 (local)"
+                    status = "known-good"
+                    family = "26.3"
+
+                    [flight_plans."fortify-26.3".components]
+                    FORTIFY_SSC_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SSC_IMAGE_TAG = "26.3.0.0001"
+                    FORTIFY_SCSAST_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCSAST_WORKER_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCDAST_CHART_VERSION = "24.4.0-2"
+                    FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            listing = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "list", "--include-candidates"], cwd=ROOT, check=False, capture_output=True, text=True)
+            show = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "show", "fortify-26.3"], cwd=ROOT, check=False, capture_output=True, text=True)
+            updates = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "env-updates", "fortify-26.3"], cwd=ROOT, check=False, capture_output=True, text=True)
+            validation = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "validate"], cwd=ROOT, check=False, capture_output=True, text=True)
+            catalog_after = catalog_path.read_text(encoding="utf-8")
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertIn("fortify-26.3\tFortify 26.3 (local)\tknown-good", listing.stdout)
+        self.assertIn("fortify-26.2", listing.stdout)
+        self.assertEqual(show.returncode, 0, show.stderr)
+        self.assertIn("FORTIFY_SSC_IMAGE_TAG=26.3.0.0001", show.stdout)
+        self.assertEqual(updates.returncode, 0, updates.stderr)
+        self.assertIn("FORTIFY_SSC_CHART_VERSION=26.3.0-1", updates.stdout)
+        # The curated catalog by itself is untouched and still strictly valid.
+        self.assertEqual(validation.returncode, 0, validation.stderr)
+        self.assertEqual(catalog_after, CATALOG.read_text(encoding="utf-8"))
+
+    def test_promote_local_dry_run_then_yes_writes_only_sibling_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "flight-plans.toml"
+            shutil.copy(CATALOG, catalog_path)
+            candidate_path = Path(directory) / "fortify-26.3.toml"
+            candidate_path.write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans."fortify-26.3"]
+                    label = "Fortify 26.3"
+                    status = "candidate"
+                    family = "26.3"
+
+                    [flight_plans."fortify-26.3".components]
+                    FORTIFY_SSC_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SSC_IMAGE_TAG = "26.3.0.0001"
+                    FORTIFY_SCSAST_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCSAST_WORKER_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCDAST_CHART_VERSION = "24.4.0-2"
+                    FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            local_path = Path(directory) / "flight-plans.local.toml"
+            dry_run = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "promote-local", str(candidate_path), "--status", "known-good"], cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
+            self.assertIn("Dry run only", dry_run.stdout)
+            self.assertFalse(local_path.exists())
+            applied = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "promote-local", str(candidate_path), "--status", "known-good", "--yes"], cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            self.assertTrue(local_path.exists())
+            self.assertIn("fortify-26.3", local_path.read_text(encoding="utf-8"))
+            self.assertEqual(catalog_path.read_text(encoding="utf-8"), CATALOG.read_text(encoding="utf-8"))
+
+    def test_promote_local_rejects_recommended_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "flight-plans.toml"
+            shutil.copy(CATALOG, catalog_path)
+            candidate_path = Path(directory) / "fortify-26.3.toml"
+            candidate_path.write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans."fortify-26.3"]
+                    label = "Fortify 26.3"
+                    status = "candidate"
+                    family = "26.3"
+
+                    [flight_plans."fortify-26.3".components]
+                    FORTIFY_SSC_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SSC_IMAGE_TAG = "26.3.0.0001"
+                    FORTIFY_SCSAST_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCSAST_WORKER_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCDAST_CHART_VERSION = "24.4.0-2"
+                    FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "promote-local", str(candidate_path), "--status", "recommended"], cwd=ROOT, check=False, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_promote_local_rejects_malformed_candidate_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "flight-plans.toml"
+            shutil.copy(CATALOG, catalog_path)
+            candidate_path = Path(directory) / "broken.toml"
+            candidate_path.write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans.broken]
+                    label = "Broken"
+                    status = "candidate"
+
+                    [flight_plans.broken.components]
+                    FORTIFY_SSC_CHART_VERSION = "1"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            local_path = Path(directory) / "flight-plans.local.toml"
+            result = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "promote-local", str(candidate_path), "--status", "candidate", "--yes"], cwd=ROOT, check=False, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing component key FORTIFY_SSC_IMAGE_TAG", result.stderr)
+        self.assertFalse(local_path.exists())
+
+    def test_full_upgrade_flow_refuses_to_stage_flight_plan_with_no_populated_components(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$PWD"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'cp .env.example "$ENV_FILE"; source "$ENV_FILE"; read -r _lab_ack; pending=(); '
+            'flight_plan_full_upgrade_flow pending fortify-25.x; printf "COUNT=%s\\n" "${#pending[@]}"',
+            user_input="\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no populated component versions yet", result.stderr)
+        self.assertIn("COUNT=0", result.stdout)
+
+    def test_select_menu_refuses_to_stage_flight_plan_with_no_populated_components(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$PWD"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
+            'cp .env.example "$ENV_FILE"; source "$ENV_FILE"; read -r _lab_ack; pending=(); '
+            'flight_plan_stage_updates pending fortify-25.x; rc=$?; printf "COUNT=%s RC=%s\\n" "${#pending[@]}" "$rc"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no populated component versions yet", result.stderr)
+        self.assertIn("COUNT=0 RC=1", result.stdout)
+
+    def test_component_override_refuses_to_mark_drift_when_target_plan_has_no_values(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$PWD"; ENV_FILE="$tmp/.env"; '
+            'cp .env.example "$ENV_FILE"; source "$ENV_FILE"; read -r _lab_ack; pending=(); '
+            'flight_plan_stage_component_from_plan pending ssc fortify-25.x; rc=$?; '
+            'printf "COUNT=%s RC=%s\\n" "${#pending[@]}" "$rc"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("COUNT=0 RC=1", result.stdout)
+
+    def test_promote_local_menu_adds_discovered_candidate_and_shows_in_upgrade_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            fortify_home = tmp / "repo"
+            shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp", "config/flight-plans.local.toml"))
+            candidate_dir = fortify_home / "tmp" / "flight-plan-candidates"
+            candidate_dir.mkdir(parents=True, exist_ok=True)
+            (candidate_dir / "fortify-26.3.toml").write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans."fortify-26.3"]
+                    label = "Fortify 26.3"
+                    status = "candidate"
+                    family = "26.3"
+
+                    [flight_plans."fortify-26.3".components]
+                    FORTIFY_SSC_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SSC_IMAGE_TAG = "26.3.0.0001"
+                    FORTIFY_SCSAST_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCSAST_WORKER_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCDAST_CHART_VERSION = "24.4.0-2"
+                    FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["XDG_CONFIG_HOME"] = str(tmp / "config")
+            env["HOME"] = str(tmp / "home")
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'export WIZARD_NOMAIN=1 NO_COLOR=1; source "$1"; title() { :; }; sleep() { :; }; '
+                    'FORTIFY_HOME_K8S="$PWD"; '
+                    'flight_plan_promote_local_menu; '
+                    'flight_plan_tool list --include-candidates',
+                    "promote-local-test",
+                    str(fortify_home / "start_wizard.sh"),
+                ],
+                cwd=fortify_home,
+                input="26.3\ncandidate\ny\n\n",
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            local_catalog_exists = (fortify_home / "config" / "flight-plans.local.toml").exists()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fortify-26.3", result.stdout)
+        self.assertTrue(local_catalog_exists)
 
 
 if __name__ == "__main__":

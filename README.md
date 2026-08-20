@@ -30,6 +30,9 @@ are separate products with different users and security boundaries.
 ## Prerequisites
 
 - Linux host (Ubuntu 22.04+ tested)
+- Python 3.11+ available as `python3` (Ubuntu 22.04 ships 3.10 by default; install
+  a newer interpreter, e.g. `sudo apt install python3.12`, if `python3 --version`
+  reports below 3.11) — required by the Flight Plans version-selection tool
 - ~16 GB RAM, ~50 GB disk free
 - Browser reachability to the host (LAN IP, public IP, or VPN)
 - A Fortify license (`fortify.license`), stored outside the repository when
