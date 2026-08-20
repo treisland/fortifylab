@@ -1324,7 +1324,7 @@ guided_wait_for_step() {
                     wizard_log_event "action=user_control step=$id control=retry"
                     return 4
                     ;;
-                [Ii])
+                ""|[Ii])
                     GUIDED_WAIT_LAST_STATE="interactive"
                     guided_wait_screen_leave
                     note "Interactive control requested."
@@ -1370,6 +1370,12 @@ guided_wait_for_step() {
                     note "No wizard state or secrets were written. Live resources will be detected when you resume."
                     wizard_log_event "action=user_control step=$id control=quit_safely"
                     return 3
+                    ;;
+                *)
+                    guided_wait_screen_leave
+                    error "Unrecognized key; see options above."
+                    sleep 1
+                    guided_wait_screen_enter
                     ;;
             esac
         fi
@@ -1582,11 +1588,15 @@ guided_countdown() {
             "$next_num" "$total" "$next_label" "$remaining"
         if read -rsn1 -t 1 control; then
             case "$control" in
-                [Ii])
+                ""|[Ii])
                     printf '\r\033[K'
                     GUIDED_AUTO_ADVANCE=0
                     note "[$next_num/$total] Auto-advance paused: staying interactive at $next_label."
                     return 1
+                    ;;
+                *)
+                    printf '\r\033[K'
+                    error "Unrecognized key; see options above."
                     ;;
             esac
         fi
