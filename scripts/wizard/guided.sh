@@ -602,16 +602,38 @@ pod_prefix_ready() {
     [ "$ready" -eq "$total" ]
 }
 
+# Unlike health_ingress_host_ready (scripts/lib/dependency-health.sh), which
+# is hardcoded to $NAMESPACE, the Dashboard's ingress can live in either
+# kube-system or kubernetes-dashboard depending on which addon variant is
+# installed (see dashboard_access_namespace), so the namespace has to be a
+# parameter here.
+dashboard_ingress_host_ready() {
+    local namespace="$1" host="$2" hosts
+    cluster_reachable || return 1
+    resource_exists "$namespace" ingress ingress-dashboard || return 1
+    hosts=$($KUBECTL -n "$namespace" get ingress ingress-dashboard -o jsonpath='{.spec.rules[*].host}' 2>/dev/null) || return 1
+    printf '%s\n' "$hosts" | tr ' ' '\n' | grep -Fxq "$host"
+}
+
 dashboard_ready() {
-    local dashboard_namespace
+    local dashboard_namespace dashboard_host
     dashboard_namespace=$(dashboard_access_namespace)
+    dashboard_host="dashboard.${DOMAIN:-fortifydemo.com}"
+    # Checking that the ingress-dashboard resource merely *exists* is not
+    # enough: if DOMAIN changes after the Dashboard was first deployed (or
+    # the ingress was recreated under an older DOMAIN), the resource is
+    # still there but its host rule no longer matches the URL anyone would
+    # actually browse to, and Traefik correctly 404s it. ssc/lim already
+    # guard against this via health_ingress_host_ready; do the equivalent
+    # check here so a stale host shows up as "not ready" instead of a
+    # silent false-positive "complete" step.
     if [ "$dashboard_namespace" = kubernetes-dashboard ]; then
         workload_ready "$dashboard_namespace" deployment kubernetes-dashboard-web &&
             workload_ready "$dashboard_namespace" deployment kubernetes-dashboard-kong &&
-            resource_exists "$dashboard_namespace" ingress ingress-dashboard
+            dashboard_ingress_host_ready "$dashboard_namespace" "$dashboard_host"
     else
         workload_ready kube-system deployment kubernetes-dashboard &&
-            resource_exists kube-system ingress ingress-dashboard
+            dashboard_ingress_host_ready kube-system "$dashboard_host"
     fi
 }
 
@@ -981,13 +1003,35 @@ guided_component_endpoint_detail() {
     fi
 }
 
+guided_dashboard_endpoint_detail() {
+    local dashboard_namespace dashboard_host
+    dashboard_namespace=$(dashboard_access_namespace)
+    dashboard_host="dashboard.${DOMAIN:-fortifydemo.com}"
+    if [ "$dashboard_namespace" = kubernetes-dashboard ]; then
+        if ! workload_ready "$dashboard_namespace" deployment kubernetes-dashboard-web ||
+            ! workload_ready "$dashboard_namespace" deployment kubernetes-dashboard-kong; then
+            printf 'Dashboard deployment in namespace %s is not ready yet.\n' "$dashboard_namespace"
+            return
+        fi
+    elif ! workload_ready kube-system deployment kubernetes-dashboard; then
+        printf 'Dashboard deployment in namespace kube-system is not ready yet.\n'
+        return
+    fi
+    if ! dashboard_ingress_host_ready "$dashboard_namespace" "$dashboard_host"; then
+        printf 'Ingress ingress-dashboard does not contain host %s yet. If DOMAIN changed since\n' "$dashboard_host"
+        printf 'the Dashboard was last deployed, rerun the Dashboard step to recreate its ingress.\n'
+        return
+    fi
+    printf '%s\n' "Waiting for Dashboard TLS material."
+}
+
 guided_step_progress_message() {
     case "$1" in
         prereqs) printf '%s\n' "Checking host tools and MicroK8s add-ons." ;;
         inputs) printf '%s\n' "Waiting for .env and a readable Fortify license." ;;
         preflight) printf '%s\n' "Validating cluster reachability, storage, registry login, capacity, and required settings." ;;
         certs) printf '%s\n' "Checking TLS certificate, private key, JVM keystore, and truststore artifacts." ;;
-        dashboard) printf '%s\n' "Waiting for Dashboard workloads, service, ingress, and TLS material." ;;
+        dashboard) guided_dashboard_endpoint_detail ;;
         secrets) secrets_missing_detail ;;
         mysql) printf '%s\n' "Waiting for the MySQL StatefulSet and an authenticated query." ;;
         postgresql) printf '%s\n' "Waiting for the PostgreSQL StatefulSet and an authenticated query." ;;
