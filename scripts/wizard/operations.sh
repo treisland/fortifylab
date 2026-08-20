@@ -2142,6 +2142,41 @@ flight_plan_upgrade_menu() {
     flight_plan_full_upgrade_flow "$@"
 }
 
+# Non-interactive entry point for `./start_wizard.sh apply-flight-plan <id> [--yes]`
+# -- stages a Flight Plan's component versions into .env with a backup, reusing
+# the same staging/preview/apply machinery as the interactive wizard menu, but
+# never prompts and never blocks on stdin. Without --yes this is a dry run,
+# matching the promote/promote-local CLI convention.
+wizard_apply_flight_plan() {
+    local plan_id="$1" auto_yes="${2:-0}" pending=() line count=0
+    wizard_doctor_load_env
+    if [ ! -s "$ENV_FILE" ]; then
+        error ".env does not exist yet. Create one (cp .env.example .env) before applying a Flight Plan."
+        return 1
+    fi
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        pending+=("$line")
+        count=$((count + 1))
+    done < <(flight_plan_tool env-updates "$plan_id")
+    if [ "$count" -eq 0 ]; then
+        error "Flight Plan $plan_id has no populated component versions yet. Nothing to apply."
+        return 1
+    fi
+    pending+=("FORTIFY_FLIGHT_PLAN=$plan_id")
+    section "Flight Plan upgrade impact"
+    flight_plan_print_upgrade_impact "$plan_id"
+    flight_plan_upgrade_safety_note
+    section "Pending .env changes"
+    env_preview_changes "${pending[@]}"
+    if [ "$auto_yes" -ne 1 ]; then
+        echo
+        note "Dry run only. Re-run with --yes to write .env (a backup is created first)."
+        return 0
+    fi
+    env_apply_updates flight-plan "${pending[@]}"
+}
+
 flight_plan_show_candidates() {
     local records=() record plan_id label status family found=0
     section "Candidate Flight Plans"

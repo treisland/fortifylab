@@ -126,6 +126,11 @@ Usage:
   ./start_wizard.sh doctor           Run a read-only health summary and exit.
   ./start_wizard.sh config-diagnostics
                                       Inspect .env host/URL wiring without printing secrets.
+  ./start_wizard.sh apply-flight-plan <plan-id> [--yes]
+                                      Stage a Flight Plan's component versions into .env
+                                      with a backup, without opening the interactive menu.
+                                      Without --yes, prints the impact and pending changes
+                                      and exits without writing (dry run).
   ./start_wizard.sh -h | --help      Show this message.
 
 Environment overrides:
@@ -145,9 +150,24 @@ EOF
 if [ -z "${WIZARD_NOMAIN:-}" ]; then
     case "${1:-}" in
         -h|--help) usage; exit 0 ;;
-        doctor|config-diagnostics|''|--accept-lab-use) ;;
+        doctor|config-diagnostics|''|--accept-lab-use|apply-flight-plan) ;;
         *) error "Unsupported argument: ${1}"; usage >&2; exit 2 ;;
     esac
+    if [ "${1:-}" = apply-flight-plan ]; then
+        apply_flight_plan_id="${2:-}"
+        apply_flight_plan_yes=0
+        case "${3:-}" in
+            --yes) apply_flight_plan_yes=1 ;;
+            "") ;;
+            *) error "Unsupported argument: ${3}"; usage >&2; exit 2 ;;
+        esac
+        if [ -z "$apply_flight_plan_id" ] || [ "$#" -gt 3 ]; then
+            error "Usage: ./start_wizard.sh apply-flight-plan <plan-id> [--yes]"
+            exit 2
+        fi
+        wizard_apply_flight_plan "$apply_flight_plan_id" "$apply_flight_plan_yes"
+        exit $?
+    fi
     if [ "$#" -gt 1 ]; then
         error "Only one command-line option is supported."
         usage >&2

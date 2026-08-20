@@ -46,6 +46,30 @@ class FlightPlansTests(unittest.TestCase):
                 env=env,
             )
 
+    def run_wizard_cli(self, *args: str, repo: Path | None = None) -> tuple[subprocess.CompletedProcess[str], str, list[Path]]:
+        """Run start_wizard.sh as a real subprocess (not sourced) against an
+        isolated copy of the repo, so .env writes never touch the real tree.
+        Returns (result, repo_path) so callers can inspect .env afterward."""
+        with tempfile.TemporaryDirectory() as directory:
+            fortify_home = repo or (Path(directory) / "repo")
+            if repo is None:
+                shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp"))
+                shutil.copy(fortify_home / ".env.example", fortify_home / ".env")
+            env = os.environ.copy()
+            env["XDG_CONFIG_HOME"] = str(Path(directory) / "config")
+            env["HOME"] = str(Path(directory) / "home")
+            result = subprocess.run(
+                [str(fortify_home / "start_wizard.sh"), *args],
+                cwd=fortify_home,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            env_after = (fortify_home / ".env").read_text(encoding="utf-8") if (fortify_home / ".env").exists() else ""
+            backups = list((fortify_home / ".env.backups").glob("*")) if (fortify_home / ".env.backups").exists() else []
+            return result, env_after, backups
+
     def write_discovery_fixtures(self, fixture_dir: Path, family: str = "25.2") -> None:
         fixture_dir.mkdir(parents=True, exist_ok=True)
         hub_payload = {"results": [{"name": f"{family}.0-1"}, {"name": "latest"}], "next": None}
@@ -796,6 +820,45 @@ class FlightPlansTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("fortify-26.3", result.stdout)
         self.assertTrue(local_catalog_exists)
+
+    def test_apply_flight_plan_cli_dry_run_does_not_write_env(self) -> None:
+        result, env_after, backups = self.run_wizard_cli("apply-flight-plan", "fortify-26.2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Dry run only", result.stdout)
+        self.assertIn("Pending .env changes", result.stdout)
+        self.assertIn('FORTIFY_SSC_IMAGE_TAG="26.2.0.0183"', env_after)
+        self.assertEqual(backups, [])
+
+    def test_apply_flight_plan_cli_yes_writes_env_with_backup(self) -> None:
+        result, env_after, backups = self.run_wizard_cli("apply-flight-plan", "fortify-26.2", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Updated .env. Backup:", result.stdout)
+        self.assertIn("FORTIFY_SSC_IMAGE_TAG='26.2.0.0183'", env_after)
+        self.assertIn("FORTIFY_FLIGHT_PLAN='fortify-26.2'", env_after)
+        # env_prepare_backup writes both a .bak and a .meta file per backup.
+        self.assertEqual(len([path for path in backups if path.suffix == ".bak"]), 1)
+
+    def test_apply_flight_plan_cli_refuses_flight_plan_with_no_populated_components(self) -> None:
+        result, env_after, backups = self.run_wizard_cli("apply-flight-plan", "fortify-25.x", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no populated component versions yet", result.stderr)
+        self.assertNotIn("FORTIFY_FLIGHT_PLAN=\"fortify-25.x\"", env_after)
+        self.assertEqual(backups, [])
+
+    def test_apply_flight_plan_cli_requires_a_plan_id(self) -> None:
+        result, _env_after, _backups = self.run_wizard_cli("apply-flight-plan")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Usage: ./start_wizard.sh apply-flight-plan <plan-id>", result.stderr)
+
+    def test_apply_flight_plan_cli_rejects_unknown_third_argument(self) -> None:
+        result, _env_after, _backups = self.run_wizard_cli("apply-flight-plan", "fortify-26.2", "--bogus")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Unsupported argument", result.stderr)
+
+    def test_apply_flight_plan_cli_documented_in_usage(self) -> None:
+        result = subprocess.run(["bash", str(WIZARD), "--help"], cwd=ROOT, check=False, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("apply-flight-plan <plan-id>", result.stdout)
 
 
 if __name__ == "__main__":
