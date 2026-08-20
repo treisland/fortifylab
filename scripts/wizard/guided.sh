@@ -1787,7 +1787,22 @@ EOF
         ask choice "Select:"
         case "$choice" in
             1) GUIDED_AUTO_ADVANCE=0; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=fresh"; guided_deployment 0; return ;;
-            2) GUIDED_AUTO_ADVANCE=1; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=auto"; guided_deployment 0; return ;;
+            2)
+                printf '\n'
+                note "Auto-advance readiness:"
+                prereqs_status_table
+                printf '  %-24s %s\n' "Configuration and license" "$(prereq_status inputs_complete)"
+                if [ "$(prereqs_ready_count)" -lt 4 ] || ! inputs_complete; then
+                    printf '\n'
+                    note "Auto-advance will pause for interactive input until the items above are ready."
+                fi
+                confirm "This will deploy $GUIDED_DEPLOYMENT_PROFILE_LABEL unattended, stopping only for required manual input or a failure. Continue?" || { note "Auto-advance not started."; continue; }
+                GUIDED_AUTO_ADVANCE=1
+                GUIDED_MODE_CONTEXT=fresh
+                wizard_log_event "action=guided_mode_start mode=auto"
+                guided_deployment 0
+                return
+                ;;
             [Rr]|[Qq]) return ;;
             *) error "Invalid selection"; sleep 1 ;;
         esac
@@ -1805,6 +1820,9 @@ guided_deployment() {
         if [ "${GUIDED_AUTO_ADVANCE:-0}" = "1" ] && ! guided_step_is_manual "$id"; then
             transition_reason="already complete"
             if ! guided_step_live_complete "$id"; then
+                if [ "$id" = prereqs ]; then
+                    printf '  Auto-advance paused: host prerequisites need attention.\n'
+                fi
                 guided_run_and_verify "$id" "${GUIDED_STEP_LABEL[$idx]}"
                 result=$?
                 case "$result" in
