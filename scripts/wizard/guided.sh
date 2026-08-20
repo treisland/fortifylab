@@ -248,6 +248,7 @@ guided_profile_menu() {
     printf '  5. Full lab\n'
     printf '  6. Sample applications only\n'
     printf '  7. Custom\n\n'
+    printf '  r. Return\n\n'
     guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
     printf 'Current saved profile:\n'
     guided_print_profile_summary
@@ -261,6 +262,7 @@ guided_profile_menu() {
         5|"") profile=full_lab ;;
         6) fortify_lab_show_action_warning vulnerable-sample; profile=sample_apps ;;
         7) guided_custom_component_prompt; return $? ;;
+        [Rr]|[Qq]) return 1 ;;
         *) error "Invalid profile selection"; sleep 1; return 1 ;;
     esac
     guided_apply_deployment_profile "$profile"
@@ -1765,13 +1767,14 @@ guided_deployment_menu() {
     fi
     GUIDED_MODE_CONTEXT=fresh
     guided_profile_menu || return
-    title "Guided deployment mode"
-    printf '\n  %s\n' "$(guided_mode_context_text fresh)"
-    guided_print_profile_summary
-    section "Flight Plan"
-    flight_plan_current_status
-    release_overlay_report
-    cat <<EOF
+    while true; do
+        title "Guided deployment mode"
+        printf '\n  %s\n' "$(guided_mode_context_text fresh)"
+        guided_print_profile_summary
+        section "Flight Plan"
+        flight_plan_current_status
+        release_overlay_report
+        cat <<EOF
 
   1. Interactive guided deployment
   2. Auto-advance after each verified step
@@ -1779,12 +1782,16 @@ guided_deployment_menu() {
   Auto-advance still pauses for manual configuration and lets you press i
   during wait screens or countdowns to take interactive control.
 
+  r. Return
 EOF
-    ask choice "Select:"
-    case "$choice" in
-        2) GUIDED_AUTO_ADVANCE=1; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=auto"; guided_deployment 0 ;;
-        *) GUIDED_AUTO_ADVANCE=0; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=fresh"; guided_deployment 0 ;;
-    esac
+        ask choice "Select:"
+        case "$choice" in
+            1) GUIDED_AUTO_ADVANCE=0; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=fresh"; guided_deployment 0; return ;;
+            2) GUIDED_AUTO_ADVANCE=1; GUIDED_MODE_CONTEXT=fresh; wizard_log_event "action=guided_mode_start mode=auto"; guided_deployment 0; return ;;
+            [Rr]|[Qq]) return ;;
+            *) error "Invalid selection"; sleep 1 ;;
+        esac
+    done
 }
 
 guided_deployment() {
