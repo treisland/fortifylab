@@ -37,6 +37,12 @@ fi
 source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/tls.sh"
 
+# Newer than most .env files in the wild (added alongside the fcli-truststore
+# split): don't require it to be present there. set -u would otherwise turn a
+# not-yet-updated .env into a hard "unbound variable" crash instead of just
+# using the same default .env.example documents.
+FCLI_CLIENT_TRUSTSTORE="${FCLI_CLIENT_TRUSTSTORE:-$FORTIFY_CERTS/fcli-truststore}"
+
 TLS_MODE="$(fortify_tls_mode)"
 BYO_STAGING_DIR=""
 CA_IMPORT_DIR=""

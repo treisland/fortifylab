@@ -592,6 +592,51 @@ exit 1
         self.assertEqual(script.count('-keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt'), 2)
         self.assertEqual(script.count('-keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt'), 2)
 
+    def test_create_certs_does_not_crash_under_set_u_when_env_predates_fcli_truststore(self) -> None:
+        # Bug: FCLI_CLIENT_TRUSTSTORE is new -- an existing .env written
+        # before this split doesn't define it, and create-certs.sh runs
+        # under `set -euo pipefail`, so referencing it without a safe
+        # default is a hard "unbound variable" crash on every lab that
+        # hasn't hand-edited .env to add the new var.
+        script = (ROOT / "scripts" / "create-certs.sh").read_text(encoding="utf-8")
+        source_line = 'source "$FORTIFY_HOME_K8S/.env"'
+        fallback_line = 'FCLI_CLIENT_TRUSTSTORE="${FCLI_CLIENT_TRUSTSTORE:-$FORTIFY_CERTS/fcli-truststore}"'
+        self.assertIn(fallback_line, script)
+        self.assertLess(script.index(source_line), script.index(fallback_line))
+        first_hard_use = script.index('"$FCLI_CLIENT_TRUSTSTORE"')
+        self.assertLess(
+            script.index(fallback_line),
+            first_hard_use,
+            "the safe-default fallback must run before any bare $FCLI_CLIENT_TRUSTSTORE reference",
+        )
+
+        # Functional proof, not just source-order: actually run the script's
+        # bootstrap under set -u with a .env that predates this var and
+        # confirm it resolves the documented default instead of crashing.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            certs = home / "certs"
+            (home / "scripts" / "lib").mkdir(parents=True)
+            shutil.copy(ROOT / "scripts" / "lib" / "tls.sh", home / "scripts" / "lib" / "tls.sh")
+            (home / ".env").write_text(
+                'export FORTIFY_CERTS="{certs}"\n'.format(certs=certs),
+                encoding="utf-8",
+            )
+            bootstrap_lines = script.splitlines(keepends=True)
+            end = next(i for i, line in enumerate(bootstrap_lines) if fallback_line in line) + 1
+            bootstrap = "".join(bootstrap_lines[:end]) + '\nprintf \'RESOLVED=%s\\n\' "$FCLI_CLIENT_TRUSTSTORE"\n'
+            bootstrap_script = home / "create-certs-bootstrap.sh"
+            bootstrap_script.write_text(bootstrap, encoding="utf-8")
+            bootstrap_script.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(bootstrap_script)],
+                env={"FORTIFY_HOME_K8S": str(home), "PATH": "/usr/bin:/bin"},
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(f"RESOLVED={certs}/fcli-truststore", result.stdout)
+
     def test_jdk_cacerts_copy_and_repassword_mechanism_produces_a_broad_trust_store(self) -> None:
         # Functional proof of the exact mechanism create-certs.sh uses to
         # seed FCLI_CLIENT_TRUSTSTORE: copy the JDK's default cacerts, then
