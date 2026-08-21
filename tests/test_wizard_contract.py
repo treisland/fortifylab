@@ -518,6 +518,167 @@ exit 1
             self.assertIn("PROFILE_SECRET=absent", output)
             self.assertNotIn("contract-secret", profile.read_text(encoding="utf-8"))
 
+    @staticmethod
+    def _write_fake_fcli(bin_dir: Path, call_log: Path) -> None:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        fcli = bin_dir / "fcli"
+        fcli.write_text(
+            "#!/usr/bin/env bash\n"
+            f'printf \'%s\\n\' "$*" >> "{call_log}"\n'
+            'if [ "$1" = "--version" ]; then printf \'fcli 3.23.3\\n\'; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        fcli.chmod(0o755)
+
+    def test_fcli_activate_reactivates_path_and_trust_when_already_installed(self) -> None:
+        # Simulates the gap: fcli was installed in a prior session, and this
+        # is a fresh shell/process where PATH and trust were never activated.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            bin_dir = home / "fortify" / "tools" / "bin"
+            certs = home / "fortify" / "certs"
+            profile = home / ".bashrc"
+            truststore = certs / "truststore"
+            call_log = Path(directory) / "fcli-calls.log"
+            certs.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text("# existing profile\n", encoding="utf-8")
+            truststore.write_text("fake-jks-for-contract-test\n", encoding="utf-8")
+            self._write_fake_fcli(bin_dir, call_log)
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_HOME_K8S="$PWD"
+                export FORTIFY_FCLI_INSTALL_DIR="$3"
+                export FORTIFY_CERTS="$4"
+                export TRUSTSTORE="$5"
+                export DEFAULT_PASS="contract-secret"
+                export FORTIFY_FCLI_PROFILE_FILE="$6"
+                export PATH=/usr/bin:/bin
+                source "$1"
+                fcli_activate
+                printf 'PATH=%s\\n' "$PATH"
+                printf 'TRUSTSTORE=%s\\n' "$FCLI_TRUSTSTORE"
+                printf 'TRUSTSTORE_PWD_SET=%s\\n' "$([ -n "${FCLI_TRUSTSTORE_PWD:-}" ] && printf yes || printf no)"
+            """
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-activate-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(bin_dir),
+                    str(certs),
+                    str(truststore),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn(f"PATH={bin_dir}:/usr/bin:/bin", output)
+            self.assertIn(f"TRUSTSTORE={truststore}", output)
+            self.assertIn("TRUSTSTORE_PWD_SET=yes", output)
+            calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+            self.assertIn("config truststore set", calls)
+            self.assertIn(f"--file {truststore}", calls)
+            self.assertIn("--password contract-secret", calls)
+
+    def test_fcli_activate_is_a_noop_when_nothing_is_installed_or_generated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            bin_dir = home / "fortify" / "tools" / "bin"
+            profile = home / ".bashrc"
+            home.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_FCLI_INSTALL_DIR="$3"
+                export FORTIFY_FCLI_PROFILE_FILE="$4"
+                export PATH=/usr/bin:/bin
+                source "$1"
+                fcli_activate
+                rc=$?
+                printf 'RC=%s\\n' "$rc"
+                printf 'PATH=%s\\n' "$PATH"
+            """
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-activate-noop-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(bin_dir),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn("RC=0", output)
+            self.assertIn("PATH=/usr/bin:/bin", output)
+            self.assertFalse(profile.exists())
+
+    def test_certs_regen_reimports_fcli_trust_unconditionally(self) -> None:
+        # Even when the current shell already looks "active" (matching env
+        # vars from a prior truststore), a cert regeneration must re-run the
+        # persistent fcli trust import rather than skipping it as a no-op —
+        # the truststore's content just changed even though its path did not.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            bin_dir = home / "fortify" / "tools" / "bin"
+            certs = home / "fortify" / "certs"
+            profile = home / ".bashrc"
+            truststore = certs / "truststore"
+            call_log = Path(directory) / "fcli-calls.log"
+            certs.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text("# existing profile\n", encoding="utf-8")
+            truststore.write_text("regenerated-jks-for-contract-test\n", encoding="utf-8")
+            self._write_fake_fcli(bin_dir, call_log)
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_HOME_K8S="$PWD"
+                export FORTIFY_FCLI_INSTALL_DIR="$3"
+                export FORTIFY_CERTS="$4"
+                export TRUSTSTORE="$5"
+                export DEFAULT_PASS="contract-secret"
+                export FORTIFY_FCLI_PROFILE_FILE="$6"
+                export PATH="$3:/usr/bin:/bin"
+                source "$1"
+                # Simulate trust already looking active from before regeneration.
+                export FCLI_TRUSTSTORE="$TRUSTSTORE"
+                export FCLI_TRUSTSTORE_TYPE="JKS"
+                export FCLI_TRUSTSTORE_PWD="contract-secret"
+                fcli_reimport_trust_after_regen
+                printf 'DONE=%s\\n' "$?"
+            """
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-reimport-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(bin_dir),
+                    str(certs),
+                    str(truststore),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn("DONE=0", output)
+            calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+            self.assertIn("config truststore set", calls)
+            self.assertIn(f"--file {truststore}", calls)
+
     def test_fcli_command_templates_are_secret_safe(self) -> None:
         command = """
             export WIZARD_NOMAIN=1 NO_COLOR=1
