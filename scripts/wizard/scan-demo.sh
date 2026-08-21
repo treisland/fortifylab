@@ -83,6 +83,17 @@ scan_type_login_sast_iwa_java() {
         --token="$token" --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION"
 }
 
+# Cheap, read-only proof that FORTIFY_FIRST_SCAN_SSC_SESSION is already
+# logged in and usable, mirroring the exact check
+# runbooks/official/fcli/local-ssc-session-doctor.sh uses to confirm a
+# session -- rather than parsing `ssc session list` table output (name/
+# expiry column layout isn't a contract worth depending on).
+scan_type_session_usable_sast_iwa_java() {
+    local fcli_bin
+    fcli_bin="$(fcli_path)" || return 1
+    "$fcli_bin" ssc appversion list --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" --fetch=1 -o table >/dev/null 2>&1
+}
+
 scan_type_sensor_check_sast_iwa_java() {
     local fcli_bin output
     fcli_bin="$(fcli_path)" || return 1
@@ -176,6 +187,42 @@ scan_type_logout_sast_iwa_java() {
 # Shared orchestration
 # ------------------------------------------------------------------
 
+# Gets a usable SSC session for this run without asking for a token when one
+# isn't actually needed. Tries, in order: an already-logged-in session under
+# our own name (nothing to do); FCLI_DEFAULT_SSC_TOKEN if the operator
+# already exported it in this shell (fcli's own documented default-value
+# convention, see docs/runbooks/fcli.md -- read if present, never written by
+# the wizard); otherwise the interactive paste prompt, same as before.
+#
+# Sets SCAN_DEMO_SESSION_OWNED=1 only when this call logged in itself, so the
+# caller knows whether it's safe to log the session back out when done --
+# reusing someone's already-open session should not end it out from under
+# them.
+scan_demo_acquire_session() {
+    SCAN_DEMO_SESSION_OWNED=0
+    if scan_type_session_usable_sast_iwa_java; then
+        note "Reusing the existing SSC session '$FORTIFY_FIRST_SCAN_SSC_SESSION'."
+        return 0
+    fi
+
+    SCAN_DEMO_SESSION_OWNED=1
+    local token
+    if [ -n "${FCLI_DEFAULT_SSC_TOKEN:-}" ]; then
+        note "Logging in to SSC using the token from FCLI_DEFAULT_SSC_TOKEN..."
+        scan_type_login_sast_iwa_java "$FCLI_DEFAULT_SSC_TOKEN"
+        return $?
+    fi
+
+    read -rsp "Paste SSC token (input hidden; empty cancels): " token
+    echo
+    [ -z "$token" ] && { note "Cancelled."; return 2; }
+    note "Logging in to SSC..."
+    scan_type_login_sast_iwa_java "$token"
+    local rc=$?
+    token=""
+    return "$rc"
+}
+
 # Essentials-menu visibility gate. Not a safety gate -- scan_type_prereqs_sast_iwa_java
 # still runs its own checks before the demo does anything -- just decides
 # whether the menu line should look actionable. True only when what the demo
@@ -191,27 +238,28 @@ scan_demo_menu() {
     cat <<EOF
 
   Runs a real ScanCentral SAST scan against $FORTIFY_FIRST_SCAN_APP and shows
-  severity counts from SSC. Requires an SSC token with permission to create
-  application versions and submit scans -- pasted once below, never written
-  to .env or disk.
+  severity counts from SSC. Reuses an already-open SSC session or
+  FCLI_DEFAULT_SSC_TOKEN when available; otherwise asks for an SSC token
+  once below, never written to .env or disk.
 
 EOF
     scan_type_prereqs_sast_iwa_java || { press_any; return 1; }
     confirm "Continue?" || return 0
 
-    local token workdir av_name rc=0
-    read -rsp "Paste SSC token (input hidden; empty cancels): " token
-    echo
-    [ -z "$token" ] && { note "Cancelled."; press_any; return 0; }
+    local workdir av_name rc=0 SCAN_DEMO_SESSION_OWNED=0 acquire_rc=0
+    scan_demo_acquire_session || acquire_rc=$?
+    if [ "$acquire_rc" -eq 2 ]; then
+        press_any
+        return 0
+    elif [ "$acquire_rc" -ne 0 ]; then
+        press_any
+        return 1
+    fi
 
     workdir="$(mktemp -d)" || { error "Could not create a scratch directory."; press_any; return 1; }
     av_name="${FORTIFY_FIRST_SCAN_APP}:demo-$(scan_demo_run_id)"
 
-    trap 'scan_type_logout_sast_iwa_java; rm -rf "$workdir"' RETURN
-
-    note "Logging in to SSC..."
-    scan_type_login_sast_iwa_java "$token" || { press_any; return 1; }
-    token=""
+    trap '[ "$SCAN_DEMO_SESSION_OWNED" = 1 ] && scan_type_logout_sast_iwa_java; rm -rf "$workdir"' RETURN
 
     note "Checking for an available ScanCentral SAST sensor..."
     scan_type_sensor_check_sast_iwa_java || { rc=1; }

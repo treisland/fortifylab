@@ -295,6 +295,139 @@ class ScanDemoContractTests(unittest.TestCase):
             calls = call_log.read_text(encoding="utf-8")
             self.assertNotIn("--client-auth-token", calls)
 
+    def test_acquire_session_reuses_an_already_usable_session_without_logging_in(self) -> None:
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            source "$1"
+            FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+            scan_type_session_usable_sast_iwa_java() { return 0; }
+            scan_type_login_sast_iwa_java() { echo LOGIN_CALLED_UNEXPECTEDLY; return 1; }
+            scan_demo_acquire_session; rc=$?
+            printf 'RC=%s OWNED=%s\\n' "$rc" "$SCAN_DEMO_SESSION_OWNED"
+        """
+        result = subprocess.run(
+            ["bash", "-c", command, "acquire-reuse-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("RC=0 OWNED=0", result.stdout)
+        self.assertNotIn("LOGIN_CALLED_UNEXPECTEDLY", result.stdout)
+        self.assertIn("Reusing the existing SSC session", result.stdout)
+
+    def test_acquire_session_uses_fcli_default_ssc_token_without_prompting(self) -> None:
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            source "$1"
+            FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+            FCLI_DEFAULT_SSC_TOKEN=env-supplied-token
+            scan_type_session_usable_sast_iwa_java() { return 1; }
+            scan_type_login_sast_iwa_java() { printf 'LOGIN_TOKEN=%s\\n' "$1"; }
+            scan_demo_acquire_session; rc=$?
+            printf 'RC=%s OWNED=%s\\n' "$rc" "$SCAN_DEMO_SESSION_OWNED"
+        """
+        # No stdin provided: this path must not block on a prompt.
+        result = subprocess.run(
+            ["bash", "-c", command, "acquire-env-token-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            input="",
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("LOGIN_TOKEN=env-supplied-token", result.stdout)
+        self.assertIn("RC=0 OWNED=1", result.stdout)
+        self.assertIn("FCLI_DEFAULT_SSC_TOKEN", result.stdout)
+
+    def test_acquire_session_falls_back_to_interactive_prompt(self) -> None:
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            source "$1"
+            FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+            unset FCLI_DEFAULT_SSC_TOKEN
+            scan_type_session_usable_sast_iwa_java() { return 1; }
+            scan_type_login_sast_iwa_java() { printf 'LOGIN_TOKEN=%s\\n' "$1"; }
+            scan_demo_acquire_session; rc=$?
+            printf 'RC=%s OWNED=%s\\n' "$rc" "$SCAN_DEMO_SESSION_OWNED"
+        """
+        result = subprocess.run(
+            ["bash", "-c", command, "acquire-prompt-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            input="pasted-token\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("LOGIN_TOKEN=pasted-token", result.stdout)
+        self.assertIn("RC=0 OWNED=1", result.stdout)
+
+    def test_acquire_session_reports_cancel_distinctly_from_failure(self) -> None:
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            source "$1"
+            FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+            unset FCLI_DEFAULT_SSC_TOKEN
+            scan_type_session_usable_sast_iwa_java() { return 1; }
+            scan_type_login_sast_iwa_java() { echo LOGIN_CALLED_UNEXPECTEDLY; }
+            scan_demo_acquire_session
+            printf 'RC=%s\\n' "$?"
+        """
+        result = subprocess.run(
+            ["bash", "-c", command, "acquire-cancel-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            input="\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("RC=2", result.stdout)
+        self.assertNotIn("LOGIN_CALLED_UNEXPECTEDLY", result.stdout)
+
+    def test_menu_only_logs_out_a_session_it_created_itself(self) -> None:
+        stub_functions = """
+            title() { :; }
+            press_any() { :; }
+            confirm() { return 0; }
+            scan_type_prereqs_sast_iwa_java() { return 0; }
+            scan_type_login_sast_iwa_java() { return 0; }
+            scan_type_sensor_check_sast_iwa_java() { return 0; }
+            scan_type_acquire_sast_iwa_java() { return 0; }
+            scan_type_package_sast_iwa_java() { return 0; }
+            scan_type_submit_sast_iwa_java() { return 0; }
+            scan_type_poll_sast_iwa_java() { return 0; }
+            scan_type_verify_sast_iwa_java() { return 0; }
+            scan_type_results_sast_iwa_java() { :; }
+            scan_type_logout_sast_iwa_java() { echo LOGOUT_CALLED; }
+        """
+        for session_usable, expect_logout, stdin in (
+            (1, False, ""),
+            (0, True, "pasted-token\n"),
+        ):
+            with self.subTest(session_usable=session_usable):
+                command = f"""
+                    export WIZARD_NOMAIN=1 NO_COLOR=1
+                    source "$1"
+                    FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                    FORTIFY_FIRST_SCAN_APP=IWA-Java
+                    {stub_functions}
+                    scan_type_session_usable_sast_iwa_java() {{ return {1 - session_usable}; }}
+                    scan_demo_menu
+                """
+                result = subprocess.run(
+                    ["bash", "-c", command, f"menu-logout-{session_usable}-test", str(ROOT / "start_wizard.sh")],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    input=stdin,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if expect_logout:
+                    self.assertIn("LOGOUT_CALLED", result.stdout)
+                else:
+                    self.assertNotIn("LOGOUT_CALLED", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
