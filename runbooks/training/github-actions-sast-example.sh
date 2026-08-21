@@ -48,8 +48,8 @@ jobs:
         run: |
           fcli sc-sast package --source . --output app.zip
           fcli sc-sast scan start \
-            --publish-to-appversion "${{ vars.SSC_APP_VERSION }}" \
-            --package app.zip
+            --publish-to "${{ vars.SSC_APP_VERSION }}" \
+            --file app.zip
 YAML
 
 echo "Created ${TARGET_REPO}/.github/workflows/fortify-sast.yml"
