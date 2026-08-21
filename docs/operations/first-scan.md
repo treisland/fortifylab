@@ -51,9 +51,13 @@ demo (SAST · IWA-Java)**. It runs a real ScanCentral SAST scan against
 IWA-Java (Fortify's own sample vulnerable Java app) and prints severity
 counts pulled straight from SSC.
 
-It still asks for an SSC token once, pasted into a hidden prompt — consistent
-with the rest of this wizard, no SSC credential is ever written to `.env` or
-disk. `FORTIFY_FIRST_SCAN_REPO_URL` defaults to the official
+It reuses an already-logged-in SSC session or `FCLI_DEFAULT_SSC_TOKEN` when
+either is available (matching the read-if-present, never-written convention
+in the [FCLI runbooks](../runbooks/fcli.md)); otherwise it asks for an SSC token
+once, pasted into a hidden prompt — consistent with the rest of this wizard,
+no SSC credential is ever written to `.env` or disk. A session the demo logs
+into itself is logged back out when it finishes; a session it found already
+open is left alone. `FORTIFY_FIRST_SCAN_REPO_URL` defaults to the official
 [fortify/IWA-Java](https://github.com/fortify/IWA-Java) repository; override
 it in `.env` if you maintain your own fork or mirror. The demo also checks
 for a registered ScanCentral SAST sensor before submitting, so a missing
