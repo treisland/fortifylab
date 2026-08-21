@@ -71,7 +71,7 @@ export FORTIFY_RECOMMENDED_FCLI_VERSION="3.23.3"
 export FORTIFY_FCLI_INSTALL_DIR="$HOME/fortify/tools/bin"
 export FCLI_BIN="$FORTIFY_FCLI_INSTALL_DIR/fcli"
 export FCLI_DEFAULT_SSC_TOKEN="<set privately>"
-export FCLI_TRUSTSTORE="$FORTIFY_CERTS/truststore"
+export FCLI_TRUSTSTORE="$FORTIFY_CERTS/fcli-truststore"  # not certs/truststore -- see fcli-readiness.md
 export FCLI_TRUSTSTORE_TYPE="JKS"
 export FCLI_TRUSTSTORE_PWD="<DEFAULT_PASS from private .env>"
 ```

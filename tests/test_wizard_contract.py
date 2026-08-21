@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
 import tempfile
 import unittest
 import subprocess
@@ -517,6 +518,116 @@ exit 1
             self.assertIn("PROFILE_TYPE_COUNT=1", output)
             self.assertIn("PROFILE_SECRET=absent", output)
             self.assertNotIn("contract-secret", profile.read_text(encoding="utf-8"))
+
+    def test_fcli_truststore_path_prefers_explicit_client_truststore_env(self) -> None:
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            source "$1"
+            FCLI_CLIENT_TRUSTSTORE=/explicit/fcli-truststore
+            fcli_truststore_path
+        """
+        result = subprocess.run(
+            ["bash", "-c", command, "fcli-truststore-explicit-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "/explicit/fcli-truststore")
+
+    def test_fcli_truststore_path_defaults_to_fcli_truststore_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            certs = Path(directory) / "certs"
+            certs.mkdir()
+            (certs / "fcli-truststore").write_text("broad-jks-for-contract-test\n", encoding="utf-8")
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                source "$1"
+                FORTIFY_CERTS="$2"
+                fcli_truststore_path
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "fcli-truststore-default-test", str(ROOT / "start_wizard.sh"), str(certs)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), str(certs / "fcli-truststore"))
+
+    def test_fcli_truststore_path_falls_back_to_legacy_truststore_when_not_yet_generated(self) -> None:
+        # A lab that hasn't regenerated certs since this split still has the
+        # narrow, SSC-only truststore -- fcli must keep using that (lab trust
+        # only) rather than pointing at a fcli-truststore file that doesn't
+        # exist yet.
+        with tempfile.TemporaryDirectory() as directory:
+            certs = Path(directory) / "certs"
+            certs.mkdir()
+            (certs / "truststore").write_text("narrow-jks-for-contract-test\n", encoding="utf-8")
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                source "$1"
+                FORTIFY_CERTS="$2"
+                unset TRUSTSTORE
+                fcli_truststore_path
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "fcli-truststore-fallback-test", str(ROOT / "start_wizard.sh"), str(certs)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), str(certs / "truststore"))
+
+    def test_create_certs_builds_a_broader_fcli_truststore_than_sscs_own(self) -> None:
+        script = (ROOT / "scripts" / "create-certs.sh").read_text(encoding="utf-8")
+        self.assertIn("FCLI_CLIENT_TRUSTSTORE", script)
+        self.assertIn("JAVA_CACERTS", script)
+        self.assertIn('keytool -storepasswd -keystore "$FCLI_CLIENT_TRUSTSTORE"', script)
+        # Both the lab CA(s) and the update.fortify.com root must land in
+        # both keystores -- SSC's narrow one and fcli's broader one -- not
+        # just the narrow one.
+        self.assertEqual(script.count('-keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt'), 2)
+        self.assertEqual(script.count('-keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt'), 2)
+
+    def test_jdk_cacerts_copy_and_repassword_mechanism_produces_a_broad_trust_store(self) -> None:
+        # Functional proof of the exact mechanism create-certs.sh uses to
+        # seed FCLI_CLIENT_TRUSTSTORE: copy the JDK's default cacerts, then
+        # reset its store password, using the real system keytool -- not a
+        # stub -- since a wrong cacerts path or password would silently
+        # produce an unusably narrow (or unreadable) truststore.
+        keytool = shutil.which("keytool")
+        if not keytool:
+            self.skipTest("keytool not available in this environment")
+        with tempfile.TemporaryDirectory() as directory:
+            java_home = subprocess.run(
+                ["bash", "-c", 'dirname "$(dirname "$(readlink -f "$(command -v keytool)")")"'],
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            cacerts = Path(java_home) / "lib" / "security" / "cacerts"
+            if not cacerts.is_file():
+                self.skipTest(f"JDK cacerts not found at {cacerts}")
+            target = Path(directory) / "fcli-truststore"
+            shutil.copy(cacerts, target)
+            subprocess.run(
+                [keytool, "-storepasswd", "-keystore", str(target), "-storepass", "changeit", "-new", "contract-secret"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            listing = subprocess.run(
+                [keytool, "-list", "-keystore", str(target), "-storepass", "contract-secret"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            entry_count = listing.count("trustedCertEntry")
+            # A real JDK cacerts bundle ships well over 50 public root CAs;
+            # a narrow lab-only store (the bug this fixes) would have 1-2.
+            self.assertGreater(entry_count, 50, listing)
 
     @staticmethod
     def _write_fake_fcli(bin_dir: Path, call_log: Path) -> None:

@@ -12,8 +12,10 @@
 #   tls.crt, tls.key                — leaf cert for $DOMAIN (nginx ingress + SSC)
 #   keystore.p12                    — PKCS12 of the leaf
 #   keystore.jks                    — JKS form for SSC's HTTPS connector
-#   truststore                      — JVM truststore: leaf + mkcert rootCA
-#                                     + Amazon Root CA 1 (for update.fortify.com)
+#   truststore                      — SSC's own JVM truststore: leaf + mkcert
+#                                     rootCA + Amazon Root CA 1 (update.fortify.com)
+#   fcli-truststore                 — fcli client truststore: JDK default CA
+#                                     bundle + the same lab/update.fortify.com anchors
 #   update.fortify.com.crt          — leaf cert for the rulepack update server
 #
 # TLS modes:
@@ -157,13 +159,38 @@ keytool -importkeystore -alias "$DEFAULT_ALIAS" \
 # Java PKIX needs CA certs (not leaves) as trust anchors. We import:
 #   1. mkcert rootCA   — covers every cert we issue for $DOMAIN
 #   2. update.fortify.com root CA — covers rulepack updates across leaf rotations
+#
+# TRUSTSTORE is SSC's own server-side JVM trust store (mounted into the pod),
+# deliberately narrow to just those two anchors. FCLI_CLIENT_TRUSTSTORE is a
+# separate file for fcli client use: the same two anchors layered onto a copy
+# of the JDK's default CA bundle, since fcli also needs to reach arbitrary
+# external Fortify infrastructure (e.g. `fcli tool ... install`) that TRUSTSTORE
+# was never meant to cover. Reusing TRUSTSTORE for fcli previously broke that
+# with PKIX failures on anything outside the lab + update.fortify.com.
 
 # Seed the truststore with the leaf (lets keytool initialize the file).
 keytool -importkeystore -alias "$DEFAULT_ALIAS" \
     -srckeystore "$KEYSTORE" -srcstoretype pkcs12 -srcstorepass "$DEFAULT_PASS" \
     -destkeystore "$TRUSTSTORE" -deststorepass "$DEFAULT_PASS"
 
-# Import the lab CA or BYO CA bundle so SSC can validate served lab certs.
+# Seed the fcli client truststore from the JDK's own default CA bundle so
+# fcli keeps trusting the public internet once its truststore is pointed
+# here, not just the lab. Falls back to a copy of the narrow TRUSTSTORE if
+# the JDK's cacerts can't be located, so fcli at least still gets lab trust.
+JAVA_CACERTS_HOME="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v keytool)")")" 2>/dev/null)}"
+JAVA_CACERTS="${JAVA_CACERTS_HOME:+$JAVA_CACERTS_HOME/lib/security/cacerts}"
+if [ -n "$JAVA_CACERTS" ] && [ -s "$JAVA_CACERTS" ]; then
+  cp "$JAVA_CACERTS" "$FCLI_CLIENT_TRUSTSTORE"
+  chmod u+w "$FCLI_CLIENT_TRUSTSTORE"
+  keytool -storepasswd -keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass changeit -new "$DEFAULT_PASS" >/dev/null
+else
+  echo "⚠️  Could not locate the JDK default cacerts; fcli-truststore will only trust the lab and update.fortify.com, not the wider internet." >&2
+  keytool -importkeystore -alias "$DEFAULT_ALIAS" \
+      -srckeystore "$KEYSTORE" -srcstoretype pkcs12 -srcstorepass "$DEFAULT_PASS" \
+      -destkeystore "$FCLI_CLIENT_TRUSTSTORE" -deststorepass "$DEFAULT_PASS"
+fi
+
+# Import the lab CA or BYO CA bundle so SSC (and fcli) can validate served lab certs.
 CA_IMPORT_DIR="$(mktemp -d)"
 awk -v dir="$CA_IMPORT_DIR" '
     /-----BEGIN CERTIFICATE-----/ { n++; file=sprintf("%s/ca-%02d.pem", dir, n) }
@@ -176,6 +203,8 @@ for ca_file in "$CA_IMPORT_DIR"/*.pem; do
   ca_index=$((ca_index + 1))
   keytool -import -alias "lab-tls-ca-$ca_index" -file "$ca_file" \
       -keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt
+  keytool -import -alias "lab-tls-ca-$ca_index" -file "$ca_file" \
+      -keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt
 done
 [ "$ca_index" -gt 0 ] || { echo "❌ No CA certificates found in $ROOTCA_CERT."; exit 1; }
 
@@ -198,6 +227,8 @@ awk -v last="$(grep -c '^-----BEGIN CERTIFICATE-----' "$UPDATE_CHAIN")" '
     c==last' "$UPDATE_CHAIN" > "$ROOT_CA"
 keytool -import -alias update-fortify-root-ca -file "$ROOT_CA" \
     -keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt
+keytool -import -alias update-fortify-root-ca -file "$ROOT_CA" \
+    -keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt
 
 
 echo
