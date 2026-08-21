@@ -65,7 +65,7 @@ class ScanDemoContractTests(unittest.TestCase):
         self.assertIn(
             "fcli sc-sast scan start --file=<zip> --publish-to=<av> --ssc-session=fortifylab-first-scan", output
         )
-        self.assertIn("fcli ssc issue count --av=<av> --by=folder --ssc-session=fortifylab-first-scan", output)
+        self.assertIn("fcli ssc issue count --av=<av> --ssc-session=fortifylab-first-scan", output)
         self.assertIn("fcli ssc session logout --ssc-session=fortifylab-first-scan", output)
 
     def test_scan_demo_module_defines_the_full_scan_type_shape(self) -> None:
@@ -316,6 +316,44 @@ class ScanDemoContractTests(unittest.TestCase):
             self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
             args = captured.read_text(encoding="utf-8")
             self.assertIn("--sc-client-version 25.2.0", args)
+
+    def test_results_step_does_not_pass_a_lowercase_by_grouping(self) -> None:
+        # --by is matched case-sensitively against SSC's own dynamic
+        # grouping list (display name or GUID); fcli's own --by default is
+        # "FOLDER" (uppercase), and passing "folder" (lowercase) failed
+        # against real SSC with "No grouping found with display name or id
+        # folder". Leave --by unset so fcli's own default applies.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            captured = Path(directory) / "fcli-args.txt"
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'printf \'%s\\n\' "$*" > "{captured}"\n'
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                section() { :; }
+                scan_type_results_sast_iwa_java "IWA-Java:my-first-scan"
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "results-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+            args = captured.read_text(encoding="utf-8")
+            self.assertIn("ssc issue count", args)
+            self.assertIn("--av=IWA-Java:my-first-scan", args)
+            self.assertNotIn("--by", args)
 
     def test_setup_appversion_step_creates_the_appversion_if_missing(self) -> None:
         # `sc-sast scan start --publish-to` resolves the target appversion

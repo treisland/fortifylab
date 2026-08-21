@@ -211,7 +211,11 @@ scan_type_results_sast_iwa_java() {
     local av_name="$1" fcli_bin
     fcli_bin="$(fcli_path)" || return 1
     section "Severity summary for $av_name"
-    "$fcli_bin" ssc issue count --av="$av_name" --by=folder --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION"
+    # --by is matched case-sensitively against SSC's own dynamic grouping
+    # list (display name or GUID); "folder" (lowercase) doesn't match.
+    # Leave it unset so fcli uses its own --by default (FOLDER), which is
+    # guaranteed to match rather than guessing at SSC's exact casing.
+    "$fcli_bin" ssc issue count --av="$av_name" --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION"
 }
 
 scan_type_logout_sast_iwa_java() {
@@ -290,7 +294,7 @@ scan_demo_menu() {
     fcli ssc action run --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION package --source-dir <src> --av <av> --output <zip>
     fcli sc-sast scan start --file=<zip> --publish-to=<av> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
     fcli sc-sast scan status <jobToken> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION   (polled)
-    fcli ssc issue count --av=<av> --by=folder --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli ssc issue count --av=<av> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
     fcli ssc session logout --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION   (only if this run logged in)
 
 EOF
