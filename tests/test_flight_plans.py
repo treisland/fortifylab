@@ -835,6 +835,89 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("fortify-26.3", result.stdout)
         self.assertTrue(local_catalog_exists)
 
+    def test_promote_local_menu_skips_the_family_prompt_when_prefilled(self) -> None:
+        # When chained from discovery, the family is already known; the menu
+        # must not ask for it again.
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            fortify_home = tmp / "repo"
+            shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp", "config/flight-plans.local.toml"))
+            candidate_dir = fortify_home / "tmp" / "flight-plan-candidates"
+            candidate_dir.mkdir(parents=True, exist_ok=True)
+            (candidate_dir / "fortify-26.3.toml").write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans."fortify-26.3"]
+                    label = "Fortify 26.3"
+                    status = "candidate"
+                    family = "26.3"
+
+                    [flight_plans."fortify-26.3".components]
+                    FORTIFY_SSC_CHART_VERSION = "26.3.0-1"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["XDG_CONFIG_HOME"] = str(tmp / "config")
+            env["HOME"] = str(tmp / "home")
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'export WIZARD_NOMAIN=1 NO_COLOR=1; source "$1"; title() { :; }; sleep() { :; }; '
+                    'FORTIFY_HOME_K8S="$PWD"; '
+                    'flight_plan_promote_local_menu 26.3; '
+                    'flight_plan_tool list --include-candidates',
+                    "promote-local-prefilled-test",
+                    str(fortify_home / "start_wizard.sh"),
+                ],
+                cwd=fortify_home,
+                # No family line here -- only the status/confirm/press_any prompts.
+                input="candidate\ny\n\n",
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("family already discovered", result.stdout)
+        self.assertIn("fortify-26.3", result.stdout)
+
+    def test_discovery_menu_offers_to_add_the_candidate_immediately(self) -> None:
+        # Regression guard: discovery used to write a candidate file and
+        # silently return to the menu, leaving "Add a discovered candidate to
+        # my local Flight Plans" as an unconnected item the user had to
+        # already know existed and re-navigate to (with the family name
+        # re-typed from memory). Discovery must now surface that next step
+        # and offer to chain straight into it.
+        result = self.run_wizard_functions(
+            'read -r _lab_ack; '
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; mkdir -p "$tmp/tmp/flight-plan-candidates"; '
+            'flight_plan_tool() { echo "Wrote candidate Flight Plan draft: $4"; }; '
+            'flight_plan_promote_local_menu() { printf "PROMOTE_CALLED family=%s\\n" "$1"; }; '
+            'flight_plan_discovery_menu',
+            user_input="26.3\ny\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Next step: add this candidate", result.stdout)
+        self.assertIn("PROMOTE_CALLED family=26.3", result.stdout)
+
+    def test_discovery_menu_lets_user_defer_adding_the_candidate(self) -> None:
+        result = self.run_wizard_functions(
+            'read -r _lab_ack; '
+            'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; mkdir -p "$tmp/tmp/flight-plan-candidates"; '
+            'flight_plan_tool() { echo "Wrote candidate Flight Plan draft: $4"; }; '
+            'flight_plan_promote_local_menu() { printf "PROMOTE_CALLED family=%s\\n" "$1"; }; '
+            'flight_plan_discovery_menu',
+            user_input="26.3\nn\n\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("option 9", result.stdout)
+        self.assertNotIn("PROMOTE_CALLED", result.stdout)
+
     def test_apply_flight_plan_cli_dry_run_does_not_write_env(self) -> None:
         result, env_after, backups = self.run_wizard_cli("apply-flight-plan", "fortify-26.2")
         self.assertEqual(result.returncode, 0, result.stderr)

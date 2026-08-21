@@ -2325,11 +2325,18 @@ EOF
     [ -n "$family" ] || return 0
     output="$FORTIFY_HOME_K8S/tmp/flight-plan-candidates/fortify-$family.toml"
     flight_plan_tool discover --family "$family" --output "$output"
+    echo
+    note "Next step: add this candidate to your own local Flight Plans (never committed, never touches the shared catalog)."
+    if confirm "Add fortify-$family to your local Flight Plans now?"; then
+        flight_plan_promote_local_menu "$family"
+        return 0
+    fi
+    note "You can add it later from 'Add a discovered candidate to my local Flight Plans' (option 9)."
     press_any
 }
 
 flight_plan_promote_local_menu() {
-    local family candidate_path status
+    local family="${1:-}" candidate_path status
     title "Add to my local Flight Plans"
     cat <<'EOF'
 
@@ -2343,7 +2350,9 @@ First run "Refresh/discover candidate Flight Plan tags" for the release you
 want, then come back here to add it.
 EOF
     echo
-    ask family "Fortify family already discovered, for example 26.3:"
+    if [ -z "$family" ]; then
+        ask family "Fortify family already discovered, for example 26.3:"
+    fi
     [ -n "$family" ] || return 0
     candidate_path="$FORTIFY_HOME_K8S/tmp/flight-plan-candidates/fortify-$family.toml"
     if [ ! -f "$candidate_path" ]; then
