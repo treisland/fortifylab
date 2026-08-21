@@ -603,10 +603,12 @@ class FlightPlansTests(unittest.TestCase):
         for line in (
             "1) flight_plan_full_upgrade_flow pending_updates; press_any ;;",
             "2) flight_plan_select_menu pending_updates ;;",
-            "3) flight_plan_show_candidates; press_any ;;",
-            "4) flight_plan_discovery_menu ;;",
-            "5) flight_plan_promote_local_menu ;;",
-            "6) flight_plan_component_override_menu pending_updates || return $? ;;",
+            "3) flight_plan_preview_menu all ;;",
+            "4) flight_plan_show_candidates; press_any ;;",
+            "5) flight_plan_discovery_menu ;;",
+            "6) flight_plan_promote_local_menu ;;",
+            "7) flight_plan_remove_local_menu ;;",
+            "8) flight_plan_component_override_menu pending_updates || return $? ;;",
         ):
             self.assertIn(line, menu)
 
@@ -775,6 +777,90 @@ class FlightPlansTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing component key FORTIFY_SSC_IMAGE_TAG", result.stderr)
         self.assertFalse(local_path.exists())
+
+    def test_remove_local_dry_run_then_yes_removes_only_from_local_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "flight-plans.toml"
+            shutil.copy(CATALOG, catalog_path)
+            candidate_path = Path(directory) / "fortify-26.3.toml"
+            candidate_path.write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans."fortify-26.3"]
+                    label = "Fortify 26.3"
+                    status = "candidate"
+                    family = "26.3"
+
+                    [flight_plans."fortify-26.3".components]
+                    FORTIFY_SSC_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SSC_IMAGE_TAG = "26.3.0.0001"
+                    FORTIFY_SCSAST_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCSAST_WORKER_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCDAST_CHART_VERSION = "24.4.0-2"
+                    FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            local_path = Path(directory) / "flight-plans.local.toml"
+            promote = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "promote-local", str(candidate_path), "--status", "known-good", "--yes"], cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertEqual(promote.returncode, 0, promote.stderr)
+            self.assertTrue(local_path.exists())
+
+            dry_run = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "remove-local", "fortify-26.3"], cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
+            self.assertIn("Dry run only", dry_run.stdout)
+            self.assertIn("fortify-26.3", local_path.read_text(encoding="utf-8"))
+
+            applied = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "remove-local", "fortify-26.3", "--yes"], cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            self.assertNotIn("fortify-26.3", local_path.read_text(encoding="utf-8"))
+            self.assertEqual(catalog_path.read_text(encoding="utf-8"), CATALOG.read_text(encoding="utf-8"))
+
+    def test_remove_local_rejects_a_plan_not_in_the_local_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "flight-plans.toml"
+            shutil.copy(CATALOG, catalog_path)
+            default_id = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "default"], cwd=ROOT, check=False, capture_output=True, text=True).stdout.strip()
+            result = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "remove-local", default_id, "--yes"], cwd=ROOT, check=False, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not in your local Flight Plans", result.stderr)
+
+    def test_list_local_only_shows_only_local_plans(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "flight-plans.toml"
+            shutil.copy(CATALOG, catalog_path)
+            candidate_path = Path(directory) / "fortify-26.3.toml"
+            candidate_path.write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans."fortify-26.3"]
+                    label = "Fortify 26.3"
+                    status = "candidate"
+                    family = "26.3"
+
+                    [flight_plans."fortify-26.3".components]
+                    FORTIFY_SSC_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SSC_IMAGE_TAG = "26.3.0.0001"
+                    FORTIFY_SCSAST_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCSAST_WORKER_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCDAST_CHART_VERSION = "24.4.0-2"
+                    FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            promote = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "promote-local", str(candidate_path), "--status", "candidate", "--yes"], cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertEqual(promote.returncode, 0, promote.stderr)
+            local_only = subprocess.run(["python3", str(TOOL), "--catalog", str(catalog_path), "list", "--local-only"], cwd=ROOT, check=False, capture_output=True, text=True)
+        self.assertEqual(local_only.returncode, 0, local_only.stderr)
+        self.assertEqual(local_only.stdout.strip(), "\t".join(["fortify-26.3", "Fortify 26.3", "candidate", "26.3"]))
 
     def test_full_upgrade_flow_refuses_to_stage_flight_plan_with_no_populated_components(self) -> None:
         result = self.run_wizard_functions(
@@ -973,6 +1059,101 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("4. deprecated", result.stdout)
         self.assertIn("fortify-26.3", result.stdout)
         self.assertIn('status = "known-good"', local_catalog)
+
+    def test_preview_menu_shows_selected_plan_full_details(self) -> None:
+        default_id = self.run_tool("default").stdout.strip()
+        result = self.run_wizard_functions(
+            'read -r _lab_ack; tmp=$(mktemp -d); FORTIFY_HOME_K8S="$PWD"; '
+            'flight_plan_preview_menu',
+            user_input="1\n\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Flight Plan details", result.stdout)
+        self.assertIn(default_id, result.stdout)
+        self.assertIn("Fortify components", result.stdout)
+        self.assertIn("Database defaults are separate", result.stdout)
+
+    def test_remove_local_menu_removes_the_selected_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            fortify_home = tmp / "repo"
+            shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp", "config/flight-plans.local.toml"))
+            candidate_dir = fortify_home / "tmp" / "flight-plan-candidates"
+            candidate_dir.mkdir(parents=True, exist_ok=True)
+            (candidate_dir / "fortify-26.3.toml").write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans."fortify-26.3"]
+                    label = "Fortify 26.3"
+                    status = "candidate"
+                    family = "26.3"
+
+                    [flight_plans."fortify-26.3".components]
+                    FORTIFY_SSC_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SSC_IMAGE_TAG = "26.3.0.0001"
+                    FORTIFY_SCSAST_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCSAST_WORKER_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCDAST_CHART_VERSION = "24.4.0-2"
+                    FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["XDG_CONFIG_HOME"] = str(tmp / "config")
+            env["HOME"] = str(tmp / "home")
+            promote = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'export WIZARD_NOMAIN=1 NO_COLOR=1; source "$1"; title() { :; }; sleep() { :; }; '
+                    'FORTIFY_HOME_K8S="$PWD"; flight_plan_promote_local_menu 26.3',
+                    "remove-local-setup",
+                    str(fortify_home / "start_wizard.sh"),
+                ],
+                cwd=fortify_home,
+                input="1\ny\n\n",
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(promote.returncode, 0, promote.stderr)
+            self.assertTrue((fortify_home / "config" / "flight-plans.local.toml").exists())
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'export WIZARD_NOMAIN=1 NO_COLOR=1; source "$1"; title() { :; }; sleep() { :; }; '
+                    'FORTIFY_HOME_K8S="$PWD"; flight_plan_remove_local_menu',
+                    "remove-local-test",
+                    str(fortify_home / "start_wizard.sh"),
+                ],
+                cwd=fortify_home,
+                # "1" selects the only local plan, "y" confirms removal.
+                input="1\ny\n\n",
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            local_catalog = (fortify_home / "config" / "flight-plans.local.toml").read_text(encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Updated local catalog", result.stdout)
+        self.assertNotIn("fortify-26.3", local_catalog)
+
+    def test_remove_local_menu_reports_when_there_is_nothing_to_remove(self) -> None:
+        result = self.run_wizard_functions(
+            'read -r _lab_ack; tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; cp -r config "$tmp/"; rm -f "$tmp/config/flight-plans.local.toml"; '
+            'flight_plan_remove_local_menu',
+            user_input="\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no local Flight Plans to remove", result.stdout)
 
     def test_discovery_menu_offers_to_add_the_candidate_immediately(self) -> None:
         # Regression guard: discovery used to write a candidate file and

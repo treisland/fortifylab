@@ -1809,6 +1809,10 @@ flight_plan_list_records() {
     fi
 }
 
+flight_plan_local_records() {
+    flight_plan_tool list --local-only 2>/dev/null
+}
+
 flight_plan_status_label() {
     case "$1" in
         recommended) printf '%s\n' Recommended ;;
@@ -2116,6 +2120,15 @@ EOF
     done
 }
 
+flight_plan_preview_menu() {
+    local include_candidates="${1:-}" plan_id
+    flight_plan_choose_menu plan_id "$include_candidates" || return $?
+    [ -n "$plan_id" ] || return 0
+    section "Flight Plan details"
+    flight_plan_tool show "$plan_id"
+    press_any
+}
+
 flight_plan_select_menu() {
     local array_name="$1" include_candidates="${2:-}" plan_id
     FLIGHT_PLAN_CHOICE_LABEL=""
@@ -2386,6 +2399,52 @@ EOF
     press_any
 }
 
+flight_plan_remove_local_menu() {
+    local records=() record plan_id label status family idx choice
+    title "Remove a local Flight Plan"
+    cat <<'EOF'
+
+This removes a Flight Plan from your own local catalog
+(config/flight-plans.local.toml), which is never committed to git. It never
+touches the shared, repo-owner-curated catalog -- only plans you added with
+"Add a discovered candidate to my local Flight Plans" show up here.
+EOF
+    echo
+    mapfile -t records < <(flight_plan_local_records)
+    if [ "${#records[@]}" -eq 0 ]; then
+        note "You have no local Flight Plans to remove."
+        press_any
+        return 0
+    fi
+    section "Your local Flight Plans"
+    for idx in "${!records[@]}"; do
+        IFS=$'\t' read -r plan_id label status family <<<"${records[$idx]}"
+        printf '  %2d. %-18s %-13s %s\n' "$((idx + 1))" "$label" "$(flight_plan_status_label "$status")" "family $family"
+    done
+    cat <<'EOF'
+
+  b. Back
+EOF
+    echo
+    ask choice "Select a Flight Plan to remove:"
+    case "$choice" in
+        [Bb]|"") return 0 ;;
+        ''|*[!0-9]*) error "Select a Flight Plan number shown above."; press_any; return 0 ;;
+    esac
+    if [ "$choice" -lt 1 ] || [ "$choice" -gt "${#records[@]}" ]; then
+        error "Out of range"
+        press_any
+        return 0
+    fi
+    IFS=$'\t' read -r plan_id label status family <<<"${records[$((choice - 1))]}"
+    if confirm "Remove '$label' ($plan_id) from your local Flight Plans? This cannot be undone."; then
+        flight_plan_tool remove-local "$plan_id" --yes
+    else
+        note "Not removed."
+    fi
+    press_any
+}
+
 flight_plan_versions_menu() {
     local choice pending_updates=()
     while true; do
@@ -2410,18 +2469,20 @@ EOF
         section "Core actions"
         echo "   1. Upgrade full Flight Plan"
         echo "   2. Select Fortify Flight Plan"
+        echo "   3. Preview a Flight Plan's versions"
         section "Discover new releases"
-        echo "   3. Show candidate Flight Plans"
-        echo "   4. Refresh/discover candidate Flight Plan tags"
-        echo "   5. Add a discovered candidate to my local Flight Plans"
+        echo "   4. Show candidate Flight Plans"
+        echo "   5. Refresh/discover candidate Flight Plan tags"
+        echo "   6. Add a discovered candidate to my local Flight Plans"
+        echo "   7. Remove a local Flight Plan"
         section "Advanced (expert)"
-        echo "   6. Advanced individual component override"
-        echo "   7. Override all Fortify component version fields"
-        echo "   8. Manage database versions"
+        echo "   8. Advanced individual component override"
+        echo "   9. Override all Fortify component version fields"
+        echo "  10. Manage database versions"
         section "Review and apply"
-        echo "   9. Compare .env to selected Flight Plan"
-        echo "  10. Preview pending .env changes"
-        echo "  11. Apply pending version changes"
+        echo "  11. Compare .env to selected Flight Plan"
+        echo "  12. Preview pending .env changes"
+        echo "  13. Apply pending version changes"
         echo
         echo "   r. Return"
         echo "   q. Quit safely"
@@ -2430,15 +2491,17 @@ EOF
         case "$choice" in
             1) flight_plan_full_upgrade_flow pending_updates; press_any ;;
             2) flight_plan_select_menu pending_updates ;;
-            3) flight_plan_show_candidates; press_any ;;
-            4) flight_plan_discovery_menu ;;
-            5) flight_plan_promote_local_menu ;;
-            6) flight_plan_component_override_menu pending_updates || return $? ;;
-            7) env_guided_section_editor "Individual Fortify component versions" versions || return $? ;;
-            8) env_guided_section_editor "Database versions" database_versions || return $? ;;
-            9) flight_plan_show_comparison; press_any ;;
-            10) [ "${#pending_updates[@]}" -gt 0 ] && env_preview_changes "${pending_updates[@]}" || note "No pending changes."; press_any ;;
-            11) env_section_apply_pending flight-plan pending_updates; press_any ;;
+            3) flight_plan_preview_menu all ;;
+            4) flight_plan_show_candidates; press_any ;;
+            5) flight_plan_discovery_menu ;;
+            6) flight_plan_promote_local_menu ;;
+            7) flight_plan_remove_local_menu ;;
+            8) flight_plan_component_override_menu pending_updates || return $? ;;
+            9) env_guided_section_editor "Individual Fortify component versions" versions || return $? ;;
+            10) env_guided_section_editor "Database versions" database_versions || return $? ;;
+            11) flight_plan_show_comparison; press_any ;;
+            12) [ "${#pending_updates[@]}" -gt 0 ] && env_preview_changes "${pending_updates[@]}" || note "No pending changes."; press_any ;;
+            13) env_section_apply_pending flight-plan pending_updates; press_any ;;
             [Rr]) env_section_prompt_return pending_updates && return 0 ;;
             [Qq]) env_section_prompt_return pending_updates && return 130 ;;
             *) error "Invalid selection"; sleep 1 ;;
