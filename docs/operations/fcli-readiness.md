@@ -20,6 +20,11 @@ extracts `fcli` into the user-local install directory, adds that directory to th
 current shell `PATH`, and persists the PATH handoff in the selected shell
 profile when it is not already present.
 
+You do not need to run this manually every session: the wizard also
+re-activates fcli's `PATH` automatically on every launch whenever it detects
+fcli already installed but not yet on `PATH` in the current shell — the same
+transparent detect-and-fix treatment it gives microk8s/docker group access.
+
 If Fortify Lab TLS certificates already exist, the install flow also activates
 fcli lab TLS trust for the current shell and persists only non-secret truststore
 location/type hints. It does not write the truststore password to shell profiles.
@@ -31,9 +36,17 @@ lifecycle operations.
 ## Lab TLS trust
 
 fcli is Java-based, so browser trust and operating-system trust are not always
-enough for local mkcert certificates. Use **Tools and FCLI readiness -> Configure
-fcli trust for lab TLS** after generating TLS certificates, or rerun the install
-flow after certificates exist.
+enough for local mkcert certificates. The wizard configures this automatically
+in two places, so you normally never need to touch it directly:
+
+- On every launch, whenever the lab truststore exists and trust isn't yet
+  active for the current shell.
+- Immediately after **Certs + Secrets -> Generate certs + secrets** rebuilds
+  the truststore, so a certificate rotation never leaves fcli trusting stale
+  certs.
+
+Use **Tools and FCLI readiness -> Configure fcli trust for lab TLS** only to
+force a re-check or recover from an unusual state.
 
 The wizard sets these values for the current shell:
 
@@ -44,9 +57,12 @@ export FCLI_TRUSTSTORE_PWD="<DEFAULT_PASS from private .env>"
 ```
 
 Only the non-secret truststore path and type are persisted for future shells.
-Set the password privately per shell, or use the wizard option again, before
-running SSC login runbooks. This is the usual fix for fcli `PKIX` certificate
-validation failures against the local SSC URL.
+In addition, it calls fcli's own persistent trust command —
+`fcli config truststore set --file <truststore> --type jks --password <DEFAULT_PASS>`
+— so trust is active for every future shell and fcli invocation, not just the
+one the wizard happens to be running in. This is the usual fix for fcli `PKIX`
+certificate validation failures against the local SSC URL, and it now requires
+no manual step at all in the common case.
 
 ## SSC-primary handoff
 

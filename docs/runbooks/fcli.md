@@ -50,9 +50,11 @@ token, then passes it to fcli through `FCLI_DEFAULT_SSC_TOKEN` for the login
 process rather than placing the token on the command line. If the variable is
 missing, it prints a redacted command shape and exits without attempting login.
 
-If login fails with a `PKIX` or certificate validation error, run **Tools and
-FCLI readiness -> Configure fcli trust for lab TLS** or the
-`configure-lab-trust.sh` runbook before retrying login.
+The wizard configures fcli trust automatically on every launch and right after
+certs are regenerated, so a `PKIX` or certificate validation error here usually
+means the wizard hasn't been (re)launched since certs last changed. Run **Tools
+and FCLI readiness -> Configure fcli trust for lab TLS** or the
+`configure-lab-trust.sh` runbook to force a re-check before retrying login.
 
 FoD is separate from this local SSC runbook set. Use `fcli fod ...` only for a
 deliberate FoD workflow with FoD tenant/client credentials kept outside this

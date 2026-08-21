@@ -187,6 +187,7 @@ if [ -z "${WIZARD_NOMAIN:-}" ]; then
     fortify_lab_require_acknowledgement || exit 1
     ensure_active_groups
     bootstrap_env
+    fcli_activate
     guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
     if [ "$first_launch" -eq 1 ]; then
         fortifylab_first_time_welcome_menu

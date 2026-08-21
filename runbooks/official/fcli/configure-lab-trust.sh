@@ -54,7 +54,13 @@ fi
 
 echo
 cat <<EOF
-Use the wizard option for the current shell:
+The wizard now configures this automatically: on every launch (whenever trust
+isn't yet active for the current shell) and immediately after certs are
+regenerated via Certs + Secrets -> Generate certs + secrets. It also runs
+'fcli config truststore set' so trust is active for every future shell, not
+just the one the wizard happens to be running in.
+
+Use the wizard option only to force a re-check or recover from an unusual state:
   Tools and FCLI readiness -> Configure fcli trust for lab TLS
 
 This avoids the common fcli PKIX error when Java does not trust the lab-local mkcert CA.

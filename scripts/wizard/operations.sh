@@ -843,13 +843,26 @@ EOF
     ask choice "Select:"
 
     case "$choice" in
-        1) ( bash "$FORTIFY_HOME_K8S/scripts/create-certs.sh" );        press_any ;;
+        1) ( bash "$FORTIFY_HOME_K8S/scripts/create-certs.sh" ) && fcli_reimport_trust_after_regen; press_any ;;
         2) ( bash "$FORTIFY_HOME_K8S/scripts/create-secrets.sh" );      press_any ;;
         3) ( bash "$FORTIFY_HOME_K8S/scripts/create-certs.sh" \
-             && bash "$FORTIFY_HOME_K8S/scripts/create-secrets.sh" );   press_any ;;
+             && bash "$FORTIFY_HOME_K8S/scripts/create-secrets.sh" ) && fcli_reimport_trust_after_regen; press_any ;;
         [Rr]) return ;;
         *) error "Invalid"; sleep 1 ;;
     esac
+}
+
+# fcli_reimport_trust_after_regen — re-imports the freshly regenerated lab
+# truststore into fcli's trust config every time, unconditionally (unlike
+# fcli_activate, which skips when env-var state already looks active). Cert
+# regeneration rewrites the truststore file's content in place, and we don't
+# want to depend on fcli's "set" command re-reading that path live rather
+# than snapshotting it — always re-run so it's correct either way. No-op if
+# fcli isn't installed or DEFAULT_PASS isn't available.
+fcli_reimport_trust_after_regen() {
+    { [ -x "$FORTIFY_FCLI_INSTALL_DIR/fcli" ] || command -v fcli >/dev/null 2>&1; } || return 0
+    [ -n "${DEFAULT_PASS:-}" ] || return 0
+    fcli_configure_lab_trust "$(fcli_truststore_path)" || true
 }
 
 
@@ -2506,6 +2519,12 @@ fcli_persist_lab_trust_hints() {
     } >> "$profile"
 }
 
+fcli_configure_persistent_trust() {
+    local truststore="${1:-$(fcli_truststore_path)}" fcli_bin
+    fcli_bin="$(fcli_path 2>/dev/null)" || return 1
+    "$fcli_bin" config truststore set --file "$truststore" --type jks --password "$DEFAULT_PASS" >/dev/null 2>&1
+}
+
 fcli_configure_lab_trust() {
     local truststore="${1:-$(fcli_truststore_path)}" profile
     if [ ! -s "$truststore" ]; then
@@ -2521,7 +2540,11 @@ fcli_configure_lab_trust() {
     profile="$(fcli_shell_profile_path)"
     note "Activated fcli lab TLS trust for this shell."
     note "Persisted non-secret truststore hints in $profile."
-    note "For future shells, export FCLI_TRUSTSTORE_PWD from DEFAULT_PASS in a private shell."
+    if fcli_configure_persistent_trust "$truststore"; then
+        note "Configured fcli's own persistent trust store (active for every future shell, no export needed)."
+    else
+        note "For future shells, export FCLI_TRUSTSTORE_PWD from DEFAULT_PASS in a private shell."
+    fi
 }
 
 fcli_trust_status_line() {
@@ -2543,6 +2566,25 @@ fcli_path() {
         return 0
     fi
     return 1
+}
+
+# fcli_activate — transparently re-activates fcli's PATH and lab TLS trust
+# whenever they're already installed/generated but not yet active in this
+# process, the same "detect and fix, no manual step" treatment as
+# ensure_active_groups gives microk8s/docker. Safe to call unconditionally
+# (wizard startup, after cert regeneration): no-ops if fcli isn't installed
+# or the truststore doesn't exist yet.
+fcli_activate() {
+    [ -x "$FORTIFY_FCLI_INSTALL_DIR/fcli" ] || command -v fcli >/dev/null 2>&1 || return 0
+    fcli_export_current_path "$FORTIFY_FCLI_INSTALL_DIR" 2>/dev/null || true
+    fcli_persist_path "$FORTIFY_FCLI_INSTALL_DIR" 2>/dev/null || true
+
+    local truststore
+    truststore="$(fcli_truststore_path)"
+    [ -s "$truststore" ] || return 0
+    [ -n "${DEFAULT_PASS:-}" ] || return 0
+    fcli_trust_configured_current "$truststore" && return 0
+    fcli_configure_lab_trust "$truststore" || true
 }
 
 fcli_installed_version() {
