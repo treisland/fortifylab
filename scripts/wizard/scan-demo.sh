@@ -65,10 +65,20 @@ scan_type_check_egress_sast_iwa_java() {
 }
 
 scan_type_login_sast_iwa_java() {
-    local token="$1" fcli_bin
+    local token="$1" fcli_bin client_auth_token
     local -a extra_args=()
     fcli_bin="$(fcli_path)" || return 1
     [ -n "${SCSAST_CTRL_URL:-}" ] && extra_args=(--sc-sast-url "$SCSAST_CTRL_URL")
+    # Same client_auth_token the fcli_print_command_templates guidance already
+    # tells operators to pass by hand -- without it, fcli's SC-SAST session
+    # (sensor list/package/submit, all used later in this flow) is not
+    # actually authenticated even though the SSC login itself succeeds.
+    client_auth_token=$(credential_value_from_secret fortify-secrets scancentral-client-auth-token 2>/dev/null) || true
+    if [ -n "$client_auth_token" ]; then
+        extra_args+=(--client-auth-token "$client_auth_token")
+    else
+        note "Could not read the ScanCentral SAST client auth token from Kubernetes; continuing without SC-SAST session auth."
+    fi
     "$fcli_bin" ssc session login --url "$SSC_URL" "${extra_args[@]}" \
         --token="$token" --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION"
 }

@@ -25,7 +25,7 @@ set -euo pipefail
 : "${SSC_CITOKEN:?Set SSC_CITOKEN to an SSC token with permission to create/upload scans}"
 : "${SCSAST_CLIENT_AUTH_TOKEN:?Set SCSAST_CLIENT_AUTH_TOKEN from the protected SAST client token}"
 
-"$FCLI_BIN" ssc session login --url "$SSC_URL" --token "$SSC_CITOKEN" --ssc-session "$FCLI_SSC_SESSION"
+"$FCLI_BIN" ssc session login --url "$SSC_URL" --sc-sast-url "$SCSAST_CTRL_URL" --token "$SSC_CITOKEN" --client-auth-token "$SCSAST_CLIENT_AUTH_TOKEN" --ssc-session "$FCLI_SSC_SESSION"
 "$FCLI_BIN" ssc appversion create "$SSC_APP_NAME:$SSC_APP_VERSION" --ssc-session "$FCLI_SSC_SESSION" --auto-required-attrs || true
 
 pushd "$SYNTHETIC_SOURCE_DIR" >/dev/null

@@ -226,6 +226,75 @@ class ScanDemoContractTests(unittest.TestCase):
             self.assertIn("--token=synthetic-token", calls)
             self.assertNotIn("--ci-token", calls)
 
+    def test_login_includes_client_auth_token_when_readable_from_kubernetes(self) -> None:
+        # Regression guard: fcli's SC-SAST session (used later for sensor
+        # list/package/submit) is not actually authenticated without
+        # --client-auth-token, even though the SSC login itself succeeds
+        # without it -- confirmed against a real fcli's working invocation.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            call_log = Path(directory) / "calls.log"
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'printf \'%s\\n\' "$*" >> "{call_log}"\n'
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                SSC_URL=https://ssc.fortifylab.test
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                credential_value_from_secret() { printf 'synthetic-client-auth-token\\n'; }
+                scan_type_login_sast_iwa_java "synthetic-token"
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "login-cat-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+            calls = call_log.read_text(encoding="utf-8")
+            self.assertIn("--client-auth-token synthetic-client-auth-token", calls)
+
+    def test_login_warns_but_continues_when_client_auth_token_is_unreadable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            call_log = Path(directory) / "calls.log"
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'printf \'%s\\n\' "$*" >> "{call_log}"\n'
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                SSC_URL=https://ssc.fortifylab.test
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                credential_value_from_secret() { return 1; }
+                scan_type_login_sast_iwa_java "synthetic-token"
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "login-cat-missing-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+            self.assertIn("Could not read the ScanCentral SAST client auth token", result.stdout + result.stderr)
+            calls = call_log.read_text(encoding="utf-8")
+            self.assertNotIn("--client-auth-token", calls)
+
 
 if __name__ == "__main__":
     unittest.main()
