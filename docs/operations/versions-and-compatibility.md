@@ -224,6 +224,28 @@ curated-catalog-only concept. `config/flight-plans.toml` itself is never
 modified by this workflow; `validate` against the curated catalog is
 unaffected.
 
+To preview a Flight Plan's component versions before selecting or upgrading to
+it -- curated or your own local ones -- use **Deployment Versions and Flight
+Plan -> Preview a Flight Plan's versions**, or from the CLI:
+
+```bash
+./scripts/tools/flight-plans.py show fortify-26.2
+```
+
+To remove one of your own local Flight Plans, use **Deployment Versions and
+Flight Plan -> Remove a local Flight Plan**, or from the CLI:
+
+```bash
+./scripts/tools/flight-plans.py list --local-only
+./scripts/tools/flight-plans.py remove-local fortify-26.3 --yes
+```
+
+Only plans in your local catalog can be removed this way; the shared curated
+catalog is never touched. To change a local plan's component versions instead
+of removing it, re-run `discover` and `promote-local` for the same id --
+`promote-local` upserts by plan id, so this overwrites the existing local
+entry in place.
+
 ## Applying a Flight Plan without the interactive menu
 
 Everything above manages *which Flight Plans exist*. To actually write a

@@ -66,7 +66,7 @@ Command groups:
     default, env-updates, validate
 
   Anyone -- discover and manage your own Flight Plans:
-    discover-releases, discover, promote-local
+    discover-releases, discover, promote-local, remove-local
 
   Repo-owner curation:
     curate, promote (writes the shared catalog)
@@ -86,6 +86,9 @@ Common workflows:
   Add a candidate to your own local Flight Plans (never touches the shared catalog):
     flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
     flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.2.toml --status known-good --yes
+
+  Remove one of your own local Flight Plans (never touches the shared catalog):
+    flight-plans.py remove-local fortify-26.2 --yes
 
   Repo owner: curate and promote into the shared catalog:
     flight-plans.py curate --years 25,26
@@ -826,6 +829,31 @@ def promote_local_candidate(base_catalog_path: Path, candidate_path: Path, statu
     return 0
 
 
+def remove_local_plan(base_catalog_path: Path, plan_id: str, yes: bool) -> int:
+    """Remove one Flight Plan from the user's own, gitignored local catalog.
+    Never touches the shared curated catalog -- a plan that only exists
+    there is not removable through this command."""
+    local_path = local_catalog_path(base_catalog_path)
+    local = load_local_catalog(base_catalog_path)
+    if plan_id not in local.flight_plans:
+        print(f"ERROR: {plan_id} is not in your local Flight Plans ({local_path})", file=sys.stderr)
+        return 1
+    plans = {key: dict(value) for key, value in local.flight_plans.items()}
+    removed = plans.pop(plan_id)
+    data = dict(local.data)
+    data["flight_plans"] = plans
+    print(f"Remove plan:          {plan_id} ({removed.get('label', plan_id)})")
+    print(f"Target local catalog: {local_path}")
+    if not yes:
+        print("Dry run only. Re-run with --yes to update your local catalog.")
+        return 0
+    backup = local_path.with_suffix(local_path.suffix + ".bak")
+    backup.write_text(local_path.read_text(encoding="utf-8"), encoding="utf-8")
+    local_path.write_text(render_catalog(data), encoding="utf-8")
+    print(f"Updated local catalog. Backup: {backup}")
+    return 0
+
+
 def curate(catalog: Catalog, years_text: str, fixture_dir: Path | None) -> int:
     years = {item.strip() for item in years_text.split(",") if item.strip()} if years_text else None
     scores = discover_family_scores(catalog, fixture_dir=fixture_dir, years=years)
@@ -885,6 +913,7 @@ Safety:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     list_parser.add_argument("--include-candidates", action="store_true", help="Include candidate plans normally hidden from lab users")
+    list_parser.add_argument("--local-only", action="store_true", help="List only your local Flight Plans (config/flight-plans.local.toml), not the curated catalog")
     show_parser = sub.add_parser(
         "show",
         help="Show one Flight Plan and its component versions",
@@ -1006,6 +1035,26 @@ Safety:
     promote_local_parser.add_argument("candidate", type=Path)
     promote_local_parser.add_argument("--status", choices=sorted(LOCAL_STATUSES), default="candidate")
     promote_local_parser.add_argument("--yes", action="store_true")
+    remove_local_parser = sub.add_parser(
+        "remove-local",
+        help="Remove a Flight Plan from your own local Flight Plans",
+        description=(
+            "Remove one Flight Plan from a local, gitignored catalog "
+            "(a sibling of --catalog, e.g. config/flight-plans.local.toml). "
+            "Only plans added with promote-local can be removed this way -- "
+            "the shared curated catalog is never touched."
+        ),
+        epilog="""Examples:
+  flight-plans.py remove-local fortify-26.3
+  flight-plans.py remove-local fortify-26.3 --yes
+
+Safety:
+  Read-only until --yes. Never writes the shared catalog; writes only your local
+  sibling file and creates a backup before removing the plan.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    remove_local_parser.add_argument("plan_id")
+    remove_local_parser.add_argument("--yes", action="store_true")
     curate_parser = sub.add_parser(
         "curate",
         help="Print the repo-owner Flight Plan curation workflow",
@@ -1038,6 +1087,8 @@ Safety:
     # the curated catalog, so a locally-promoted candidate behaves like any
     # other selectable plan without ever touching the shared catalog.
     if args.command == "list":
+        if args.local_only:
+            return print_list(load_local_catalog(args.catalog), True)
         return print_list(merged_read_catalog(args.catalog), args.include_candidates)
     if args.command == "show":
         return print_show(merged_read_catalog(args.catalog), args.plan_id)
@@ -1054,6 +1105,8 @@ Safety:
         return promote_candidate(catalog, args.candidate, args.status, args.set_default, args.yes)
     if args.command == "promote-local":
         return promote_local_candidate(args.catalog, args.candidate, args.status, args.yes)
+    if args.command == "remove-local":
+        return remove_local_plan(args.catalog, args.plan_id, args.yes)
     if args.command == "curate":
         return curate(catalog, args.years, args.fixture_dir)
     raise AssertionError(args.command)
