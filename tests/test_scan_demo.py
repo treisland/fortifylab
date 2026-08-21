@@ -99,6 +99,36 @@ class ScanDemoContractTests(unittest.TestCase):
             )
             self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
 
+    def test_prereqs_fail_when_maven_is_missing(self) -> None:
+        # ScanCentral SAST packaging (`fcli sc-sast package`) needs `mvn` on
+        # PATH to build IWA-Java's Maven source; without it the demo should
+        # fail loudly here rather than later mid-package.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            _write_executable(bin_dir / "fcli", "#!/usr/bin/env bash\nexit 0\n")
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                # Isolated PATH: only fcli and the coreutils/git needed to run
+                # bash itself are present, deliberately excluding mvn.
+                export PATH="$2:/usr/bin:/bin"
+                hash -r
+                source "$1"
+                SSC_URL=https://ssc.fortifylab.test
+                FORTIFY_FIRST_SCAN_REPO_URL=https://example.invalid/iwa-java.git
+                scan_type_prereqs_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "prereqs-no-mvn-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=1", result.stdout)
+            self.assertIn("Maven (mvn) is required", result.stdout + result.stderr)
+
     def test_sensor_check_fails_closed_when_no_sensor_is_registered(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bin_dir = Path(directory) / "bin"

@@ -51,6 +51,7 @@ scan_type_prereqs_sast_iwa_java() {
         ok=0
     fi
     command -v git >/dev/null 2>&1 || { error "git is required to clone $FORTIFY_FIRST_SCAN_APP."; ok=0; }
+    command -v mvn >/dev/null 2>&1 || { error "Maven (mvn) is required to package $FORTIFY_FIRST_SCAN_APP for ScanCentral SAST."; ok=0; }
     [ "$ok" -eq 1 ]
 }
 
