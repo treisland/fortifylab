@@ -23,6 +23,7 @@
 # today.
 
 FORTIFY_FIRST_SCAN_APP="${FORTIFY_FIRST_SCAN_APP:-IWA-Java}"
+FORTIFY_FIRST_SCAN_REPO_URL="${FORTIFY_FIRST_SCAN_REPO_URL:-https://github.com/fortify/IWA-Java}"
 FORTIFY_FIRST_SCAN_SSC_SESSION="${FORTIFY_FIRST_SCAN_SSC_SESSION:-fortifylab-first-scan}"
 FORTIFY_FIRST_SCAN_POLL_INTERVAL="${FORTIFY_FIRST_SCAN_POLL_INTERVAL:-15}"
 FORTIFY_FIRST_SCAN_POLL_TIMEOUT="${FORTIFY_FIRST_SCAN_POLL_TIMEOUT:-1800}"
@@ -46,9 +47,7 @@ scan_type_prereqs_sast_iwa_java() {
         ok=0
     fi
     if [ -z "${FORTIFY_FIRST_SCAN_REPO_URL:-}" ]; then
-        error "FORTIFY_FIRST_SCAN_REPO_URL is not set."
-        note "Set it in .env to the $FORTIFY_FIRST_SCAN_APP source repository you have access to."
-        note "This is deliberately not defaulted: Fortify sample app distribution varies by license/portal access."
+        error "FORTIFY_FIRST_SCAN_REPO_URL is empty. Set it in .env, or unset the override to use the default."
         ok=0
     fi
     command -v git >/dev/null 2>&1 || { error "git is required to clone $FORTIFY_FIRST_SCAN_APP."; ok=0; }

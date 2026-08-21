@@ -41,15 +41,29 @@ class ScanDemoContractTests(unittest.TestCase):
         ):
             self.assertIn(f"{fn}()", module)
 
-    def test_prereqs_refuse_to_run_without_repo_url_configured(self) -> None:
-        # No FORTIFY_FIRST_SCAN_REPO_URL guessed/defaulted anywhere -- this
-        # must fail loudly rather than silently cloning nothing or an
-        # invented URL.
+    def test_repo_url_defaults_to_the_official_iwa_java_repository(self) -> None:
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            unset FORTIFY_FIRST_SCAN_REPO_URL
+            source "$1"
+            printf 'REPO_URL=%s\\n' "$FORTIFY_FIRST_SCAN_REPO_URL"
+        """
+        result = subprocess.run(
+            ["bash", "-c", command, "repo-url-default-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertIn("REPO_URL=https://github.com/fortify/IWA-Java", result.stdout)
+
+    def test_prereqs_refuse_to_run_if_repo_url_is_explicitly_cleared(self) -> None:
+        # A user can still override the default to empty; this must fail
+        # loudly rather than silently cloning nothing.
         command = """
             export WIZARD_NOMAIN=1 NO_COLOR=1
             source "$1"
             SSC_URL=https://ssc.fortifylab.test
-            unset FORTIFY_FIRST_SCAN_REPO_URL
+            FORTIFY_FIRST_SCAN_REPO_URL=
             scan_type_prereqs_sast_iwa_java
             printf 'RC=%s\\n' "$?"
         """
@@ -60,9 +74,9 @@ class ScanDemoContractTests(unittest.TestCase):
             capture_output=True,
         )
         self.assertIn("RC=1", result.stdout)
-        self.assertIn("FORTIFY_FIRST_SCAN_REPO_URL is not set", result.stdout + result.stderr)
+        self.assertIn("FORTIFY_FIRST_SCAN_REPO_URL is empty", result.stdout + result.stderr)
 
-    def test_prereqs_pass_when_fcli_ssc_url_and_repo_url_are_present(self) -> None:
+    def test_prereqs_pass_when_fcli_and_ssc_url_are_present(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bin_dir = Path(directory) / "bin"
             bin_dir.mkdir()

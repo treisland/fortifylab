@@ -53,12 +53,11 @@ counts pulled straight from SSC.
 
 It still asks for an SSC token once, pasted into a hidden prompt — consistent
 with the rest of this wizard, no SSC credential is ever written to `.env` or
-disk. Set `FORTIFY_FIRST_SCAN_REPO_URL` in `.env` first: it is deliberately
-not defaulted, since Fortify sample app distribution varies by license/portal
-access, and the wizard refuses to run rather than guess a source location for
-you. The demo also checks for a registered ScanCentral SAST sensor before
-submitting, so a missing worker fails fast with a clear message instead of
-queuing forever.
+disk. `FORTIFY_FIRST_SCAN_REPO_URL` defaults to the official
+[fortify/IWA-Java](https://github.com/fortify/IWA-Java) repository; override
+it in `.env` if you maintain your own fork or mirror. The demo also checks
+for a registered ScanCentral SAST sensor before submitting, so a missing
+worker fails fast with a clear message instead of queuing forever.
 
 This is a fast path, not a replacement for the walkthrough below — it does
 not teach the dependency chain, the token boundary, or the SSC verification
