@@ -262,6 +262,7 @@ wizard_more_menu() {
         echo "  18. Help Center / Fortify Knowledge Center"
         echo "  19. Operational guidance and troubleshooting"
         echo "  20. View wizard log"
+        echo "  21. First-scan one-click demo (SAST · IWA-Java)"
 
         echo
         echo "   r. Return to essentials"
@@ -291,6 +292,7 @@ wizard_more_menu() {
            18)  help_center ;;
            19)  operational_guidance_menu ;;
            20)  wizard_log_viewer ;;
+           21)  scan_demo_menu ;;
             [Rr]) return ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;

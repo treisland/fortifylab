@@ -43,6 +43,26 @@ The generated files contain placeholders only. Keep tokens in environment
 variables, leave SSC as the primary result destination, and use FoD only when
 you intentionally choose an optional separate workflow.
 
+## One-click demo (real scan, not synthetic)
+
+If you already understand the verification path below and just want to see a
+real scan and real results fast, use **More tools -> First-scan one-click
+demo (SAST · IWA-Java)**. It runs a real ScanCentral SAST scan against
+IWA-Java (Fortify's own sample vulnerable Java app) and prints severity
+counts pulled straight from SSC.
+
+It still asks for an SSC token once, pasted into a hidden prompt — consistent
+with the rest of this wizard, no SSC credential is ever written to `.env` or
+disk. `FORTIFY_FIRST_SCAN_REPO_URL` defaults to the official
+[fortify/IWA-Java](https://github.com/fortify/IWA-Java) repository; override
+it in `.env` if you maintain your own fork or mirror. The demo also checks
+for a registered ScanCentral SAST sensor before submitting, so a missing
+worker fails fast with a clear message instead of queuing forever.
+
+This is a fast path, not a replacement for the walkthrough below — it does
+not teach the dependency chain, the token boundary, or the SSC verification
+habit the way working through each step by hand does.
+
 ## Synthetic SAST walkthrough
 
 ### 1. Establish SAST prerequisites
