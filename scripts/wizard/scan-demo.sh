@@ -166,6 +166,16 @@ scan_type_logout_sast_iwa_java() {
 # Shared orchestration
 # ------------------------------------------------------------------
 
+# Essentials-menu visibility gate. Not a safety gate -- scan_type_prereqs_sast_iwa_java
+# still runs its own checks before the demo does anything -- just decides
+# whether the menu line should look actionable. True only when what the demo
+# actually needs is live: SSC, the ScanCentral SAST controller/sensor, and a
+# usable fcli. Reuses the same readiness probes Guided deployment already
+# calls each render, so this adds no new kubectl/HTTP calls of its own.
+scan_demo_ready() {
+    cluster_reachable && ssc_ready && sast_ready && fcli_path >/dev/null 2>&1
+}
+
 scan_demo_menu() {
     title "First-scan one-click demo"
     cat <<EOF

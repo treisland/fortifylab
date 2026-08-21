@@ -85,6 +85,58 @@ class GuidedWizardTests(unittest.TestCase):
         ):
             self.assertIn(label, WIZARD)
 
+    def test_essentials_menu_disables_scan_demo_until_ready(self) -> None:
+        result = self.run_wizard_functions(
+            'scan_demo_ready() { return 1; }; scan_demo_menu() { echo SCAN_DEMO_CALLED; }; '
+            "main_menu",
+            user_input="5\nq\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("SCAN_DEMO_CALLED", result.stdout)
+        self.assertIn("First-scan one-click demo (SAST · IWA-Java) -- deploy SSC + SAST first", result.stdout)
+        self.assertIn("Deploy SSC and ScanCentral SAST first", result.stderr)
+
+    def test_essentials_menu_launches_scan_demo_when_ready(self) -> None:
+        result = self.run_wizard_functions(
+            'scan_demo_ready() { return 0; }; scan_demo_menu() { echo SCAN_DEMO_CALLED; }; '
+            "main_menu",
+            user_input="5\nq\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SCAN_DEMO_CALLED", result.stdout)
+        self.assertNotIn("-- deploy SSC + SAST first", result.stdout)
+
+    def test_scan_demo_ready_requires_cluster_ssc_sast_and_fcli(self) -> None:
+        base_stubs = {
+            "cluster_reachable": "return 0",
+            "ssc_ready": "return 0",
+            "sast_ready": "return 0",
+            "fcli_path": "return 0",
+        }
+        for missing in base_stubs:
+            with self.subTest(missing=missing):
+                stubs = dict(base_stubs)
+                stubs[missing] = "return 1"
+                body = "; ".join(f"{name}() {{ {impl}; }}" for name, impl in stubs.items())
+                result = self.run_wizard_functions(f"{body}; scan_demo_ready && echo READY || echo NOT_READY")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("NOT_READY", result.stdout)
+        stubs = dict(base_stubs)
+        body = "; ".join(f"{name}() {{ {impl}; }}" for name, impl in stubs.items())
+        result = self.run_wizard_functions(f"{body}; scan_demo_ready && echo READY || echo NOT_READY")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("READY", result.stdout)
+
+    def test_essentials_menu_question_mark_opens_help_center(self) -> None:
+        result = self.run_wizard_functions(
+            'scan_demo_ready() { return 1; }; help_center() { echo HELP_CENTER_CALLED; }; '
+            "main_menu",
+            user_input="?\nq\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("HELP_CENTER_CALLED", result.stdout)
+        self.assertIn("Help Center / Fortify Knowledge Center", result.stdout)
+
     def test_first_time_welcome_menu_does_not_duplicate_main_menu_actions(self) -> None:
         body = WIZARD.split("fortifylab_first_time_welcome_menu() {", 1)[1].split("# ============================================================\n# Main menu", 1)[0]
         self.assertNotIn("Start guided setup", body)

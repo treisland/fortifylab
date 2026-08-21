@@ -254,6 +254,14 @@ placeholder SAST/DAST command starters under `docs/examples/first-scan/`.
 Those starters keep SSC as the primary result destination, keep FoD optional,
 and require tokens and target URLs through environment variables.
 
+Once SSC and ScanCentral SAST report healthy, the main menu's **Essentials**
+screen also surfaces **5. First-scan one-click demo (SAST · IWA-Java)**
+directly -- no need to go through **m. More tools** to find it. It stays
+visible but disabled with a reason until those two components are ready, and
+still requires pasting an SSC token when run (never written to `.env` or
+disk). A **`?`** hotkey on the same screen jumps straight to the Help Center
+at any time, including before the cluster is up.
+
 ## Destructive actions are separate
 
 Stopping a component retains its persistent data. Resume and ordinary retries
