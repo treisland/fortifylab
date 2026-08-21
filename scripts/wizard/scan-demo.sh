@@ -119,9 +119,15 @@ scan_type_acquire_sast_iwa_java() {
 }
 
 scan_type_package_sast_iwa_java() {
-    local workdir="$1" fcli_bin
+    local workdir="$1" av_name="$2" fcli_bin
     fcli_bin="$(fcli_path)" || return 1
-    "$fcli_bin" sc-sast package --source "$workdir/src" --output "$workdir/$FORTIFY_FIRST_SCAN_APP.zip"
+    # `fcli sc-sast package` does not exist; packaging is a built-in SSC
+    # action that auto-detects a compatible ScanCentral Client version from
+    # the sensor registered for --av, then runs `scancentral package`.
+    "$fcli_bin" ssc action run --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" package \
+        --source-dir "$workdir/src" \
+        --av "$av_name" \
+        --output "$workdir/$FORTIFY_FIRST_SCAN_APP.zip"
 }
 
 scan_type_submit_sast_iwa_java() {
@@ -271,7 +277,7 @@ EOF
     fi
     if [ "$rc" -eq 0 ]; then
         note "Packaging source..."
-        scan_type_package_sast_iwa_java "$workdir" || rc=1
+        scan_type_package_sast_iwa_java "$workdir" "$av_name" || rc=1
     fi
     if [ "$rc" -eq 0 ]; then
         note "Submitting scan to $av_name..."

@@ -42,11 +42,11 @@ jobs:
         run: |
           fcli ssc session login \
             --url "${{ secrets.SSC_URL }}" \
-            --ci-token "${{ secrets.SSC_CI_TOKEN }}"
+            --token "${{ secrets.SSC_CI_TOKEN }}"
 
       - name: Package and submit SAST scan
         run: |
-          fcli sc-sast package --source . --output app.zip
+          fcli ssc action run package --source-dir . --av "${{ vars.SSC_APP_VERSION }}" --output app.zip
           fcli sc-sast scan start \
             --publish-to "${{ vars.SSC_APP_VERSION }}" \
             --file app.zip

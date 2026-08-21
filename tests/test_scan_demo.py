@@ -196,6 +196,47 @@ class ScanDemoContractTests(unittest.TestCase):
             )
             self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
 
+    def test_package_step_runs_the_ssc_package_action_not_the_nonexistent_sc_sast_package(self) -> None:
+        # `fcli sc-sast package` does not exist in fcli's sc-sast module (it
+        # only has scan/sensor/sensor-pool subcommands). Packaging is a
+        # built-in SSC action (`fcli ssc action run package`) that must run
+        # under an active --ssc-session, matching every other fcli call in
+        # this flow.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            captured = Path(directory) / "fcli-args.txt"
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'printf \'%s\\n\' "$*" > "{captured}"\n'
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                scan_type_package_sast_iwa_java /tmp/workdir "IWA-Java:demo-1"
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "package-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+            args = captured.read_text(encoding="utf-8")
+            self.assertNotIn("sc-sast package", args)
+            self.assertIn("ssc action run", args)
+            self.assertIn("--ssc-session=fortifylab-first-scan", args)
+            self.assertIn("package", args)
+            self.assertIn("--source-dir /tmp/workdir/src", args)
+            self.assertIn("--av IWA-Java:demo-1", args)
+            self.assertIn("--output /tmp/workdir/IWA-Java.zip", args)
+
     def test_verify_treats_faulted_state_as_failure_not_success(self) -> None:
         # This is the "wait-for doesn't guarantee success" gap identified
         # during design review: a terminal state must not be reported as a
