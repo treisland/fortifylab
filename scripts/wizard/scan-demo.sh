@@ -15,22 +15,22 @@
 #
 # Scan-type shape (Phase 1 of the design): every scan type implements
 # scan_type_prereqs_<type>, scan_type_login_<type>, scan_type_sensor_check_<type>,
-# scan_type_acquire_<type>, scan_type_package_<type>, scan_type_submit_<type>,
-# scan_type_poll_<type>, scan_type_verify_<type>, scan_type_results_<type>,
-# scan_type_logout_<type>. scan_demo_run dispatches through that shape by
-# name, so adding SCA (Debricked) or DAST later is a new set of functions,
-# not a rework of the menu/orchestration below. Only "sast_iwa_java" exists
-# today.
+# scan_type_setup_appversion_<type>, scan_type_acquire_<type>,
+# scan_type_package_<type>, scan_type_submit_<type>, scan_type_poll_<type>,
+# scan_type_verify_<type>, scan_type_results_<type>, scan_type_logout_<type>.
+# scan_demo_run dispatches through that shape by name, so adding SCA
+# (Debricked) or DAST later is a new set of functions, not a rework of the
+# menu/orchestration below. Only "sast_iwa_java" exists today.
 
 FORTIFY_FIRST_SCAN_APP="${FORTIFY_FIRST_SCAN_APP:-IWA-Java}"
 FORTIFY_FIRST_SCAN_REPO_URL="${FORTIFY_FIRST_SCAN_REPO_URL:-https://github.com/fortify/IWA-Java}"
 FORTIFY_FIRST_SCAN_SSC_SESSION="${FORTIFY_FIRST_SCAN_SSC_SESSION:-fortifylab-first-scan}"
+# Fixed on purpose: setup-appversion is idempotent (--skip-if-exists), so
+# rerunning the demo reuses the same appversion and its scan history in SSC
+# instead of creating a new application+version on every run.
+FORTIFY_FIRST_SCAN_RELEASE="${FORTIFY_FIRST_SCAN_RELEASE:-my-first-scan}"
 FORTIFY_FIRST_SCAN_POLL_INTERVAL="${FORTIFY_FIRST_SCAN_POLL_INTERVAL:-15}"
 FORTIFY_FIRST_SCAN_POLL_TIMEOUT="${FORTIFY_FIRST_SCAN_POLL_TIMEOUT:-1800}"
-
-scan_demo_run_id() {
-    date +%Y%m%d%H%M%S
-}
 
 # ------------------------------------------------------------------
 # sast_iwa_java scan type
@@ -51,6 +51,7 @@ scan_type_prereqs_sast_iwa_java() {
         ok=0
     fi
     command -v git >/dev/null 2>&1 || { error "git is required to clone $FORTIFY_FIRST_SCAN_APP."; ok=0; }
+    command -v mvn >/dev/null 2>&1 || { error "Maven (mvn) is required to package $FORTIFY_FIRST_SCAN_APP for ScanCentral SAST."; ok=0; }
     [ "$ok" -eq 1 ]
 }
 
@@ -108,6 +109,19 @@ scan_type_sensor_check_sast_iwa_java() {
     fi
 }
 
+# `sc-sast scan start --publish-to` requires the target application version
+# to already exist (it resolves via SSC's getRequiredAppVersion, which
+# throws rather than creating one) -- and this demo generates a fresh,
+# never-before-seen av_name every run. Create it first, via the same
+# built-in SSC action the ci.yaml pipeline action uses for this: idempotent
+# (--skip-if-exists) and auto-fills required attributes so it never blocks
+# on an interactive issue-template prompt.
+scan_type_setup_appversion_sast_iwa_java() {
+    local av_name="$1" fcli_bin
+    fcli_bin="$(fcli_path)" || return 1
+    "$fcli_bin" ssc action run --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" setup-appversion --av "$av_name"
+}
+
 scan_type_acquire_sast_iwa_java() {
     local workdir="$1"
     scan_type_check_egress_sast_iwa_java || return 1
@@ -118,9 +132,26 @@ scan_type_acquire_sast_iwa_java() {
 }
 
 scan_type_package_sast_iwa_java() {
-    local workdir="$1" fcli_bin
+    local workdir="$1" av_name="$2" fcli_bin
     fcli_bin="$(fcli_path)" || return 1
-    "$fcli_bin" sc-sast package --source "$workdir/src" --output "$workdir/$FORTIFY_FIRST_SCAN_APP.zip"
+    # `fcli sc-sast package` does not exist; packaging is a built-in SSC
+    # action that auto-detects a compatible ScanCentral Client version from
+    # the sensor registered in --av's specific sensor pool, then runs
+    # `scancentral package`. That auto-detect throws (loudly, though
+    # non-fatally -- the action catches it and falls back to a default
+    # version) when the appversion's pool has no active sensor, which is
+    # common for a freshly created appversion. Skip the noisy detection
+    # entirely by pinning the version fortifylab actually deployed, when
+    # known.
+    local sc_client_version_args=()
+    if [ -n "${FORTIFY_SCSAST_WORKER_IMAGE_TAG:-}" ]; then
+        sc_client_version_args=(--sc-client-version "$FORTIFY_SCSAST_WORKER_IMAGE_TAG")
+    fi
+    "$fcli_bin" ssc action run --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" package \
+        --source-dir "$workdir/src" \
+        --av "$av_name" \
+        "${sc_client_version_args[@]}" \
+        --output "$workdir/$FORTIFY_FIRST_SCAN_APP.zip"
 }
 
 scan_type_submit_sast_iwa_java() {
@@ -142,7 +173,7 @@ scan_type_poll_sast_iwa_java() {
     local fcli_bin elapsed=0 status
     fcli_bin="$(fcli_path)" || return 1
     while [ "$elapsed" -lt "$FORTIFY_FIRST_SCAN_POLL_TIMEOUT" ]; do
-        status="$("$fcli_bin" sc-sast scan status ::first_scan_job::scanId \
+        status="$("$fcli_bin" sc-sast scan status ::first_scan_job::jobToken \
             --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" 2>&1)"
         note "Scan status: $(printf '%s' "$status" | tr '\n' ' ' | head -c 200)"
         if printf '%s' "$status" | grep -qiE 'COMPLETE|FAULTED|FAILED|CANCELED|TIMEOUT'; then
@@ -242,6 +273,20 @@ scan_demo_menu() {
   FCLI_DEFAULT_SSC_TOKEN when available; otherwise asks for an SSC token
   once below, never written to .env or disk.
 
+  What this actually runs, in order (<av> = $FORTIFY_FIRST_SCAN_APP:$FORTIFY_FIRST_SCAN_RELEASE,
+  reused across runs so rerunning the demo doesn't create a new
+  application+version in SSC every time):
+
+    fcli ssc session login --url $SSC_URL --token=*** --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli sc-sast sensor list --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli ssc action run --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION setup-appversion --av <av>
+    git clone --depth 1 $FORTIFY_FIRST_SCAN_REPO_URL
+    fcli ssc action run --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION package --source-dir <src> --av <av> --output <zip>
+    fcli sc-sast scan start --file=<zip> --publish-to=<av> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli sc-sast scan status <jobToken> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION   (polled)
+    fcli ssc issue count --av=<av> --by=folder --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli ssc session logout --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION   (only if this run logged in)
+
 EOF
     scan_type_prereqs_sast_iwa_java || { press_any; return 1; }
     confirm "Continue?" || return 0
@@ -257,7 +302,7 @@ EOF
     fi
 
     workdir="$(mktemp -d)" || { error "Could not create a scratch directory."; press_any; return 1; }
-    av_name="${FORTIFY_FIRST_SCAN_APP}:demo-$(scan_demo_run_id)"
+    av_name="${FORTIFY_FIRST_SCAN_APP}:${FORTIFY_FIRST_SCAN_RELEASE}"
 
     trap '[ "$SCAN_DEMO_SESSION_OWNED" = 1 ] && scan_type_logout_sast_iwa_java; rm -rf "$workdir"' RETURN
 
@@ -265,12 +310,16 @@ EOF
     scan_type_sensor_check_sast_iwa_java || { rc=1; }
 
     if [ "$rc" -eq 0 ]; then
+        note "Ensuring $av_name exists in SSC..."
+        scan_type_setup_appversion_sast_iwa_java "$av_name" || rc=1
+    fi
+    if [ "$rc" -eq 0 ]; then
         note "Cloning $FORTIFY_FIRST_SCAN_APP..."
         scan_type_acquire_sast_iwa_java "$workdir" || rc=1
     fi
     if [ "$rc" -eq 0 ]; then
         note "Packaging source..."
-        scan_type_package_sast_iwa_java "$workdir" || rc=1
+        scan_type_package_sast_iwa_java "$workdir" "$av_name" || rc=1
     fi
     if [ "$rc" -eq 0 ]; then
         note "Submitting scan to $av_name..."
