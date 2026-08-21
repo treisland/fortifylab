@@ -70,7 +70,7 @@ scan_type_login_sast_iwa_java() {
     fcli_bin="$(fcli_path)" || return 1
     [ -n "${SCSAST_CTRL_URL:-}" ] && extra_args=(--sc-sast-url "$SCSAST_CTRL_URL")
     "$fcli_bin" ssc session login --url "$SSC_URL" "${extra_args[@]}" \
-        --ci-token="$token" --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION"
+        --token="$token" --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION"
 }
 
 scan_type_sensor_check_sast_iwa_java() {

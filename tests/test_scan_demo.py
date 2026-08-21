@@ -223,7 +223,8 @@ class ScanDemoContractTests(unittest.TestCase):
             calls = call_log.read_text(encoding="utf-8")
             self.assertNotIn('""', calls)
             self.assertNotIn("--sc-sast-url", calls)
-            self.assertIn("--ci-token=synthetic-token", calls)
+            self.assertIn("--token=synthetic-token", calls)
+            self.assertNotIn("--ci-token", calls)
 
 
 if __name__ == "__main__":
