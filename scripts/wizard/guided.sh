@@ -904,13 +904,39 @@ guided_board_reset() {
     # earlier inline version had no in_progress branch, so any step that was
     # genuinely mid-flight from a prior/interrupted session (e.g. resume)
     # was misreported as pending until this session happened to touch it.
-    local ids=("$@") id
+    #
+    # guided_step_live_state shells out to kubectl (up to twice) for every
+    # workload step, so this loop is not free -- on a cold or slow cluster
+    # it can take tens of seconds. Print per-step progress exactly like
+    # guided_collect_step_statuses already does for the resume path;
+    # without it, a fresh Guided deployment start (interactive or
+    # auto-advance) looked frozen right after the confirmation prompt, with
+    # no feedback that anything was happening (bug report).
+    local ids=("$@") id label idx=0 i row state total
     [ "${#ids[@]}" -gt 0 ] || ids=("${GUIDED_STEP_ID[@]}")
+    total="${#ids[@]}"
     GUIDED_STEP_BOARD_STATE=()
     GUIDED_STEP_STARTED_AT=()
     GUIDED_STEP_ELAPSED_FINAL=()
+    section "Checking deployment state"
+    printf '  Deriving live state from files and Kubernetes.\n\n'
     for id in "${ids[@]}"; do
-        GUIDED_STEP_BOARD_STATE[$id]=$(guided_step_live_state "$id")
+        idx=$((idx + 1))
+        label="$id"
+        for i in "${!GUIDED_STEP_ID[@]}"; do
+            [ "${GUIDED_STEP_ID[$i]}" = "$id" ] && { label="${GUIDED_STEP_LABEL[$i]}"; break; }
+        done
+        row=$(printf '  [%2d/%2d] %-30s' "$idx" "$total" "$label")
+        if [ -t 1 ]; then
+            printf '%s %s' "$row" "checking..."
+        fi
+        state=$(guided_step_live_state "$id")
+        GUIDED_STEP_BOARD_STATE[$id]="$state"
+        if [ -t 1 ]; then
+            printf '\r%s %s\033[K\n' "$row" "$(guided_status_render "$state")"
+        else
+            printf '%s %s\n' "$row" "$(guided_status_render "$state")"
+        fi
     done
 }
 
