@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FortifyLab Flight Plan catalog and repo-owner discovery helper."""
+"""FortifyLab Flight Plan catalog, discovery, and curation helper."""
 
 from __future__ import annotations
 
@@ -65,8 +65,11 @@ Command groups:
   Wizard and automation helpers:
     default, env-updates, validate
 
+  Anyone -- discover and manage your own Flight Plans:
+    discover-releases, discover, promote-local
+
   Repo-owner curation:
-    discover-releases, discover, curate, promote
+    curate, promote (writes the shared catalog)
 
 Common workflows:
   Review curated Flight Plans:
@@ -76,24 +79,33 @@ Common workflows:
   Compare the current .env to a Flight Plan:
     flight-plans.py compare-env fortify-26.2
 
-  Discover repo-owner release candidates:
+  Discover release candidates (anyone -- not repo-owner-only):
     flight-plans.py discover-releases --years 25,26
     flight-plans.py discover --release 26.2
-    flight-plans.py curate --years 25,26
 
-  Promote a reviewed candidate:
+  Add a candidate to your own local Flight Plans (never touches the shared catalog):
+    flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
+    flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.2.toml --status known-good --yes
+
+  Repo owner: curate and promote into the shared catalog:
+    flight-plans.py curate --years 25,26
     flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
     flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status recommended --yes
+
+  Apply a Flight Plan to .env without the interactive wizard menu:
+    ./start_wizard.sh apply-flight-plan fortify-26.2
+    ./start_wizard.sh apply-flight-plan fortify-26.2 --yes
 
 Safety model:
   Read-only:  default, list, show, compare-env, discover-releases without write flags, curate
   Writes tmp: discover, discover-releases --write-complete, discover-releases --write-all
-  Writes catalog: promote --yes
+  Writes your local catalog: promote-local --yes
+  Writes the shared catalog: promote --yes
 
 Vocabulary:
   Release      A Fortify yy.quarter line such as 25.2 or 26.2 discovered from tags.
   Flight Plan  A curated, deployable bundle of Fortify component versions.
-  Candidate    A generated Flight Plan draft that still needs owner review and testing.
+  Candidate    A generated Flight Plan draft that still needs review and testing.
 """
 
 

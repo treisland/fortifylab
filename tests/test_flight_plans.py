@@ -397,6 +397,20 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("Safety model:", result.stdout)
         self.assertIn("flight-plans.py discover-releases --years 25,26", result.stdout)
         self.assertIn("Release      A Fortify yy.quarter line", result.stdout)
+        # discover/discover-releases are for anyone, not repo-owner-only, and
+        # promote-local/apply-flight-plan should be discoverable from --help.
+        self.assertIn("promote-local", result.stdout)
+        self.assertIn("discover and manage your own Flight Plans", result.stdout)
+        self.assertIn("not repo-owner-only", result.stdout)
+        self.assertIn("./start_wizard.sh apply-flight-plan fortify-26.2", result.stdout)
+        self.assertIn("Writes your local catalog: promote-local --yes", result.stdout)
+
+    def test_promote_local_subcommand_help_explains_safety_model(self) -> None:
+        result = self.run_tool("promote-local", "-h")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Read-only until --yes", result.stdout)
+        self.assertIn("Never writes the shared catalog", result.stdout)
+        self.assertIn("recommended", result.stdout)
 
     def test_subcommand_help_explains_operator_commands(self) -> None:
         list_help = self.run_tool("list", "-h")

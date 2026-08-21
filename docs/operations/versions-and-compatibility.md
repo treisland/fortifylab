@@ -145,7 +145,13 @@ configuration editor flow.
 
 ## Repo-owner discovery workflow
 
-Repo owners can draft and curate new plan candidates with the discovery helper.
+Repo owners curate the shared, tracked catalog (`config/flight-plans.toml`)
+with the discovery helper below. Discovery itself (`discover-releases`,
+`discover`) is not repo-owner-only -- any user can run it too, then add the
+result to their own local Flight Plans instead (see
+[Your own local Flight Plans](#your-own-local-flight-plans)). This section
+covers curating the plan everyone else sees by default.
+
 Fortify commonly publishes tags with a release prefix such as `25.2` or
 `26.2`, so the helper can scan known repositories and score candidate releases:
 
