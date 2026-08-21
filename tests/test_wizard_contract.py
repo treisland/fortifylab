@@ -611,13 +611,22 @@ exit 1
             if not cacerts.is_file():
                 self.skipTest(f"JDK cacerts not found at {cacerts}")
             target = Path(directory) / "fcli-truststore"
-            shutil.copy(cacerts, target)
-            subprocess.run(
-                [keytool, "-storepasswd", "-keystore", str(target), "-storepass", "changeit", "-new", "contract-secret"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            # "changeit" is the near-universal JKS cacerts default, but some
+            # distros' packaged JRE ships an empty password instead -- mirror
+            # create-certs.sh's try-both fallback rather than assuming one.
+            repassworded = False
+            for cacerts_src_pass in ("changeit", ""):
+                shutil.copy(cacerts, target)
+                result = subprocess.run(
+                    [keytool, "-storepasswd", "-keystore", str(target), "-storepass", cacerts_src_pass, "-new", "contract-secret"],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    repassworded = True
+                    break
+            if not repassworded:
+                self.skipTest("This system's JDK cacerts uses neither the changeit nor empty default password")
             listing = subprocess.run(
                 [keytool, "-list", "-keystore", str(target), "-storepass", "contract-secret"],
                 check=True,

@@ -179,12 +179,23 @@ keytool -importkeystore -alias "$DEFAULT_ALIAS" \
 # the JDK's cacerts can't be located, so fcli at least still gets lab trust.
 JAVA_CACERTS_HOME="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v keytool)")")" 2>/dev/null)}"
 JAVA_CACERTS="${JAVA_CACERTS_HOME:+$JAVA_CACERTS_HOME/lib/security/cacerts}"
+cacerts_seeded=0
 if [ -n "$JAVA_CACERTS" ] && [ -s "$JAVA_CACERTS" ]; then
-  cp "$JAVA_CACERTS" "$FCLI_CLIENT_TRUSTSTORE"
-  chmod u+w "$FCLI_CLIENT_TRUSTSTORE"
-  keytool -storepasswd -keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass changeit -new "$DEFAULT_PASS" >/dev/null
-else
-  echo "⚠️  Could not locate the JDK default cacerts; fcli-truststore will only trust the lab and update.fortify.com, not the wider internet." >&2
+  # "changeit" is the near-universal JKS cacerts default, but some
+  # distros' packaged JRE ships an empty store password instead -- try
+  # both rather than assuming, so a packaging difference degrades to the
+  # narrow fallback below instead of failing the whole cert rebuild.
+  for cacerts_src_pass in changeit ""; do
+    cp "$JAVA_CACERTS" "$FCLI_CLIENT_TRUSTSTORE"
+    chmod u+w "$FCLI_CLIENT_TRUSTSTORE"
+    if keytool -storepasswd -keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass "$cacerts_src_pass" -new "$DEFAULT_PASS" >/dev/null 2>&1; then
+      cacerts_seeded=1
+      break
+    fi
+  done
+fi
+if [ "$cacerts_seeded" -ne 1 ]; then
+  echo "⚠️  Could not seed fcli-truststore from the JDK default cacerts; fcli-truststore will only trust the lab and update.fortify.com, not the wider internet." >&2
   keytool -importkeystore -alias "$DEFAULT_ALIAS" \
       -srckeystore "$KEYSTORE" -srcstoretype pkcs12 -srcstorepass "$DEFAULT_PASS" \
       -destkeystore "$FCLI_CLIENT_TRUSTSTORE" -deststorepass "$DEFAULT_PASS"
