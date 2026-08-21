@@ -262,6 +262,19 @@ scan_demo_menu() {
   FCLI_DEFAULT_SSC_TOKEN when available; otherwise asks for an SSC token
   once below, never written to .env or disk.
 
+  What this actually runs, in order (<av> = $FORTIFY_FIRST_SCAN_APP:demo-<timestamp>,
+  a fresh appversion name generated each run):
+
+    fcli ssc session login --url $SSC_URL --token=*** --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli sc-sast sensor list --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli ssc action run --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION setup-appversion --av <av>
+    git clone --depth 1 $FORTIFY_FIRST_SCAN_REPO_URL
+    fcli ssc action run --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION package --source-dir <src> --av <av> --output <zip>
+    fcli sc-sast scan start --file=<zip> --publish-to=<av> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli sc-sast scan status <scanId> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION   (polled)
+    fcli ssc issue count --av=<av> --by=folder --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli ssc session logout --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION   (only if this run logged in)
+
 EOF
     scan_type_prereqs_sast_iwa_java || { press_any; return 1; }
     confirm "Continue?" || return 0

@@ -26,6 +26,48 @@ class ScanDemoContractTests(unittest.TestCase):
         self.assertIn("scan_demo_menu", menu)
         self.assertIn("First-scan one-click demo", menu)
 
+    def test_menu_overview_lists_the_actual_fcli_commands_it_will_run(self) -> None:
+        # The demo logs into real SSC, creates a real appversion, downloads
+        # and runs ScanCentral Client, and submits a real scan -- show the
+        # exact command sequence up front (with the real session/URL/repo
+        # values substituted) rather than asking users to trust a black box.
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            source "$1"
+            SSC_URL=https://ssc.fortifylab.test
+            FORTIFY_FIRST_SCAN_REPO_URL=https://github.com/fortify/IWA-Java
+            title() { :; }
+            press_any() { :; }
+            confirm() { return 1; }
+            scan_type_prereqs_sast_iwa_java() { return 0; }
+            scan_demo_menu
+        """
+        result = subprocess.run(
+            ["bash", "-c", command, "menu-overview-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        output = result.stdout
+        self.assertIn(
+            "fcli ssc session login --url https://ssc.fortifylab.test --token=*** --ssc-session=fortifylab-first-scan",
+            output,
+        )
+        self.assertIn("fcli sc-sast sensor list --ssc-session=fortifylab-first-scan", output)
+        self.assertIn(
+            "fcli ssc action run --ssc-session=fortifylab-first-scan setup-appversion --av <av>", output
+        )
+        self.assertIn("git clone --depth 1 https://github.com/fortify/IWA-Java", output)
+        self.assertIn(
+            "fcli ssc action run --ssc-session=fortifylab-first-scan package --source-dir <src> --av <av> --output <zip>",
+            output,
+        )
+        self.assertIn(
+            "fcli sc-sast scan start --file=<zip> --publish-to=<av> --ssc-session=fortifylab-first-scan", output
+        )
+        self.assertIn("fcli ssc issue count --av=<av> --by=folder --ssc-session=fortifylab-first-scan", output)
+        self.assertIn("fcli ssc session logout --ssc-session=fortifylab-first-scan", output)
+
     def test_scan_demo_module_defines_the_full_scan_type_shape(self) -> None:
         module = (ROOT / "scripts" / "wizard" / "scan-demo.sh").read_text(encoding="utf-8")
         for fn in (
