@@ -279,6 +279,43 @@ class ScanDemoContractTests(unittest.TestCase):
             self.assertIn("--source-dir /tmp/workdir/src", args)
             self.assertIn("--av IWA-Java:demo-1", args)
             self.assertIn("--output /tmp/workdir/IWA-Java.zip", args)
+            self.assertNotIn("--sc-client-version", args)
+
+    def test_package_step_pins_sc_client_version_when_the_deployed_worker_version_is_known(self) -> None:
+        # The package action's own client-version auto-detect only looks at
+        # sensors in --av's specific sensor pool, and throws a scary (though
+        # non-fatal) exception when a freshly created appversion's pool has
+        # no active sensor yet. Skip that detection entirely by pinning the
+        # version fortifylab actually deployed.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            captured = Path(directory) / "fcli-args.txt"
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'printf \'%s\\n\' "$*" > "{captured}"\n'
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                FORTIFY_SCSAST_WORKER_IMAGE_TAG=25.2.0
+                scan_type_package_sast_iwa_java /tmp/workdir "IWA-Java:demo-1"
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "package-pinned-version-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+            args = captured.read_text(encoding="utf-8")
+            self.assertIn("--sc-client-version 25.2.0", args)
 
     def test_setup_appversion_step_creates_the_appversion_if_missing(self) -> None:
         # `sc-sast scan start --publish-to` resolves the target appversion
@@ -338,6 +375,42 @@ class ScanDemoContractTests(unittest.TestCase):
         )
         self.assertIn("RC=1", result.stdout)
         self.assertIn("did not complete successfully", result.stdout + result.stderr)
+
+    def test_poll_queries_job_token_not_the_nonexistent_scan_id(self) -> None:
+        # SCSastScanJobDescriptor's field is `jobToken`, not `scanId` --
+        # ::first_scan_job::scanId resolved to null against a real fcli,
+        # crashing every poll iteration with
+        # "Property path 'scanId' for variable 'first_scan_job' resolves to null".
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            captured = Path(directory) / "fcli-args.txt"
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'printf \'%s\\n\' "$*" > "{captured}"\n'
+                "printf 'scanState: COMPLETE\\n'\n"
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                scan_type_poll_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "poll-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+            args = captured.read_text(encoding="utf-8")
+            self.assertIn("::first_scan_job::jobToken", args)
+            self.assertNotIn("::first_scan_job::scanId", args)
 
     def test_verify_accepts_completed_state_as_success(self) -> None:
         command = """
@@ -551,6 +624,37 @@ class ScanDemoContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("RC=2", result.stdout)
         self.assertNotIn("LOGIN_CALLED_UNEXPECTEDLY", result.stdout)
+
+    def test_menu_reuses_a_fixed_appversion_name_instead_of_a_timestamp(self) -> None:
+        # A timestamped av_name meant a new SSC application+version was
+        # created on every single run of the demo. setup-appversion is
+        # idempotent (--skip-if-exists), so a fixed name lets reruns reuse
+        # the same appversion and its scan history instead.
+        with tempfile.TemporaryDirectory() as directory:
+            captured = Path(directory) / "av-name.txt"
+            command = f"""
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                FORTIFY_FIRST_SCAN_APP=IWA-Java
+                title() {{ :; }}
+                press_any() {{ :; }}
+                confirm() {{ return 0; }}
+                scan_type_prereqs_sast_iwa_java() {{ return 0; }}
+                scan_type_session_usable_sast_iwa_java() {{ return 0; }}
+                scan_type_sensor_check_sast_iwa_java() {{ return 0; }}
+                scan_type_setup_appversion_sast_iwa_java() {{ printf '%s' "$1" > "{captured}"; return 1; }}
+                scan_demo_menu
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "menu-av-name-test", str(ROOT / "start_wizard.sh")],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertTrue(captured.exists(), result.stdout + result.stderr)
+            av_name = captured.read_text(encoding="utf-8")
+            self.assertEqual(av_name, "IWA-Java:my-first-scan")
 
     def test_menu_only_logs_out_a_session_it_created_itself(self) -> None:
         stub_functions = """
