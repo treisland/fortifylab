@@ -851,7 +851,7 @@ class FlightPlansTests(unittest.TestCase):
                     str(fortify_home / "start_wizard.sh"),
                 ],
                 cwd=fortify_home,
-                input="26.3\ncandidate\ny\n\n",
+                input="26.3\n1\ny\n\n",
                 check=False,
                 capture_output=True,
                 text=True,
@@ -903,7 +903,7 @@ class FlightPlansTests(unittest.TestCase):
                 ],
                 cwd=fortify_home,
                 # No family line here -- only the status/confirm/press_any prompts.
-                input="candidate\ny\n\n",
+                input="1\ny\n\n",
                 check=False,
                 capture_output=True,
                 text=True,
@@ -912,6 +912,67 @@ class FlightPlansTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("family already discovered", result.stdout)
         self.assertIn("fortify-26.3", result.stdout)
+
+    def test_promote_local_menu_offers_a_numbered_status_selection(self) -> None:
+        # PM feedback: status should be a numbered pick, not free-typed text.
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            fortify_home = tmp / "repo"
+            shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp", "config/flight-plans.local.toml"))
+            candidate_dir = fortify_home / "tmp" / "flight-plan-candidates"
+            candidate_dir.mkdir(parents=True, exist_ok=True)
+            (candidate_dir / "fortify-26.3.toml").write_text(
+                textwrap.dedent(
+                    '''
+                    schema_version = 1
+
+                    [flight_plans."fortify-26.3"]
+                    label = "Fortify 26.3"
+                    status = "candidate"
+                    family = "26.3"
+
+                    [flight_plans."fortify-26.3".components]
+                    FORTIFY_SSC_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SSC_IMAGE_TAG = "26.3.0.0001"
+                    FORTIFY_SCSAST_CHART_VERSION = "26.3.0-1"
+                    FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCSAST_WORKER_IMAGE_TAG = "26.3.0"
+                    FORTIFY_SCDAST_CHART_VERSION = "24.4.0-2"
+                    FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
+                    '''
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["XDG_CONFIG_HOME"] = str(tmp / "config")
+            env["HOME"] = str(tmp / "home")
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'export WIZARD_NOMAIN=1 NO_COLOR=1; source "$1"; title() { :; }; sleep() { :; }; '
+                    'FORTIFY_HOME_K8S="$PWD"; '
+                    'flight_plan_promote_local_menu 26.3; '
+                    'flight_plan_tool list --include-candidates',
+                    "promote-local-status-menu-test",
+                    str(fortify_home / "start_wizard.sh"),
+                ],
+                cwd=fortify_home,
+                # "2" selects known-good from the numbered list, not typed text.
+                input="2\ny\n\n",
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            local_catalog = (fortify_home / "config" / "flight-plans.local.toml").read_text(encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("1. candidate (default)", result.stdout)
+        self.assertIn("2. known-good", result.stdout)
+        self.assertIn("3. legacy", result.stdout)
+        self.assertIn("4. deprecated", result.stdout)
+        self.assertIn("fortify-26.3", result.stdout)
+        self.assertIn('status = "known-good"', local_catalog)
 
     def test_discovery_menu_offers_to_add_the_candidate_immediately(self) -> None:
         # Regression guard: discovery used to write a candidate file and
