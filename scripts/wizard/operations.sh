@@ -2393,35 +2393,37 @@ EOF
 Impact
   Flight Plans align Fortify product versions. MySQL and PostgreSQL are managed
   separately because application upgrades and database rollback are different risks.
-
-Options
-  1. Upgrade full Flight Plan
-  2. Advanced individual component override
-  3. Select Fortify Flight Plan
-  4. Override all Fortify component version fields
-  5. Manage database versions
-  6. Compare .env to selected Flight Plan
-  7. Show candidate Flight Plans
-  8. Refresh/discover candidate Flight Plan tags
-  9. Add a discovered candidate to my local Flight Plans
-  10. Preview pending .env changes
-  11. Apply pending version changes
-
-  r. Return
-  q. Quit safely
 EOF
+        section "Core actions"
+        echo "   1. Upgrade full Flight Plan"
+        echo "   2. Select Fortify Flight Plan"
+        section "Discover new releases"
+        echo "   3. Show candidate Flight Plans"
+        echo "   4. Refresh/discover candidate Flight Plan tags"
+        echo "   5. Add a discovered candidate to my local Flight Plans"
+        section "Advanced (expert)"
+        echo "   6. Advanced individual component override"
+        echo "   7. Override all Fortify component version fields"
+        echo "   8. Manage database versions"
+        section "Review and apply"
+        echo "   9. Compare .env to selected Flight Plan"
+        echo "  10. Preview pending .env changes"
+        echo "  11. Apply pending version changes"
+        echo
+        echo "   r. Return"
+        echo "   q. Quit safely"
         echo
         ask choice "Select:"
         case "$choice" in
             1) flight_plan_full_upgrade_flow pending_updates; press_any ;;
-            2) flight_plan_component_override_menu pending_updates || return $? ;;
-            3) flight_plan_select_menu pending_updates ;;
-            4) env_guided_section_editor "Individual Fortify component versions" versions || return $? ;;
-            5) env_guided_section_editor "Database versions" database_versions || return $? ;;
-            6) flight_plan_show_comparison; press_any ;;
-            7) flight_plan_show_candidates; press_any ;;
-            8) flight_plan_discovery_menu ;;
-            9) flight_plan_promote_local_menu ;;
+            2) flight_plan_select_menu pending_updates ;;
+            3) flight_plan_show_candidates; press_any ;;
+            4) flight_plan_discovery_menu ;;
+            5) flight_plan_promote_local_menu ;;
+            6) flight_plan_component_override_menu pending_updates || return $? ;;
+            7) env_guided_section_editor "Individual Fortify component versions" versions || return $? ;;
+            8) env_guided_section_editor "Database versions" database_versions || return $? ;;
+            9) flight_plan_show_comparison; press_any ;;
             10) [ "${#pending_updates[@]}" -gt 0 ] && env_preview_changes "${pending_updates[@]}" || note "No pending changes."; press_any ;;
             11) env_section_apply_pending flight-plan pending_updates; press_any ;;
             [Rr]) env_section_prompt_return pending_updates && return 0 ;;
