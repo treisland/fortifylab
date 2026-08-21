@@ -20,9 +20,12 @@ Deployment also needs:
 - a browser that can reach the host by its LAN address, public address, or VPN;
 - a Fortify license file that is readable by your normal user;
 - a Docker Hub account entitled to pull `fortifydocker/*` and
-  `bitnamilegacy/*` images; and
+  `bitnamilegacy/*` images;
 - outbound access for Ubuntu packages, snaps, container images, Helm charts,
-  and Fortify update services.
+  and Fortify update services; and
+- `python3` resolving to 3.11 or newer (Ubuntu 22.04 ships 3.10 by default —
+  install a newer interpreter such as `python3.12` if needed), required by the
+  Flight Plans version-selection tool.
 
 Allow **15–20 minutes for Express deployment after prerequisites and images
 are available**. A first run on a new host commonly takes **30–60 minutes**

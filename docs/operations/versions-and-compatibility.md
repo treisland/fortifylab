@@ -145,7 +145,13 @@ configuration editor flow.
 
 ## Repo-owner discovery workflow
 
-Repo owners can draft and curate new plan candidates with the discovery helper.
+Repo owners curate the shared, tracked catalog (`config/flight-plans.toml`)
+with the discovery helper below. Discovery itself (`discover-releases`,
+`discover`) is not repo-owner-only -- any user can run it too, then add the
+result to their own local Flight Plans instead (see
+[Your own local Flight Plans](#your-own-local-flight-plans)). This section
+covers curating the plan everyone else sees by default.
+
 Fortify commonly publishes tags with a release prefix such as `25.2` or
 `26.2`, so the helper can scan known repositories and score candidate releases:
 
@@ -191,6 +197,50 @@ Promoting a plan as `recommended` also makes it the catalog default and demotes
 the previous recommended plan to `known-good`. ScanCentral DAST Core and Scanner
 container images are currently chart-managed in this lab; add explicit `.env`
 keys before curating them as separate Flight Plan fields.
+
+## Your own local Flight Plans
+
+Discovery and drafting are not repo-owner-only: any user can add a Flight Plan
+to their own local, gitignored catalog (`config/flight-plans.local.toml`)
+without opening a PR or touching the shared `config/flight-plans.toml`. This is
+useful for trying a release the repo owner has not reviewed yet -- for example,
+a new Fortify release the day it drops.
+
+From the wizard: **Deployment Versions and Flight Plan -> Refresh/discover
+candidate Flight Plan tags**, then **Add a discovered candidate to my local
+Flight Plans**. From the CLI:
+
+```bash
+./scripts/tools/flight-plans.py discover --release 26.3
+./scripts/tools/flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.3.toml --status candidate
+./scripts/tools/flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.3.toml --status known-good --yes
+```
+
+Local Flight Plans show up merged alongside curated ones everywhere a Flight
+Plan can be selected (`list`, `show`, `env-updates`, `compare-env`, and every
+wizard picker) -- they are never a separate mode you have to opt into. They
+cannot be set `--status recommended`, since "the recommended plan" is a
+curated-catalog-only concept. `config/flight-plans.toml` itself is never
+modified by this workflow; `validate` against the curated catalog is
+unaffected.
+
+## Applying a Flight Plan without the interactive menu
+
+Everything above manages *which Flight Plans exist*. To actually write a
+Flight Plan's versions into your real `.env`, use the wizard's non-interactive
+`apply-flight-plan` command -- no need to open the interactive menu:
+
+```bash
+./start_wizard.sh apply-flight-plan fortify-26.2          # dry run: shows impact and pending changes only
+./start_wizard.sh apply-flight-plan fortify-26.2 --yes    # writes .env with a backup first
+```
+
+This reuses the same staging, impact-preview, and backup-and-apply machinery
+as **Deployment Versions -> Upgrade full Flight Plan**. Without `--yes` it
+never writes anything (dry run is the default, matching `promote`/
+`promote-local`); it also refuses -- in both modes -- to apply a Flight Plan
+with no populated component versions, the same guard the interactive menu
+uses.
 
 ## Rollback expectations
 

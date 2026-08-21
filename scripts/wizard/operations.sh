@@ -2054,12 +2054,17 @@ EOF
 }
 
 flight_plan_stage_updates() {
-    local array_name="$1" plan_id="$2" line
+    local array_name="$1" plan_id="$2" line count=0
     local -n pending_ref="$array_name"
     while IFS= read -r line; do
         [ -n "$line" ] || continue
         env_pending_set "$array_name" "${line%%=*}" "${line#*=}"
+        count=$((count + 1))
     done < <(flight_plan_tool env-updates "$plan_id")
+    if [ "$count" -eq 0 ]; then
+        error "Flight Plan $plan_id has no populated component versions yet. Nothing was staged."
+        return 1
+    fi
     env_pending_set "$array_name" FORTIFY_FLIGHT_PLAN "$plan_id"
 }
 
@@ -2103,9 +2108,10 @@ flight_plan_select_menu() {
     FLIGHT_PLAN_CHOICE_LABEL=""
     flight_plan_choose_menu plan_id "$include_candidates" || return $?
     [ -n "$plan_id" ] || return 0
-    flight_plan_stage_updates "$array_name" "$plan_id"
-    note "Flight Plan staged: ${FLIGHT_PLAN_CHOICE_LABEL:-$(flight_plan_label_for_id "$plan_id")}"
-    flight_plan_upgrade_safety_note
+    if flight_plan_stage_updates "$array_name" "$plan_id"; then
+        note "Flight Plan staged: ${FLIGHT_PLAN_CHOICE_LABEL:-$(flight_plan_label_for_id "$plan_id")}"
+        flight_plan_upgrade_safety_note
+    fi
     press_any
 }
 
@@ -2113,6 +2119,11 @@ flight_plan_full_upgrade_flow() {
     local array_name="$1" target_plan="${2:-}"
     [ -n "$target_plan" ] || flight_plan_choose_menu target_plan all || return $?
     [ -n "$target_plan" ] || return 0
+    if [ -z "$(flight_plan_tool env-updates "$target_plan" 2>/dev/null)" ]; then
+        error "Flight Plan $target_plan has no populated component versions yet. Nothing to stage."
+        press_any
+        return 0
+    fi
     section "Flight Plan upgrade impact"
     flight_plan_print_upgrade_impact "$target_plan"
     flight_plan_upgrade_safety_note
@@ -2129,6 +2140,41 @@ flight_plan_full_upgrade_flow() {
 
 flight_plan_upgrade_menu() {
     flight_plan_full_upgrade_flow "$@"
+}
+
+# Non-interactive entry point for `./start_wizard.sh apply-flight-plan <id> [--yes]`
+# -- stages a Flight Plan's component versions into .env with a backup, reusing
+# the same staging/preview/apply machinery as the interactive wizard menu, but
+# never prompts and never blocks on stdin. Without --yes this is a dry run,
+# matching the promote/promote-local CLI convention.
+wizard_apply_flight_plan() {
+    local plan_id="$1" auto_yes="${2:-0}" pending=() line count=0
+    wizard_doctor_load_env
+    if [ ! -s "$ENV_FILE" ]; then
+        error ".env does not exist yet. Create one (cp .env.example .env) before applying a Flight Plan."
+        return 1
+    fi
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        pending+=("$line")
+        count=$((count + 1))
+    done < <(flight_plan_tool env-updates "$plan_id")
+    if [ "$count" -eq 0 ]; then
+        error "Flight Plan $plan_id has no populated component versions yet. Nothing to apply."
+        return 1
+    fi
+    pending+=("FORTIFY_FLIGHT_PLAN=$plan_id")
+    section "Flight Plan upgrade impact"
+    flight_plan_print_upgrade_impact "$plan_id"
+    flight_plan_upgrade_safety_note
+    section "Pending .env changes"
+    env_preview_changes "${pending[@]}"
+    if [ "$auto_yes" -ne 1 ]; then
+        echo
+        note "Dry run only. Re-run with --yes to write .env (a backup is created first)."
+        return 0
+    fi
+    env_apply_updates flight-plan "${pending[@]}"
 }
 
 flight_plan_show_candidates() {
@@ -2216,9 +2262,12 @@ EOF
                 section "Component impact"
                 flight_plan_print_component_impact "$component" "$target_plan"
                 if confirm "Stage $(flight_plan_component_label "$component") values from $target_plan?"; then
-                    flight_plan_stage_component_from_plan "$array_name" "$component" "$target_plan"
-                    flight_plan_stage_drift_marker "$array_name" "$component"
-                    note "$(flight_plan_component_label "$component") staged from $target_plan and marked as Flight Plan drift."
+                    if flight_plan_stage_component_from_plan "$array_name" "$component" "$target_plan"; then
+                        flight_plan_stage_drift_marker "$array_name" "$component"
+                        note "$(flight_plan_component_label "$component") staged from $target_plan and marked as Flight Plan drift."
+                    else
+                        error "$(flight_plan_component_label "$component") has no populated values in $target_plan. Nothing was staged."
+                    fi
                 fi
                 press_any
                 ;;
@@ -2250,18 +2299,55 @@ flight_plan_discovery_menu() {
     title "Flight Plan Discovery"
     cat <<'EOF'
 
-Repo-owner workflow:
-  Discover -> Draft -> Review -> Test -> Promote -> Commit
+Discover -> Draft -> Review -> Test -> Add (below)
 
 Discovery queries Docker Hub for known Fortify repositories and writes a
-candidate TOML file. It does not update config/flight-plans.toml and is not
-shown to normal users until the repo owner promotes it.
+candidate TOML file under tmp/flight-plan-candidates/. It never updates any
+catalog by itself. From here you (or the repo owner) can either add the
+candidate to your own local Flight Plans, or -- for repo owners -- promote it
+into the shared curated catalog for everyone.
 EOF
     echo
-    ask family "Fortify family to discover, for example 26.2 or 25:" 
+    ask family "Fortify family to discover, for example 26.2 or 25:"
     [ -n "$family" ] || return 0
     output="$FORTIFY_HOME_K8S/tmp/flight-plan-candidates/fortify-$family.toml"
     flight_plan_tool discover --family "$family" --output "$output"
+    press_any
+}
+
+flight_plan_promote_local_menu() {
+    local family candidate_path status
+    title "Add to my local Flight Plans"
+    cat <<'EOF'
+
+This adds a Flight Plan to your own local catalog
+(config/flight-plans.local.toml), which is never committed to git and never
+changes the shared, repo-owner-curated catalog. Use this to try a release the
+repo owner has not reviewed yet -- it then shows up alongside curated plans
+everywhere you pick a Flight Plan.
+
+First run "Refresh/discover candidate Flight Plan tags" for the release you
+want, then come back here to add it.
+EOF
+    echo
+    ask family "Fortify family already discovered, for example 26.3:"
+    [ -n "$family" ] || return 0
+    candidate_path="$FORTIFY_HOME_K8S/tmp/flight-plan-candidates/fortify-$family.toml"
+    if [ ! -f "$candidate_path" ]; then
+        error "No candidate file found at $candidate_path. Run discovery first."
+        press_any
+        return 0
+    fi
+    section "Candidate to add"
+    sed 's/^/  /' "$candidate_path" 2>/dev/null
+    echo
+    ask status "Status for your local Flight Plan (candidate/known-good/legacy/deprecated) [candidate]:"
+    status="${status:-candidate}"
+    if confirm "Add fortify-$family to your local Flight Plans as '$status'?"; then
+        flight_plan_tool promote-local "$candidate_path" --status "$status" --yes
+    else
+        note "Not added."
+    fi
     press_any
 }
 
@@ -2294,9 +2380,10 @@ Options
   5. Manage database versions
   6. Compare .env to selected Flight Plan
   7. Show candidate Flight Plans
-  8. Refresh/discover candidate Flight Plan tags (repo owner)
-  9. Preview pending .env changes
-  10. Apply pending version changes
+  8. Refresh/discover candidate Flight Plan tags
+  9. Add a discovered candidate to my local Flight Plans
+  10. Preview pending .env changes
+  11. Apply pending version changes
 
   r. Return
   q. Quit safely
@@ -2312,8 +2399,9 @@ EOF
             6) flight_plan_show_comparison; press_any ;;
             7) flight_plan_show_candidates; press_any ;;
             8) flight_plan_discovery_menu ;;
-            9) [ "${#pending_updates[@]}" -gt 0 ] && env_preview_changes "${pending_updates[@]}" || note "No pending changes."; press_any ;;
-            10) env_section_apply_pending flight-plan pending_updates; press_any ;;
+            9) flight_plan_promote_local_menu ;;
+            10) [ "${#pending_updates[@]}" -gt 0 ] && env_preview_changes "${pending_updates[@]}" || note "No pending changes."; press_any ;;
+            11) env_section_apply_pending flight-plan pending_updates; press_any ;;
             [Rr]) env_section_prompt_return pending_updates && return 0 ;;
             [Qq]) env_section_prompt_return pending_updates && return 130 ;;
             *) error "Invalid selection"; sleep 1 ;;

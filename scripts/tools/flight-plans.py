@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
-"""FortifyLab Flight Plan catalog and repo-owner discovery helper."""
+"""FortifyLab Flight Plan catalog, discovery, and curation helper."""
 
 from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 11):
+    print(
+        "ERROR: Flight Plans requires Python 3.11 or newer (for the standard-library "
+        f"tomllib TOML parser). Found Python {sys.version.split()[0]} at {sys.executable}. "
+        "Install a newer python3 (e.g. 'sudo apt install python3.12' on Ubuntu, or via "
+        "deadsnakes/pyenv) and re-run.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 
 import argparse
 import base64
@@ -9,7 +21,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tomllib
 import urllib.error
 import urllib.parse
@@ -54,8 +65,11 @@ Command groups:
   Wizard and automation helpers:
     default, env-updates, validate
 
+  Anyone -- discover and manage your own Flight Plans:
+    discover-releases, discover, promote-local
+
   Repo-owner curation:
-    discover-releases, discover, curate, promote
+    curate, promote (writes the shared catalog)
 
 Common workflows:
   Review curated Flight Plans:
@@ -65,24 +79,33 @@ Common workflows:
   Compare the current .env to a Flight Plan:
     flight-plans.py compare-env fortify-26.2
 
-  Discover repo-owner release candidates:
+  Discover release candidates (anyone -- not repo-owner-only):
     flight-plans.py discover-releases --years 25,26
     flight-plans.py discover --release 26.2
-    flight-plans.py curate --years 25,26
 
-  Promote a reviewed candidate:
+  Add a candidate to your own local Flight Plans (never touches the shared catalog):
+    flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
+    flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.2.toml --status known-good --yes
+
+  Repo owner: curate and promote into the shared catalog:
+    flight-plans.py curate --years 25,26
     flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
     flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status recommended --yes
+
+  Apply a Flight Plan to .env without the interactive wizard menu:
+    ./start_wizard.sh apply-flight-plan fortify-26.2
+    ./start_wizard.sh apply-flight-plan fortify-26.2 --yes
 
 Safety model:
   Read-only:  default, list, show, compare-env, discover-releases without write flags, curate
   Writes tmp: discover, discover-releases --write-complete, discover-releases --write-all
-  Writes catalog: promote --yes
+  Writes your local catalog: promote-local --yes
+  Writes the shared catalog: promote --yes
 
 Vocabulary:
   Release      A Fortify yy.quarter line such as 25.2 or 26.2 discovered from tags.
   Flight Plan  A curated, deployable bundle of Fortify component versions.
-  Candidate    A generated Flight Plan draft that still needs owner review and testing.
+  Candidate    A generated Flight Plan draft that still needs review and testing.
 """
 
 
@@ -144,11 +167,64 @@ def load_catalog(path: Path) -> Catalog:
         return Catalog(path=path, data=tomllib.load(handle))
 
 
+def local_catalog_path(base_path: Path) -> Path:
+    """Sibling, gitignored catalog a user can add their own Flight Plans to
+    (e.g. config/flight-plans.toml -> config/flight-plans.local.toml)
+    without touching the shared, repo-owner-curated catalog."""
+    return base_path.with_name(f"{base_path.stem}.local{base_path.suffix}")
+
+
+def load_local_catalog(base_path: Path) -> Catalog:
+    local_path = local_catalog_path(base_path)
+    if local_path.exists():
+        return load_catalog(local_path)
+    return Catalog(path=local_path, data={"schema_version": 1, "flight_plans": {}})
+
+
+def merged_read_catalog(base_path: Path) -> Catalog:
+    """Read-only view combining the curated catalog with the user's local
+    one. Local entries take precedence on id collision. schema_version,
+    default_flight_plan, and database_defaults always come from the base
+    catalog -- the local catalog only ever contributes flight_plans."""
+    base = load_catalog(base_path)
+    local = load_local_catalog(base_path)
+    if not local.flight_plans:
+        return base
+    data = dict(base.data)
+    plans = {key: dict(value) for key, value in base.flight_plans.items()}
+    plans.update({key: dict(value) for key, value in local.flight_plans.items()})
+    data["flight_plans"] = plans
+    return Catalog(path=base.path, data=data)
+
+
 def plan_record(catalog: Catalog, plan_id: str) -> dict[str, Any]:
     try:
         return catalog.flight_plans[plan_id]
     except KeyError as exc:
         raise SystemExit(f"Unknown Flight Plan: {plan_id}") from exc
+
+
+def plan_shape_issues(plan_id: str, plan: dict[str, Any]) -> list[str]:
+    """Per-plan structural checks shared by the strict catalog validator and
+    the lenient local-catalog promotion path. Does not check catalog-wide
+    invariants (exactly one recommended plan, database_defaults)."""
+    issues: list[str] = []
+    status = plan.get("status", "")
+    label = plan.get("label", "")
+    components = plan.get("components", {})
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", plan_id):
+        issues.append(f"{plan_id}: id must be lowercase letters, numbers, dot, dash, or underscore")
+    if not label:
+        issues.append(f"{plan_id}: label is required")
+    if status not in VALID_STATUSES:
+        issues.append(f"{plan_id}: status must be one of {', '.join(sorted(VALID_STATUSES))}")
+    missing = [key for key in FORTIFY_KEYS if key not in components]
+    for key in missing:
+        issues.append(f"{plan_id}: missing component key {key}")
+    for key in components:
+        if key not in FORTIFY_KEYS:
+            issues.append(f"{plan_id}: unsupported component key {key}")
+    return issues
 
 
 def validate_catalog(catalog: Catalog) -> list[str]:
@@ -159,23 +235,9 @@ def validate_catalog(catalog: Catalog) -> list[str]:
         issues.append("at least one flight plan is required")
     recommended = 0
     for plan_id, plan in catalog.flight_plans.items():
-        status = plan.get("status", "")
-        label = plan.get("label", "")
-        components = plan.get("components", {})
-        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", plan_id):
-            issues.append(f"{plan_id}: id must be lowercase letters, numbers, dot, dash, or underscore")
-        if not label:
-            issues.append(f"{plan_id}: label is required")
-        if status not in VALID_STATUSES:
-            issues.append(f"{plan_id}: status must be one of {', '.join(sorted(VALID_STATUSES))}")
-        if status == "recommended":
+        issues.extend(plan_shape_issues(plan_id, plan))
+        if plan.get("status", "") == "recommended":
             recommended += 1
-        missing = [key for key in FORTIFY_KEYS if key not in components]
-        for key in missing:
-            issues.append(f"{plan_id}: missing component key {key}")
-        for key in components:
-            if key not in FORTIFY_KEYS:
-                issues.append(f"{plan_id}: unsupported component key {key}")
     if recommended != 1:
         issues.append(f"exactly one recommended Flight Plan is required; found {recommended}")
     for key in DATABASE_KEYS:
@@ -529,7 +591,8 @@ def candidate_lines(family: str, selected: dict[str, str], warnings: list[str], 
     lines.append("")
     lines.append(f"[flight_plans.{toml_quote('fortify-' + family)}.repositories]")
     for key, repos in DISCOVERY_REPOSITORIES.items():
-        lines.append(f"{key} = {toml_quote(", ".join(repos))}")
+        repo_list = ", ".join(repos)
+        lines.append(f"{key} = {toml_quote(repo_list)}")
     if warnings:
         lines.append("")
         lines.append("# Review warnings")
@@ -650,8 +713,12 @@ def render_toml_table(name: str, values: dict[str, str]) -> list[str]:
 
 
 def render_catalog(data: dict[str, Any]) -> str:
-    lines = ["schema_version = 1", f"default_flight_plan = {toml_quote(str(data.get('default_flight_plan', '')))}", ""]
-    lines.extend(render_toml_table("database_defaults", data.get("database_defaults", {})))
+    lines = ["schema_version = 1"]
+    if "default_flight_plan" in data:
+        lines.append(f"default_flight_plan = {toml_quote(str(data['default_flight_plan']))}")
+    if data.get("database_defaults"):
+        lines.append("")
+        lines.extend(render_toml_table("database_defaults", data["database_defaults"]))
     for plan_id, plan in data.get("flight_plans", {}).items():
         lines.extend(["", f"[flight_plans.{toml_quote(plan_id)}]"])
         for key in ("label", "status", "family", "notes"):
@@ -708,6 +775,54 @@ def promote_candidate(catalog: Catalog, candidate_path: Path, status: str, set_d
     backup.write_text(catalog.path.read_text(encoding="utf-8"), encoding="utf-8")
     catalog.path.write_text(render_catalog(data), encoding="utf-8")
     print(f"Updated catalog. Backup: {backup}")
+    return 0
+
+
+LOCAL_STATUSES = VALID_STATUSES - {"recommended"}
+
+
+def promote_local_candidate(base_catalog_path: Path, candidate_path: Path, status: str, yes: bool) -> int:
+    """Add a reviewed candidate to the user's own, gitignored local catalog
+    (a sibling of base_catalog_path) instead of the shared curated catalog.
+    Unlike promote_candidate, this never requires database_defaults or an
+    exactly-one-recommended invariant -- the local catalog is a supplement,
+    always read merged with the curated one, never a standalone catalog."""
+    if status not in LOCAL_STATUSES:
+        print(f"ERROR: status must be one of {', '.join(sorted(LOCAL_STATUSES))} for a local Flight Plan", file=sys.stderr)
+        return 1
+    candidate = load_catalog(candidate_path)
+    if len(candidate.flight_plans) != 1:
+        print("ERROR: candidate file must contain exactly one Flight Plan", file=sys.stderr)
+        return 1
+    plan_id, plan = next(iter(candidate.flight_plans.items()))
+    plan = dict(plan)
+    plan["status"] = status
+    issues = plan_shape_issues(plan_id, plan)
+    if issues:
+        for issue in issues:
+            print(f"ERROR: {issue}", file=sys.stderr)
+        return 1
+    local_path = local_catalog_path(base_catalog_path)
+    local = load_local_catalog(base_catalog_path)
+    data = dict(local.data)
+    plans = {key: dict(value) for key, value in local.flight_plans.items()}
+    plans[plan_id] = plan
+    data["flight_plans"] = plans
+    print(f"Promote candidate:   {candidate_path}")
+    print(f"Target local catalog: {local_path}")
+    print(f"Plan:                {plan_id}")
+    print(f"Status:              {status}")
+    if not yes:
+        print("Dry run only. Re-run with --yes to update your local catalog.")
+        return 0
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    if local_path.exists():
+        backup = local_path.with_suffix(local_path.suffix + ".bak")
+        backup.write_text(local_path.read_text(encoding="utf-8"), encoding="utf-8")
+        print(f"Updated local catalog. Backup: {backup}")
+    else:
+        print(f"Created local catalog: {local_path}")
+    local_path.write_text(render_catalog(data), encoding="utf-8")
     return 0
 
 
@@ -868,6 +983,29 @@ Safety:
     promote_parser.add_argument("--status", choices=sorted(VALID_STATUSES), default="candidate")
     promote_parser.add_argument("--set-default", action="store_true")
     promote_parser.add_argument("--yes", action="store_true")
+    promote_local_parser = sub.add_parser(
+        "promote-local",
+        help="Add a reviewed candidate to your own local Flight Plans",
+        description=(
+            "Add one reviewed candidate Flight Plan to a local, gitignored catalog "
+            "(a sibling of --catalog, e.g. config/flight-plans.local.toml) instead of the "
+            "shared curated catalog. Useful for trying a release the repo owner has not "
+            "reviewed yet. Local Flight Plans are always shown merged with the curated "
+            "catalog in list/show/env-updates/compare-env."
+        ),
+        epilog="""Examples:
+  flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.3.toml --status candidate
+  flight-plans.py promote-local tmp/flight-plan-candidates/fortify-26.3.toml --status known-good --yes
+
+Safety:
+  Read-only until --yes. Never writes the shared catalog; writes only your local
+  sibling file and creates a backup if it already exists.
+  --status recommended is not accepted here -- that is a curated-catalog-only concept.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    promote_local_parser.add_argument("candidate", type=Path)
+    promote_local_parser.add_argument("--status", choices=sorted(LOCAL_STATUSES), default="candidate")
+    promote_local_parser.add_argument("--yes", action="store_true")
     curate_parser = sub.add_parser(
         "curate",
         help="Print the repo-owner Flight Plan curation workflow",
@@ -895,14 +1033,18 @@ Safety:
     if args.command == "default":
         print(catalog.data.get("default_flight_plan", ""))
         return 0
+    # list/show/env-updates/compare-env also see the user's local Flight
+    # Plans (config/flight-plans.local.toml, gitignored) merged on top of
+    # the curated catalog, so a locally-promoted candidate behaves like any
+    # other selectable plan without ever touching the shared catalog.
     if args.command == "list":
-        return print_list(catalog, args.include_candidates)
+        return print_list(merged_read_catalog(args.catalog), args.include_candidates)
     if args.command == "show":
-        return print_show(catalog, args.plan_id)
+        return print_show(merged_read_catalog(args.catalog), args.plan_id)
     if args.command == "env-updates":
-        return print_env_updates(catalog, args.plan_id, args.include_empty)
+        return print_env_updates(merged_read_catalog(args.catalog), args.plan_id, args.include_empty)
     if args.command == "compare-env":
-        return compare_env(catalog, args.plan_id, args.env_file)
+        return compare_env(merged_read_catalog(args.catalog), args.plan_id, args.env_file)
     if args.command == "discover":
         out = args.output or candidate_output_path(args.release)
         return discover(catalog, args.release, out, args.fixture_dir)
@@ -910,6 +1052,8 @@ Safety:
         return discover_families(catalog, args.years, args.min_coverage, args.write_complete, args.write_all, args.output_dir, args.fixture_dir)
     if args.command == "promote":
         return promote_candidate(catalog, args.candidate, args.status, args.set_default, args.yes)
+    if args.command == "promote-local":
+        return promote_local_candidate(args.catalog, args.candidate, args.status, args.yes)
     if args.command == "curate":
         return curate(catalog, args.years, args.fixture_dir)
     raise AssertionError(args.command)

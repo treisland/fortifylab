@@ -413,6 +413,24 @@ inputs_complete() {
       fortify_resolve_license_file ) >/dev/null 2>&1
 }
 
+inputs_pending_detail() {
+    local plan_id
+    [ -s "$ENV_FILE" ] || { printf '%s\n' "Waiting for .env to be created."; return; }
+    env_config_valid || { printf '%s\n' "Waiting for a valid .env configuration."; return; }
+    plan_id="$(flight_plan_selected_id)"
+    if ! flight_plan_tool show "$plan_id" >/dev/null 2>&1; then
+        printf 'Flight Plan tool failed for %s. Run: python3 scripts/tools/flight-plans.py show %s\n' "$plan_id" "$plan_id"
+        printf '  Most common cause: python3 must resolve to Python 3.11 or newer.\n'
+        return
+    fi
+    if ( source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh" &&
+         fortify_resolve_license_file ) >/dev/null 2>&1; then
+        printf '%s\n' "Waiting for .env and a readable Fortify license."
+    else
+        printf '%s\n' "Waiting for a readable Fortify license."
+    fi
+}
+
 deployment_inputs_menu() {
     while true; do
         title "Configuration and license"
@@ -1028,7 +1046,7 @@ guided_dashboard_endpoint_detail() {
 guided_step_progress_message() {
     case "$1" in
         prereqs) printf '%s\n' "Checking host tools and MicroK8s add-ons." ;;
-        inputs) printf '%s\n' "Waiting for .env and a readable Fortify license." ;;
+        inputs) inputs_pending_detail ;;
         preflight) printf '%s\n' "Validating cluster reachability, storage, registry login, capacity, and required settings." ;;
         certs) printf '%s\n' "Checking TLS certificate, private key, JVM keystore, and truststore artifacts." ;;
         dashboard) guided_dashboard_endpoint_detail ;;
