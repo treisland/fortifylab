@@ -1,0 +1,65 @@
+/*
+ * OpenText-inspired palette for the mkdocs-material theme.
+ *
+ * Colors are a close visual approximation read from screenshots of
+ * opentext.com/products/static-application-security-testing (the "ot" logo
+ * mark, accent bar, stat numbers, and "Ask OT Agent" button all share one
+ * vivid blue; headings are near-black; body copy is a dark slate/navy;
+ * cards sit on a very light gray). They are not pixel-sampled from the
+ * live site's stylesheet, so nudge --ot-blue below if it needs to match
+ * more precisely once compared side-by-side.
+ */
+
+:root {
+  --ot-blue: #0b5fda;
+  --ot-blue-dark: #0a4fb5;
+  --ot-ink: #10141c;
+  --ot-body: #3a4759;
+  --ot-card-bg: #f4f5f7;
+}
+
+/* Light mode (data-md-color-scheme="default") */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--ot-blue);
+  --md-primary-fg-color--light: var(--ot-blue);
+  --md-primary-fg-color--dark: var(--ot-blue-dark);
+  --md-primary-bg-color: #ffffff;
+  --md-accent-fg-color: var(--ot-blue);
+  --md-accent-fg-color--transparent: rgb(11 95 218 / 10%);
+  --md-typeset-a-color: var(--ot-blue);
+  /* Only the base text color is overridden -- --md-default-fg-color--light/
+     --lighter/--lightest stay at mkdocs-material's own faded-opacity
+     defaults so secondary/tertiary text (captions, footnotes) keeps its
+     lighter-than-body hierarchy instead of flattening to one solid color. */
+  --md-default-fg-color: var(--ot-body);
+  --md-typeset-color: var(--ot-body);
+  --md-code-bg-color: var(--ot-card-bg);
+}
+
+[data-md-color-scheme="default"] .md-typeset h1,
+[data-md-color-scheme="default"] .md-typeset h2,
+[data-md-color-scheme="default"] .md-typeset h3,
+[data-md-color-scheme="default"] .md-typeset h4 {
+  color: var(--ot-ink);
+  font-weight: 700;
+}
+
+[data-md-color-scheme="default"] .md-typeset table:not([class]) th {
+  background-color: var(--ot-card-bg);
+}
+
+[data-md-color-scheme="default"] .md-typeset .admonition,
+[data-md-color-scheme="default"] .md-typeset details {
+  background-color: var(--ot-card-bg);
+}
+
+/* Dark mode (data-md-color-scheme="slate") keeps the same blue as the one
+   recognizable brand color; ink/body/card tones are left to the slate
+   scheme's own dark-mode defaults for contrast. */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--ot-blue);
+  --md-primary-fg-color--light: var(--ot-blue);
+  --md-primary-fg-color--dark: var(--ot-blue-dark);
+  --md-accent-fg-color: var(--ot-blue);
+  --md-typeset-a-color: var(--ot-blue);
+}
