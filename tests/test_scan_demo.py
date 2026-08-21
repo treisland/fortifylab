@@ -32,6 +32,7 @@ class ScanDemoContractTests(unittest.TestCase):
             "scan_type_prereqs_sast_iwa_java",
             "scan_type_login_sast_iwa_java",
             "scan_type_sensor_check_sast_iwa_java",
+            "scan_type_setup_appversion_sast_iwa_java",
             "scan_type_acquire_sast_iwa_java",
             "scan_type_package_sast_iwa_java",
             "scan_type_submit_sast_iwa_java",
@@ -236,6 +237,45 @@ class ScanDemoContractTests(unittest.TestCase):
             self.assertIn("--source-dir /tmp/workdir/src", args)
             self.assertIn("--av IWA-Java:demo-1", args)
             self.assertIn("--output /tmp/workdir/IWA-Java.zip", args)
+
+    def test_setup_appversion_step_creates_the_appversion_if_missing(self) -> None:
+        # `sc-sast scan start --publish-to` resolves the target appversion
+        # via SSC's getRequiredAppVersion, which throws rather than
+        # creating one -- and this demo generates a fresh, never-seen
+        # av_name every run. The setup-appversion action must run first,
+        # via the same idempotent (--skip-if-exists) building block the
+        # ci.yaml pipeline action uses.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            captured = Path(directory) / "fcli-args.txt"
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'printf \'%s\\n\' "$*" > "{captured}"\n'
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                scan_type_setup_appversion_sast_iwa_java "IWA-Java:demo-1"
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "setup-appversion-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+            args = captured.read_text(encoding="utf-8")
+            self.assertIn("ssc action run", args)
+            self.assertIn("--ssc-session=fortifylab-first-scan", args)
+            self.assertIn("setup-appversion", args)
+            self.assertIn("--av IWA-Java:demo-1", args)
 
     def test_verify_treats_faulted_state_as_failure_not_success(self) -> None:
         # This is the "wait-for doesn't guarantee success" gap identified
@@ -478,6 +518,7 @@ class ScanDemoContractTests(unittest.TestCase):
             scan_type_prereqs_sast_iwa_java() { return 0; }
             scan_type_login_sast_iwa_java() { return 0; }
             scan_type_sensor_check_sast_iwa_java() { return 0; }
+            scan_type_setup_appversion_sast_iwa_java() { return 0; }
             scan_type_acquire_sast_iwa_java() { return 0; }
             scan_type_package_sast_iwa_java() { return 0; }
             scan_type_submit_sast_iwa_java() { return 0; }

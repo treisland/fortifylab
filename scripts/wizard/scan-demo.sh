@@ -15,12 +15,12 @@
 #
 # Scan-type shape (Phase 1 of the design): every scan type implements
 # scan_type_prereqs_<type>, scan_type_login_<type>, scan_type_sensor_check_<type>,
-# scan_type_acquire_<type>, scan_type_package_<type>, scan_type_submit_<type>,
-# scan_type_poll_<type>, scan_type_verify_<type>, scan_type_results_<type>,
-# scan_type_logout_<type>. scan_demo_run dispatches through that shape by
-# name, so adding SCA (Debricked) or DAST later is a new set of functions,
-# not a rework of the menu/orchestration below. Only "sast_iwa_java" exists
-# today.
+# scan_type_setup_appversion_<type>, scan_type_acquire_<type>,
+# scan_type_package_<type>, scan_type_submit_<type>, scan_type_poll_<type>,
+# scan_type_verify_<type>, scan_type_results_<type>, scan_type_logout_<type>.
+# scan_demo_run dispatches through that shape by name, so adding SCA
+# (Debricked) or DAST later is a new set of functions, not a rework of the
+# menu/orchestration below. Only "sast_iwa_java" exists today.
 
 FORTIFY_FIRST_SCAN_APP="${FORTIFY_FIRST_SCAN_APP:-IWA-Java}"
 FORTIFY_FIRST_SCAN_REPO_URL="${FORTIFY_FIRST_SCAN_REPO_URL:-https://github.com/fortify/IWA-Java}"
@@ -107,6 +107,19 @@ scan_type_sensor_check_sast_iwa_java() {
         note "Confirm a worker is deployed and connected before retrying."
         return 1
     fi
+}
+
+# `sc-sast scan start --publish-to` requires the target application version
+# to already exist (it resolves via SSC's getRequiredAppVersion, which
+# throws rather than creating one) -- and this demo generates a fresh,
+# never-before-seen av_name every run. Create it first, via the same
+# built-in SSC action the ci.yaml pipeline action uses for this: idempotent
+# (--skip-if-exists) and auto-fills required attributes so it never blocks
+# on an interactive issue-template prompt.
+scan_type_setup_appversion_sast_iwa_java() {
+    local av_name="$1" fcli_bin
+    fcli_bin="$(fcli_path)" || return 1
+    "$fcli_bin" ssc action run --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" setup-appversion --av "$av_name"
 }
 
 scan_type_acquire_sast_iwa_java() {
@@ -271,6 +284,10 @@ EOF
     note "Checking for an available ScanCentral SAST sensor..."
     scan_type_sensor_check_sast_iwa_java || { rc=1; }
 
+    if [ "$rc" -eq 0 ]; then
+        note "Ensuring $av_name exists in SSC..."
+        scan_type_setup_appversion_sast_iwa_java "$av_name" || rc=1
+    fi
     if [ "$rc" -eq 0 ]; then
         note "Cloning $FORTIFY_FIRST_SCAN_APP..."
         scan_type_acquire_sast_iwa_java "$workdir" || rc=1
