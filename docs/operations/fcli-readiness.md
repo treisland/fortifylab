@@ -51,14 +51,25 @@ force a re-check or recover from an unusual state.
 The wizard sets these values for the current shell:
 
 ```bash
-export FCLI_TRUSTSTORE="$TRUSTSTORE"
+export FCLI_TRUSTSTORE="$FCLI_CLIENT_TRUSTSTORE"   # certs/fcli-truststore, not certs/truststore
 export FCLI_TRUSTSTORE_TYPE="JKS"
 export FCLI_TRUSTSTORE_PWD="<DEFAULT_PASS from private .env>"
 ```
 
+`certs/truststore` and `certs/fcli-truststore` are deliberately different
+files. `certs/truststore` is SSC's own server-side JVM truststore (mounted
+into the pod) and is narrow on purpose: just the lab CA and
+`update.fortify.com`'s root CA. `certs/fcli-truststore` is fcli's own client
+truststore: the same two anchors layered onto a copy of the JDK's default CA
+bundle, since fcli is a client that also needs to reach arbitrary external
+Fortify infrastructure (for example `fcli tool ... install`), not only the
+lab and rulepack updates. Pointing fcli at the narrow `certs/truststore`
+instead produces PKIX certificate validation failures for anything outside
+the lab and `update.fortify.com`.
+
 Only the non-secret truststore path and type are persisted for future shells.
 In addition, it calls fcli's own persistent trust command —
-`fcli config truststore set --file <truststore> --type jks --password <DEFAULT_PASS>`
+`fcli config truststore set --file <fcli-truststore> --type jks --password <DEFAULT_PASS>`
 — so trust is active for every future shell and fcli invocation, not just the
 one the wizard happens to be running in. This is the usual fix for fcli `PKIX`
 certificate validation failures against the local SSC URL, and it now requires

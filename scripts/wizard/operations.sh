@@ -2560,10 +2560,23 @@ fcli_persist_path() {
 }
 
 
+# fcli's own client truststore -- a superset of the JDK default CA bundle
+# plus the lab/update.fortify.com anchors, not TRUSTSTORE (SSC's narrow,
+# server-side-only JVM trust store). Falls back to TRUSTSTORE only when
+# fcli-truststore hasn't been generated yet (existing lab, certs not
+# regenerated since this split), so fcli still gets lab trust in the
+# meantime -- regenerate certs to widen it to the public internet too.
 fcli_truststore_path() {
-    local truststore="${TRUSTSTORE:-}"
+    local certs truststore legacy
+    certs="${FORTIFY_CERTS:-$FORTIFY_HOME_K8S/certs}"
+    truststore="${FCLI_CLIENT_TRUSTSTORE:-}"
+    legacy="${TRUSTSTORE:-$certs/truststore}"
     if [ -z "$truststore" ]; then
-        truststore="${FORTIFY_CERTS:-$FORTIFY_HOME_K8S/certs}/truststore"
+        truststore="$certs/fcli-truststore"
+    fi
+    if [ ! -s "$truststore" ] && [ -s "$legacy" ]; then
+        printf '%s\n' "$legacy"
+        return
     fi
     printf '%s\n' "$truststore"
 }
