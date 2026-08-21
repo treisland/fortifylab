@@ -333,9 +333,35 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("[ 2/ 2] Two", result.stdout)
         self.assertIn("complete", result.stdout)
         self.assertIn("pending", result.stdout)
-        self.assertNotIn("checking...", result.stdout)
-        self.assertIn("Deployment state", result.stdout)
 
+    def test_board_reset_shows_progress_instead_of_a_silent_pause(self) -> None:
+        # Bug: starting a fresh Guided deployment (interactive or
+        # auto-advance) called guided_board_reset, which shells out to
+        # kubectl for every step with zero output, so the wizard looked
+        # frozen right after the "Continue?" prompt on a slow/cold cluster.
+        result = self.run_wizard_functions(
+            'GUIDED_STEP_ID=(one two); GUIDED_STEP_LABEL=(One Two); '
+            'guided_step_live_state() { [ "$1" = one ] && printf complete || printf pending; }; '
+            'guided_board_reset'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Checking deployment state", result.stdout)
+        self.assertIn("Deriving live state from files and Kubernetes.", result.stdout)
+        self.assertIn("[ 1/ 2] One", result.stdout)
+        self.assertIn("[ 2/ 2] Two", result.stdout)
+        self.assertIn("complete", result.stdout)
+        self.assertIn("pending", result.stdout)
+
+    def test_board_reset_progress_uses_labels_for_a_subset_of_ids(self) -> None:
+        result = self.run_wizard_functions(
+            'GUIDED_STEP_ID=(one two three); GUIDED_STEP_LABEL=(One Two Three); '
+            'guided_step_live_state() { printf complete; }; '
+            'guided_board_reset two three'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[ 1/ 2] Two", result.stdout)
+        self.assertIn("[ 2/ 2] Three", result.stdout)
+        self.assertNotIn("One", result.stdout)
 
     def test_resume_treats_manually_deployed_sast_pods_as_complete(self) -> None:
         result = self.run_wizard_functions(
