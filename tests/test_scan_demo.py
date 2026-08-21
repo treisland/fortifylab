@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -102,17 +103,30 @@ class ScanDemoContractTests(unittest.TestCase):
     def test_prereqs_fail_when_maven_is_missing(self) -> None:
         # ScanCentral SAST packaging (`fcli sc-sast package`) needs `mvn` on
         # PATH to build IWA-Java's Maven source; without it the demo should
-        # fail loudly here rather than later mid-package.
+        # fail loudly here rather than later mid-package. `mvn` isn't
+        # guaranteed to live in any particular directory across machines (it
+        # can sit right alongside coreutils in /usr/bin), so we can't just
+        # exclude a directory from PATH -- instead build an isolated PATH out
+        # of symlinks to only the specific tools sourcing the wizard needs,
+        # deliberately leaving `mvn` out.
         with tempfile.TemporaryDirectory() as directory:
             bin_dir = Path(directory) / "bin"
             bin_dir.mkdir()
             _write_executable(bin_dir / "fcli", "#!/usr/bin/env bash\nexit 0\n")
+            for tool in (
+                "bash", "git", "cat", "printf", "mkdir", "sed", "grep", "cut",
+                "tr", "date", "mktemp", "readlink", "id", "whoami", "tput",
+                "stty", "sort", "head", "tail", "wc", "dirname", "basename",
+                "awk", "uname", "hostname", "cp", "ls", "rm", "touch",
+                "chmod", "tee", "xargs", "find", "expr", "sleep", "seq",
+            ):
+                real = shutil.which(tool)
+                if real:
+                    (bin_dir / tool).symlink_to(real)
             command = """
                 export WIZARD_NOMAIN=1 NO_COLOR=1
                 export FORTIFY_FCLI_INSTALL_DIR="$2"
-                # Isolated PATH: only fcli and the coreutils/git needed to run
-                # bash itself are present, deliberately excluding mvn.
-                export PATH="$2:/usr/bin:/bin"
+                export PATH="$2"
                 hash -r
                 source "$1"
                 SSC_URL=https://ssc.fortifylab.test
