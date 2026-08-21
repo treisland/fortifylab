@@ -583,6 +583,33 @@ class FlightPlansTests(unittest.TestCase):
         self.assertIn("flight_plan_full_upgrade_flow", operations)
         self.assertIn("flight_plan_component_override_menu", operations)
 
+    def test_versions_menu_groups_discovery_under_its_own_header_ahead_of_advanced(self) -> None:
+        # PM feedback: discovery was buried at option 8, behind advanced/expert
+        # options, even though it's often the first thing a user wants to do
+        # (a new release just dropped). It must now have its own section,
+        # placed ahead of the advanced/expert group.
+        operations = (ROOT / "scripts/wizard/operations.sh").read_text(encoding="utf-8")
+        menu = operations.split("flight_plan_versions_menu()", 1)[1].split("versions_menu()", 1)[0]
+        self.assertIn('section "Core actions"', menu)
+        self.assertIn('section "Discover new releases"', menu)
+        self.assertIn('section "Advanced (expert)"', menu)
+        self.assertIn('section "Review and apply"', menu)
+        discover_pos = menu.index('section "Discover new releases"')
+        advanced_pos = menu.index('section "Advanced (expert)"')
+        review_pos = menu.index('section "Review and apply"')
+        self.assertLess(discover_pos, advanced_pos)
+        self.assertLess(advanced_pos, review_pos)
+        # Renumbered case statement must still route correctly.
+        for line in (
+            "1) flight_plan_full_upgrade_flow pending_updates; press_any ;;",
+            "2) flight_plan_select_menu pending_updates ;;",
+            "3) flight_plan_show_candidates; press_any ;;",
+            "4) flight_plan_discovery_menu ;;",
+            "5) flight_plan_promote_local_menu ;;",
+            "6) flight_plan_component_override_menu pending_updates || return $? ;;",
+        ):
+            self.assertIn(line, menu)
+
     def test_tool_parses_and_runs_under_python_3_11(self) -> None:
         # Regression guard for a prior bug: an f-string reused its own quote
         # character inside the expression (PEP 701), which only parses on
