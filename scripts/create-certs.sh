@@ -185,13 +185,19 @@ if [ -n "$JAVA_CACERTS" ] && [ -s "$JAVA_CACERTS" ]; then
   # distros' packaged JRE ships an empty store password instead -- try
   # both rather than assuming, so a packaging difference degrades to the
   # narrow fallback below instead of failing the whole cert rebuild.
+  # Each attempt writes to its own fresh scratch file rather than
+  # overwriting a previous attempt's file: some keytool builds leave a
+  # failed target in a state a later cp/chmod can't cleanly reuse.
   for cacerts_src_pass in changeit ""; do
-    cp "$JAVA_CACERTS" "$FCLI_CLIENT_TRUSTSTORE"
-    chmod u+w "$FCLI_CLIENT_TRUSTSTORE"
-    if keytool -storepasswd -keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass "$cacerts_src_pass" -new "$DEFAULT_PASS" >/dev/null 2>&1; then
+    attempt_file="$(mktemp)"
+    cp "$JAVA_CACERTS" "$attempt_file"
+    chmod u+w "$attempt_file"
+    if keytool -storepasswd -keystore "$attempt_file" -storepass "$cacerts_src_pass" -new "$DEFAULT_PASS" >/dev/null 2>&1; then
+      mv "$attempt_file" "$FCLI_CLIENT_TRUSTSTORE"
       cacerts_seeded=1
       break
     fi
+    rm -f "$attempt_file"
   done
 fi
 if [ "$cacerts_seeded" -ne 1 ]; then

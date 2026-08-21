@@ -584,7 +584,8 @@ exit 1
         script = (ROOT / "scripts" / "create-certs.sh").read_text(encoding="utf-8")
         self.assertIn("FCLI_CLIENT_TRUSTSTORE", script)
         self.assertIn("JAVA_CACERTS", script)
-        self.assertIn('keytool -storepasswd -keystore "$FCLI_CLIENT_TRUSTSTORE"', script)
+        self.assertIn('keytool -storepasswd -keystore "$attempt_file"', script)
+        self.assertIn('mv "$attempt_file" "$FCLI_CLIENT_TRUSTSTORE"', script)
         # Both the lab CA(s) and the update.fortify.com root must land in
         # both keystores -- SSC's narrow one and fcli's broader one -- not
         # just the narrow one.
@@ -610,22 +611,27 @@ exit 1
             cacerts = Path(java_home) / "lib" / "security" / "cacerts"
             if not cacerts.is_file():
                 self.skipTest(f"JDK cacerts not found at {cacerts}")
-            target = Path(directory) / "fcli-truststore"
             # "changeit" is the near-universal JKS cacerts default, but some
             # distros' packaged JRE ships an empty password instead -- mirror
             # create-certs.sh's try-both fallback rather than assuming one.
-            repassworded = False
-            for cacerts_src_pass in ("changeit", ""):
-                shutil.copy(cacerts, target)
+            # Each attempt gets its own fresh file/permissions rather than
+            # overwriting the previous attempt's file: some keytool builds
+            # leave a failed target in a state a later attempt can't just
+            # copy over (observed in CI as a plain PermissionError).
+            target = None
+            for attempt, cacerts_src_pass in enumerate(("changeit", "")):
+                candidate = Path(directory) / f"fcli-truststore-{attempt}"
+                shutil.copy(cacerts, candidate)
+                candidate.chmod(0o600)
                 result = subprocess.run(
-                    [keytool, "-storepasswd", "-keystore", str(target), "-storepass", cacerts_src_pass, "-new", "contract-secret"],
+                    [keytool, "-storepasswd", "-keystore", str(candidate), "-storepass", cacerts_src_pass, "-new", "contract-secret"],
                     capture_output=True,
                     text=True,
                 )
                 if result.returncode == 0:
-                    repassworded = True
+                    target = candidate
                     break
-            if not repassworded:
+            if target is None:
                 self.skipTest("This system's JDK cacerts uses neither the changeit nor empty default password")
             listing = subprocess.run(
                 [keytool, "-list", "-keystore", str(target), "-storepass", "contract-secret"],
