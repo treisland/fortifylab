@@ -146,8 +146,14 @@ main_menu() {
         echo "  2. Lab lifecycle controls (start / stop / status)"
         echo "  3. Configuration editor (.env)"
         echo "  4. Logs (stream / tail / wizard log)"
+        if scan_demo_ready; then
+            echo "  5. First-scan one-click demo (SAST · IWA-Java)"
+        else
+            printf '  %s5. First-scan one-click demo (SAST · IWA-Java) -- deploy SSC + SAST first%s\n' "$DIM" "$RESET"
+        fi
 
         echo
+        echo "  ?. Help Center / Fortify Knowledge Center"
         echo "  m. More tools (all wizard menus)"
         echo "  q. Quit"
         echo
@@ -159,6 +165,15 @@ main_menu() {
             2) lab_lifecycle_menu ;;
             3) edit_env ;;
             4) essentials_logs_menu ;;
+            5)
+                if scan_demo_ready; then
+                    scan_demo_menu
+                else
+                    error "Deploy SSC and ScanCentral SAST first (Essentials -> 1. Deploy)."
+                    sleep 1
+                fi
+                ;;
+            "?") help_center ;;
             [Mm]) wizard_more_menu ;;
             [Qq]) clear; exit 0 ;;
             *) error "Invalid choice"; sleep 1 ;;

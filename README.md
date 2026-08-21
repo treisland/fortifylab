@@ -123,7 +123,9 @@ python -m pip install -r requirements-python.txt
 ## Using the wizard
 
 The main menu opens on a small **Essentials** screen (Deploy, Lab lifecycle
-controls, Configuration editor, Logs), plus **m. More tools** for everything
+controls, Configuration editor, Logs, and a first-scan one-click demo once
+SSC and ScanCentral SAST are up), a **`?`** hotkey straight to the Help
+Center from anywhere on that screen, and **m. More tools** for everything
 else, organized by task: Deploy, Diagnostics and advanced, Operations, and
 Learn (an offline Help Center with guides to every component, answerable even
 when the cluster is down).
