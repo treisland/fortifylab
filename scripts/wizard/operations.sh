@@ -2363,8 +2363,21 @@ EOF
     section "Candidate to add"
     sed 's/^/  /' "$candidate_path" 2>/dev/null
     echo
-    ask status "Status for your local Flight Plan (candidate/known-good/legacy/deprecated) [candidate]:"
-    status="${status:-candidate}"
+    section "Status for your local Flight Plan"
+    echo "  1. candidate (default)"
+    echo "  2. known-good"
+    echo "  3. legacy"
+    echo "  4. deprecated"
+    echo
+    local status_choice
+    ask status_choice "Select:"
+    case "$status_choice" in
+        ""|1) status=candidate ;;
+        2) status=known-good ;;
+        3) status=legacy ;;
+        4) status=deprecated ;;
+        *) error "Invalid selection; defaulting to candidate."; status=candidate ;;
+    esac
     if confirm "Add fortify-$family to your local Flight Plans as '$status'?"; then
         flight_plan_tool promote-local "$candidate_path" --status "$status" --yes
     else
