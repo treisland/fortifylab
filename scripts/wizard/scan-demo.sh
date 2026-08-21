@@ -170,12 +170,18 @@ scan_type_submit_sast_iwa_java() {
 # scan_type_verify_sast_iwa_java decides whether that terminal state means
 # the scan actually succeeded.
 scan_type_poll_sast_iwa_java() {
-    local fcli_bin elapsed=0 status
+    local fcli_bin elapsed=0 status data_row
     fcli_bin="$(fcli_path)" || return 1
     while [ "$elapsed" -lt "$FORTIFY_FIRST_SCAN_POLL_TIMEOUT" ]; do
         status="$("$fcli_bin" sc-sast scan status ::first_scan_job::jobToken \
             --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" 2>&1)"
-        note "Scan status: $(printf '%s' "$status" | tr '\n' ' ' | head -c 200)"
+        # Default table output is "Job token, Has files, Scan state, Publish
+        # state, SSC processing state, Endpoint version, Action" with the
+        # header repeated on every call; collapsing that whole thing to one
+        # line (as before) mashed the header into the data row. Print just
+        # the data row's scan/publish state instead of the full table.
+        data_row="$(printf '%s\n' "$status" | tail -n1)"
+        note "Scan status: $(printf '%s' "$data_row" | awk '{print "scanState="$3, "publishState="$4}')"
         if printf '%s' "$status" | grep -qiE 'COMPLETE|FAULTED|FAILED|CANCELED|TIMEOUT'; then
             LAST_SCAN_STATUS="$status"
             return 0

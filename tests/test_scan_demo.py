@@ -412,6 +412,43 @@ class ScanDemoContractTests(unittest.TestCase):
             self.assertIn("::first_scan_job::jobToken", args)
             self.assertNotIn("::first_scan_job::scanId", args)
 
+    def test_poll_prints_a_clean_one_line_status_not_a_mangled_repeated_table(self) -> None:
+        # `sc-sast scan status` prints its header + one data row on every
+        # call; collapsing that to one line with tr+head-c mashed the header
+        # into the data row and cut it off mid-word (reported from a real
+        # run). Print just the scan/publish state fields from the data row.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                "cat <<'TABLE'\n"
+                "Job token                             Has files  Scan state  Publish state  SSC processing state  Endpoint version  Action\n"
+                "d2d63825-eaa5-4dd2-b7e9-24a4076e861d  true       COMPLETE    QUEUED         QUEUED                 4                 SCAN_REQUESTED\n"
+                "TABLE\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                scan_type_poll_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "poll-format-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            output = result.stdout
+            self.assertIn("RC=0", output, output + result.stderr)
+            self.assertIn("Scan status: scanState=COMPLETE publishState=QUEUED", output)
+            self.assertNotIn("Job token", output)
+            self.assertNotIn("SCAN_REQUESTED", output)
+
     def test_verify_accepts_completed_state_as_success(self) -> None:
         command = """
             export WIZARD_NOMAIN=1 NO_COLOR=1
