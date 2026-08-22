@@ -78,6 +78,7 @@ nav:
       - Software Security Center (SSC): fortify/ssc.md
       - ScanCentral SAST: fortify/scancentral-sast.md
       - ScanCentral DAST: fortify/scancentral-dast.md
+      - fcli and SSC known issues: fortify/fcli-known-issues.md
       - License and Infrastructure Manager (LIM): fortify/lim.md
       - MySQL: fortify/mysql.md
       - PostgreSQL: fortify/postgresql.md
