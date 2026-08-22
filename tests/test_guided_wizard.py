@@ -1858,7 +1858,6 @@ class GuidedWizardTests(unittest.TestCase):
             "apps/postgresql/stop.sh": ["postgresql"],
             "apps/ssc/stop.sh": ["ssc-webapp"],
             "apps/lim/stop.sh": ["lim"],
-            "apps/scsast/stop.sh": ["scancentral-sast-controller", "scancentral-sast-worker-linux"],
             "apps/scdast/core/stop.sh": [
                 "sdast-core-scancentral-dast-core-api",
                 "sdast-core-scancentral-dast-core-globalservice",
@@ -1873,6 +1872,37 @@ class GuidedWizardTests(unittest.TestCase):
                 self.assertIn("fortify_scale_statefulset_if_exists", body)
                 for statefulset in statefulsets:
                     self.assertIn(statefulset, body)
+
+    def test_scsast_stop_scales_every_known_sensor_statefulset_name(self) -> None:
+        # The sensor's StatefulSet name has varied across chart
+        # versions/configs (scancentral-sast-sensor-linux,
+        # scancentral-sast-sensor, scancentral-sast-worker-linux). Scaling
+        # only "worker-linux" left the sensor running after "stop" on labs
+        # deployed with a chart that named it something else -- confirmed
+        # against guided.sh's own readiness checks, which already tried all
+        # three names via a duplicate list. Single shared source of truth
+        # now, used by both.
+        helper = (ROOT / "scripts/lib/k8s-scale.sh").read_text(encoding="utf-8")
+        self.assertIn("fortify_sast_sensor_statefulset_names()", helper)
+        self.assertIn("fortify_scale_sast_sensor_if_exists()", helper)
+        for name in (
+            "scancentral-sast-sensor-linux",
+            "scancentral-sast-sensor",
+            "scancentral-sast-worker-linux",
+        ):
+            self.assertIn(name, helper)
+
+        stop_body = (ROOT / "apps/scsast/stop.sh").read_text(encoding="utf-8")
+        self.assertIn("scripts/lib/k8s-scale.sh", stop_body)
+        self.assertIn("fortify_scale_statefulset_if_exists", stop_body)
+        self.assertIn("scancentral-sast-controller", stop_body)
+        self.assertIn("fortify_scale_sast_sensor_if_exists", stop_body)
+        self.assertNotIn("scancentral-sast-worker-linux", stop_body)
+
+        # guided.sh's readiness checks reuse the same shared name list
+        # rather than keeping their own separate copy that could drift.
+        guided_body = (ROOT / "scripts/wizard/guided.sh").read_text(encoding="utf-8")
+        self.assertIn("fortify_sast_sensor_statefulset_names", guided_body)
 
     def test_scale_helper_treats_missing_statefulset_as_success(self) -> None:
         helper = ROOT / "scripts/lib/k8s-scale.sh"
@@ -1893,6 +1923,57 @@ class GuidedWizardTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('statefulset.apps "missing-statefulset" not found', result.stdout)
+        self.assertNotIn("SCALE:", result.stdout)
+
+    def test_scale_sast_sensor_finds_it_under_any_known_name(self) -> None:
+        # The bug: a lab whose chart named the sensor's StatefulSet
+        # "scancentral-sast-sensor" (not "scancentral-sast-worker-linux")
+        # was left running after "stop", because the old code only ever
+        # checked the one hardcoded name and silently treated "not found
+        # under that name" as "already stopped."
+        helper = ROOT / "scripts/lib/k8s-scale.sh"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; '
+                'FORTIFY_OPERATION_KUBECTL=fake_kubectl; '
+                'fake_kubectl() { case "$*" in '
+                '*"get statefulset scancentral-sast-sensor-linux") return 1 ;; '
+                '*"get statefulset scancentral-sast-sensor") return 0 ;; '
+                '*"get statefulset "*) return 1 ;; '
+                '*) printf "SCALE:%s\\n" "$*" ;; esac; }; '
+                'fortify_scale_sast_sensor_if_exists fortify 0',
+                "scale-sensor-test",
+                str(helper),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SCALE:-n fortify scale statefulset scancentral-sast-sensor --replicas=0", result.stdout)
+        self.assertNotIn("No ScanCentral SAST sensor", result.stdout)
+
+    def test_scale_sast_sensor_reports_when_none_of_the_known_names_exist(self) -> None:
+        helper = ROOT / "scripts/lib/k8s-scale.sh"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; '
+                'FORTIFY_OPERATION_KUBECTL=fake_kubectl; '
+                'fake_kubectl() { case "$*" in *" get statefulset "*) return 1 ;; esac; printf "SCALE:%s\\n" "$*"; }; '
+                'fortify_scale_sast_sensor_if_exists fortify 0',
+                "scale-sensor-missing-test",
+                str(helper),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("No ScanCentral SAST sensor StatefulSet found", result.stdout)
         self.assertNotIn("SCALE:", result.stdout)
 
     def test_helm_delete_helper_treats_missing_release_as_success(self) -> None:

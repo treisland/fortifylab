@@ -568,7 +568,7 @@ sast_pods_in_progress() {
 }
 
 sast_sensor_workload_names() {
-    printf '%s\n' scancentral-sast-sensor-linux scancentral-sast-sensor scancentral-sast-worker-linux
+    fortify_sast_sensor_statefulset_names
 }
 
 sast_sensor_workload_ready() {
