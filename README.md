@@ -26,6 +26,7 @@ reference (getting started, troubleshooting, architecture, operations).
 - [Conventions and gotchas](#conventions-and-gotchas)
 - [Cleanup](#cleanup)
 - [Contributing](#contributing)
+- [Changelog](#changelog)
 - [License](#license)
 
 ## Scope
@@ -265,6 +266,10 @@ evidence plus the failed wizard step. Do not attach raw logs, `.env`, Secret
 values, license data, tokens, or private keys.
 
 Questions or ideas: open a [GitHub issue](https://github.com/treisland/fortifylab/issues).
+
+## Changelog
+
+See [`CHANGELOG.md`](CHANGELOG.md) for notable changes by release.
 
 ## License
 
