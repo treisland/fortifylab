@@ -17,6 +17,12 @@ source "$FORTIFY_HOME_K8S/scripts/lib/k8s-hostnames.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
 # shellcheck source=../../scripts/lib/coredns-lab-hosts.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+RELEASE_OVERLAY_HELM_ARGS=()
+if [ -f "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh" ]; then
+    # shellcheck source=../../scripts/lib/release-overlays.sh
+    source "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh"
+    release_overlay_load scsast
+fi
 
 fortify_require_k8s_hostname SCSAST "$SCSAST"
 fortify_ensure_coredns_lab_hosts
@@ -76,7 +82,8 @@ microk8s helm -n "$NAMESPACE" upgrade -i scancentral-sast oci://registry-1.docke
 --set workers.linux.persistence.storageClass="nfs" \
 --set workers.linux.persistence.size="20" \
 --set workers.linux.image.tag="$FORTIFY_SCSAST_WORKER_IMAGE_TAG" \
--f $CURRENT_DIR/resource_override.yaml
+-f $CURRENT_DIR/resource_override.yaml \
+"${RELEASE_OVERLAY_HELM_ARGS[@]}"
 
 fortify_annotate_traefik_https_service "$NAMESPACE" scancentral-sast-controller
 microk8s kubectl -n "$NAMESPACE" scale statefulset scancentral-sast-controller --replicas=1

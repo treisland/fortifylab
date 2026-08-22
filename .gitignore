@@ -24,6 +24,7 @@ venv/
 # Environment config (contains passwords)
 .env
 .env.backups/
+.fortifylab/
 .env.*.bak
 .env.bak
 .env.tmp
@@ -43,3 +44,10 @@ apps/scdast/core/DefaultData.zip
 
 # Local/scratch test values
 apps/scdast/scanner/values_test.yaml
+# Your own local Flight Plans (never shared/committed)
+config/flight-plans.local.toml
+config/flight-plans.local.toml.bak
+# Local/private runbooks
+runbooks/local/*
+!runbooks/local/README.md
+fortify-sast-package.zip

@@ -15,8 +15,9 @@ secrets/
 1. Set `FORTIFY_LICENSE_FILE` to a protected external file, or use the
    backward-compatible `input/fortify.license` default (see `input/README.md`).
 2. Configure `.env` (domain, passwords, image versions).
-3. Run `scripts/create-certs.sh` to generate the mkcert root + leaf cert and
-   build the JVM keystore + truststore into `generated/`.
+3. Run `scripts/create-certs.sh` to generate the mkcert root + leaf cert, or
+   validate and normalize BYO TLS inputs when `FORTIFY_TLS_MODE=byo`, and build
+   the JVM keystore + truststore into `generated/`.
 4. Run `scripts/create-secrets.sh` to render templates, generate ephemeral
    secrets (SSC `secret.key`, scancentral tokens, JWT keys), and create the
    Kubernetes Secret objects.
@@ -33,7 +34,7 @@ The k8s Secret name and key are what the helm chart reads.
 | `generated/certs/keystore.jks`                 | `fortify-secrets`                | `keystore.jks`       | SSC (HTTPS keystore)                |
 | `generated/certs/truststore`                   | `fortify-secrets`                | `truststore`         | SSC (JVM truststore for outbound)   |
 | `generated/certs/tls.crt` + `tls.key`          | `tls`                            | (TLS type)           | nginx ingress (server cert)         |
-| `generated/certs/rootCA.pfx`                   | `tls-pfx`                        | `tls.pfx`            | LIM (signing cert PFX)              |
+| `generated/certs/rootCA.pfx`                   | `tls-pfx`                        | `tls.pfx`            | LIM (signing/server-compatible PFX) |
 | —                                              | `tls-pfx-password`               | `password`           | LIM (PFX password)                  |
 | —                                              | `lim-server-certificate`         | (TLS type)           | LIM (server cert)                   |
 | —                                              | `lim-admin-credentials`          | basic-auth           | LIM admin                           |
@@ -68,4 +69,6 @@ or rollback behavior that does not exist.
 Public certificate authorities (Amazon Root CA 1, the `update.fortify.com`
 chain, etc.) are **not** stored here as secrets. They are imported into the
 JVM truststore by `scripts/create-certs.sh` and travel with the
-`truststore` file above.
+`truststore` file above. In BYO TLS mode, keep `FORTIFY_BYO_TLS_KEY` outside
+Git or under the gitignored `secrets/input/` handoff area; never paste private
+key material into terminal output, docs, issues, or diagnostics.

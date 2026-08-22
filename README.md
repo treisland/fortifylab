@@ -9,6 +9,25 @@ mkcert-issued TLS. Every step driven by an interactive wizard or a single
 > Not a production deployment guide — opinionated defaults, single-node
 > cluster, NFS PVCs. Intended for lab and evaluation use.
 
+📖 **Full documentation:** [treisland.github.io/fortifylab](https://treisland.github.io/fortifylab/)
+— this README is a fast on-ramp; the docs site is the complete, authoritative
+reference (getting started, troubleshooting, architecture, operations).
+
+## Contents
+
+- [Scope](#scope)
+- [What you get](#what-you-get)
+- [Prerequisites](#prerequisites)
+- [Quick start](#quick-start)
+- [Using the wizard](#using-the-wizard)
+- [DNS and TLS](#dns-and-tls)
+- [Manual configuration after deploy](#manual-configuration-after-deploy)
+- [Repo layout](#repo-layout)
+- [Conventions and gotchas](#conventions-and-gotchas)
+- [Cleanup](#cleanup)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Scope
 
 This repository intentionally has one job: guide an operator through creating
@@ -27,9 +46,18 @@ are separate products with different users and security boundaries.
 | LIM | `https://lim.fortifydemo.com` | DAST license/pool server |
 | Kubernetes Dashboard | `https://dashboard.fortifydemo.com` | Deployed by default; short-lived access tokens |
 
+Also included: optional **vulnerable sample applications** (Juice Shop,
+WebGoat, DVWA) for a first scan with no source of your own, and a **Flight
+Plans** system that bundles known-compatible component versions so you pick
+one plan instead of tuning versions by hand — see [Versions and
+compatibility](docs/operations/versions-and-compatibility.md).
+
 ## Prerequisites
 
-- Linux host (Ubuntu 22.04+ tested)
+- Linux host (Ubuntu 22.04+ tested; other distros are untested)
+- Python 3.11+ available as `python3` (Ubuntu 22.04 ships 3.10 by default; install
+  a newer interpreter, e.g. `sudo apt install python3.12`, if `python3 --version`
+  reports below 3.11) — required by the Flight Plans version-selection tool
 - ~16 GB RAM, ~50 GB disk free
 - Browser reachability to the host (LAN IP, public IP, or VPN)
 - A Fortify license (`fortify.license`), stored outside the repository when
@@ -37,6 +65,11 @@ are separate products with different users and security boundaries.
 - A Docker Hub login that can pull from `fortifydocker/*` and `bitnamilegacy/*`
 - For DAST: ScanCentral DAST and WebInspect licenses loaded into LIM before
   DAST scans can run successfully
+
+MicroK8s itself does not need to be pre-installed — the wizard's guided setup
+installs it (and other host prerequisites) for you; see
+[`scripts/install_microk8s.sh`](scripts/install_microk8s.sh) if you'd rather
+run that step by hand first.
 
 ## Quick start
 
@@ -49,217 +82,103 @@ cp .env.example .env
 ./start_wizard.sh
 ```
 
-The first launch displays a Fortify Lab banner with the current version and a
-mandatory **LAB / DEMO USE ONLY** notice. Type `LAB` to acknowledge that this
-repository's architecture and automation are for lab, evaluation, demo, and
-training use only. This limitation applies to this deployment toolkit, not to
-the production capabilities of Fortify products. See [`docs/lab-use.md`](docs/lab-use.md).
+The first launch shows a Fortify Lab banner and a mandatory **LAB / DEMO USE
+ONLY** notice — type `LAB` to acknowledge it. That limitation applies to this
+deployment toolkit, not to the production capabilities of Fortify products;
+see [`docs/lab-use.md`](docs/lab-use.md). From there, the welcome screen
+recommends **Guided deployment** for first-time use: a numbered,
+explanatory walkthrough that installs host prerequisites, then TLS, secrets,
+databases, and each Fortify component in dependency order.
 
-After acknowledgement, the first-run welcome screen explains the recommended
-path for beginners, summarizes the core components, shows a read-only snapshot
-of `.env`, license, Docker, MicroK8s, domain, and selected deployment profile,
-and lists useful local paths such as `.env`, `.env.backups/`, `certs/`, the
-license input, diagnostics directory, and wizard log. Set `FORTIFY_NO_BANNER=1`
-to suppress the banner or `NO_COLOR=1` for plain terminal output.
+**What to expect:** allow roughly 15–20 minutes for Express deployment once
+prerequisites and images are already available, and 30–60 minutes for a
+first run on a fresh host (package installs and image pulls dominate). Guided
+mode shows a live status board and an estimate for the current step, so it
+won't look stuck. Full walkthrough, including expected screen-by-screen
+output: [Getting started](docs/getting-started/index.md).
 
-Inside the wizard, the main menu is organized by task:
+If a step fails, fix the reported dependency and retry the same step, or quit
+safely and come back later — choose **Resume or repair** and the wizard picks
+up at the first incomplete step. It never deletes data on its own.
 
-- **Deploy:** Guided deployment, Express deployment, Resume or repair,
-  individual component management, vulnerable sample applications, and
-  Kubernetes Dashboard access.
-- **Diagnostics and advanced:** live status plus the advanced setup menu for
-  prerequisites, license files, certificates/secrets, DNS, SSC token, LIM,
-  Dashboard access, and `.env` editing.
-- **Operations:** lab lifecycle controls, logs, cluster snapshot, one-pod logs,
-  URLs and credentials, Tools and FCLI readiness, image versions, Configuration editor, and wizard log.
-- **Learn:** the Help Center / Fortify Knowledge Center and operational
-  guidance.
+### Python CLI preview
 
-Choose **Guided deployment (recommended)** for a numbered, explanatory
-walkthrough. Guided deployment first asks for a deployment profile: SSC only,
-SAST controller only, SAST full with SSC, DAST full, Full lab, Sample vulnerable
-apps, or Custom. The wizard expands required dependencies before it shows the
-final plan. Each screen
-shows status derived from current files and live Kubernetes resources. Required
-steps cannot be skipped; optional host setup and post-deploy configuration can
-be deferred. Guided wait screens poll through readiness and application checks,
-show recent relevant events, and let you open contextual pod logs or live
-diagnostics without leaving the guided flow. Interactive mode pauses after each
-verified step; auto-advance continues after a 5-second countdown unless you take
-control.
+A Python CLI/TUI migration is in progress alongside the Bash wizard. Bash remains the production guided wizard and compatibility entrypoint; the
+preview commands run from a clone with the standard library only:
 
-Choose **Express deployment** for the original unattended sequence: certs →
-Kubernetes Dashboard → secrets → MySQL + Postgres → SSC + LIM → SAST → DAST.
-Guided and Express modes call the same underlying component operations and
-dependency gates; Guided adds selectable profiles and orchestration around those
-operations.
+```bash
+./bin/fortifylab --help
+```
 
-Choose **Resume or repair** after a failure or safe quit. It locates the first
-incomplete required step from Kubernetes and generated files. The wizard does
-not create a state file and never persists passwords or tokens. Use **Manage
-individual components (expert) → Start / Upgrade** when intentionally repairing
-one component.
+Install `requirements-python.txt` only if you're developing or previewing
+those CLI/TUI slices (kept separate from `requirements-docs.txt`, which is
+for building the documentation site):
 
-Choose **Help Center / Fortify Knowledge Center** for offline, read-only guides
-to the system, each Fortify and database component, dependency/data flow,
-interfaces, roles, and terminology. Guided deployment screens also accept `?`
-to open help for the current step. The Help Center reads committed text under
-`docs/help/` and remains available when MicroK8s is offline.
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-python.txt
+```
 
-Long-form documentation is maintained as code under `docs/`; see the
-[documentation architecture decision](docs/adr/0001-mkdocs-authoritative-documentation.md)
-for the source-of-truth, offline-help, publishing, and GitHub Wiki boundaries.
+## Using the wizard
 
-Choose **Operational guidance and troubleshooting** for a read-only environment
-overview, deployment plan, unfinished-work summary, symptom-driven guidance,
-network/TLS and lifecycle explanations, compatibility notes, backup/recovery
-guidance, and the synthetic [first-scan walkthrough](docs/operations/first-scan.md).
-It can also create a deliberately minimal diagnostics archive in the user's
-private state directory. Review every archive before sharing it; the bundle
-excludes logs, Secret and ConfigMap data, environment variables, command lines,
-license metadata, credentials, and local configuration paths.
+The main menu opens on a small **Essentials** screen (Deploy, Lab lifecycle
+controls, Configuration editor, Logs, and a first-scan one-click demo once
+SSC and ScanCentral SAST are up), a **`?`** hotkey straight to the Help
+Center from anywhere on that screen, and **m. More tools** for everything
+else, organized by task: Deploy, Diagnostics and advanced, Operations, and
+Learn (an offline Help Center with guides to every component, answerable even
+when the cluster is down).
 
-The Dashboard is surfaced before application workloads so it can monitor the
-rest of the deployment. When Guided deployment finishes, the wizard shows a
-congratulations and access handoff page with the selected profile, live service
-status, URLs, recommended next steps, certificate trust guidance, and a shortcut
-to **URLs & credentials**. That credential screen lists where lab-generated
-credentials live, can print retrieval commands, and can reveal a single selected
-credential after explicit confirmation. It does not disclose stored passwords or
-tokens by default.
+- **Guided deployment (recommended)** — a numbered, explanatory walkthrough
+  with a deployment-profile picker (SSC only, SAST, DAST, Full lab, sample
+  apps, or Custom).
+- **Express deployment** — the same underlying operations, run unattended
+  back-to-back.
+- **Resume or repair** — after a failure or safe quit, picks up at the first
+  incomplete step; never persists passwords or tokens.
+- **Deployment Versions and Flight Plan** — pick, preview, upgrade, or
+  compare component-version bundles; see [Versions and
+  compatibility](docs/operations/versions-and-compatibility.md).
 
-Use **Tools and FCLI readiness** after infrastructure is running to install or
-update Fortify CLI (`fcli`), compare the installed version with
-`FORTIFY_RECOMMENDED_FCLI_VERSION`, and print SSC-first command templates. The
-templates use configured SSC and ScanCentral URLs, include FoD as an optional
-path, and keep every token or client secret as a placeholder. FCLI readiness is
-warning-only for deployment: missing or mismatched FCLI does not block SSC,
-SAST, DAST, or Dashboard profiles.
+Full menu tour, screen-by-screen: [Getting started](docs/getting-started/index.md).
+Stuck on something specific: [Troubleshooting](docs/troubleshooting/index.md).
 
-If a guided operation fails, its screen remains incomplete and offers Retry.
-Fix the reported dependency, retry the same operation, or quit safely and use
-Resume later. Rendering status performs read-only file and Kubernetes queries;
-it never installs, upgrades, generates credentials, or rotates TLS material.
-
-The Dashboard is the lab's operational Web UI. Open
-`https://dashboard.$DOMAIN`, then use **Kubernetes Dashboard access** from the
-main menu, or **Advanced setup and configuration → Configure DNS, SSC token,
-LIM, and Dashboard access → Kubernetes Dashboard access**, to generate a
-one-hour token. Choose view-only access for routine monitoring. Administrator
-access is offered separately with a warning because it can modify or delete
-every workload, Secret, and persistent resource in the cluster. Tokens are
-neither stored by this repository nor printed during deployment; the wizard
-prints one only after an explicit operator request. Persistent view-only and
-administrator tokens are also available for isolated labs. They are stored only
-in Kubernetes, remain valid until revoked, and can be revoked from the same
-Dashboard access menu. Prefer one-hour tokens whenever practical.
-
-The fresh/express deployment path refuses to run over existing managed Helm
-releases. Use **Guided deployment** or **Resume or repair** for an existing lab;
-use **Apps → Start / Upgrade** when intentionally repairing one component. This
-protects persistent data, SSC encryption material, and application credentials
-from accidental reset.
-
-### Dependency gates and safe retries
-
-The wizard checks authoritative dependencies before it starts a consumer, in
-both **Deploy from scratch** and **Apps → Start / Upgrade**:
-
-- SSC waits for the MySQL StatefulSet and an authenticated `SELECT 1`.
-- ScanCentral SAST controller can be deployed independently for standalone SAST.
-- ScanCentral SAST sensor waits for the SAST controller; the SAST full profile
-  also includes SSC and MySQL for the integrated lab workflow.
-- DAST Core waits for an authenticated PostgreSQL query, SSC, and LIM in the
-  current lab topology.
-- The DAST scanner waits for all DAST Core workloads and its API endpoint.
-
-Every wait is bounded by `FORTIFY_HEALTH_TIMEOUT` (600 seconds by default).
-Failures print only the dependency name and a safe remediation; passwords,
-query output, and HTTP response bodies are suppressed. A failed gate makes no
-change to the dependent component. Correct the unhealthy dependency and rerun
-the same Start / Upgrade action; completed dependencies are detected and the
-operation continues normally.
-
-Application probes route the configured TLS hostname to the local ingress, so
-fresh deployment does not require client DNS to be configured first. HTTP
-success, redirect, authentication, and other non-server-error responses count
-as an answering application; connection failures and HTTP 5xx responses do not.
-
-## DNS setup
+## DNS and TLS
 
 The lab issues TLS certs for the wildcard `*.$DOMAIN` (default
-`fortifydemo.com`). Browsers and pods both need to resolve those hosts to
-the cluster's node IP.
-
-**Client-side** (your laptop) — add to `/etc/hosts` (or Pi-hole):
-
-```
-<host-ip>  ssc.fortifydemo.com sast.fortifydemo.com dast.fortifydemo.com lim.fortifydemo.com dashboard.fortifydemo.com
-```
-
-**In-cluster** — pods also need the lab hostnames to resolve to the node so
-service-to-ingress traffic keeps the expected Host header. The wizard's
-**Advanced setup and configuration → Configure DNS, SSC token, LIM, and
-Dashboard access → DNS** option patches CoreDNS's hosts plugin so SCDAST
-scanner ↔ DAST API and SAST ↔ SSC traffic resolves correctly.
-
-## TLS trust
-
-`scripts/create-certs.sh` uses [mkcert](https://github.com/FiloSottile/mkcert)
-to create a per-machine root CA and a wildcard leaf for `*.$DOMAIN`. To
-make your browser trust the lab:
+`fortifydemo.com`) and needs that domain to resolve both on your browser and
+inside the cluster. The wizard's **Advanced setup and configuration →
+Configure DNS** step handles the in-cluster half; you handle the client half
+(add the lab node's IP to `/etc/hosts` for each hostname, or your resolver).
+To make your browser trust the lab CA:
 
 ```bash
 # From your laptop:
 scp ubuntu@<host>:~/fortifylab/certs/rootCA.pem ~/Downloads/fortify-rootCA.pem
-
-# macOS: open Keychain Access → System keychain → drag in rootCA.pem →
-#        double-click → set "Always Trust"
-# Linux: sudo cp ~/Downloads/fortify-rootCA.pem /usr/local/share/ca-certificates/fortify-rootCA.crt
-#        sudo update-ca-certificates
+# macOS: Keychain Access → System keychain → drag in rootCA.pem → double-click → Always Trust
+# Linux:  sudo cp ~/Downloads/fortify-rootCA.pem /usr/local/share/ca-certificates/fortify-rootCA.crt && sudo update-ca-certificates
 # Firefox: about:preferences#privacy → Certificates → import as authority
 ```
 
-Re-running `create-certs.sh` rotates the root CA — you'll need to
-re-import. The wizard does not warn you about this; treat it as a
-fresh-install operation.
-
-The same DNS and TLS trust setup applies to Dashboard, SSC, LIM, SAST, and
-DAST. MicroK8s 1.35+ uses Traefik for the `ingress` addon;
-`scripts/create-secrets.sh` now points MicroK8s ingress at the mkcert wildcard
-Secret `fortify/tls` so browsers receive the lab certificate instead of
-`TRAEFIK DEFAULT CERT`. The application start scripts also add Traefik backend
-service annotations for HTTPS services with lab-generated internal
-certificates. If a browser still reports `TRAEFIK DEFAULT CERT`, rerun the
-Secrets step or run:
-
-```bash
-microk8s enable ingress --default-ssl-certificate fortify/tls
-```
-
-Then recheck the hostname with `openssl s_client -servername`. If the browser
-reports a name or certificate error after that, verify the client hosts/DNS
-entry and import this lab's `certs/rootCA.pem` before generating a Dashboard
-token or logging into SSC.
+Re-running `create-certs.sh` rotates the root CA — you'll need to re-import.
+Full details, including the Traefik `TRAEFIK DEFAULT CERT` recovery steps:
+[Networking, URLs, and TLS](docs/operations/networking-and-tls.md).
 
 ## Manual configuration after deploy
 
 Two steps still need a human after `Deploy from scratch`:
 
-- **SSC access and ControllerToken**: Log into SSC as `admin`; refer to the SSC
-  documentation for the default administrator password. Then open
-  Administration → ScanCentral SAST → Tokens → create a token of type
-  `ScanCentralCtrlToken`. Run wizard
-  Configure → option 2 to enter it through hidden input. The wizard patches the
-  existing Kubernetes Secret through standard input and restarts the controller;
-  the token is not placed in files, Helm values, or process arguments. This
-  operation also clears token material left in Helm metadata by older versions
-  of the wizard.
-- **DAST license + pool in LIM**: Open `https://lim.$DOMAIN`, sign in with
-  `lim_admin`; retrieve the lab-generated password from **URLs & credentials**
-  if needed, upload the
-  DAST license file, create a pool named `Default` (matches `LIM_POOL_NAME`
-  in `.env`), then redeploy ScanCentral DAST so the scanner can authenticate.
+- **SSC access and ControllerToken** — log into SSC as `admin`, create a
+  `ScanCentralCtrlToken` under Administration → ScanCentral SAST → Tokens,
+  then run wizard **Configure → Apply SSC ControllerToken** (hidden input;
+  the wizard patches the Secret directly, never writes the token to a file).
+- **DAST license + pool in LIM** — sign into LIM as `lim_admin`, upload the
+  DAST license, create a pool named `Default` (matches `LIM_POOL_NAME`), then
+  redeploy ScanCentral DAST so the scanner can authenticate.
+
+Full walkthrough, including Kubernetes Dashboard token options and the first
+scan handoff: [Getting started](docs/getting-started/index.md).
 
 ## Repo layout
 
@@ -271,6 +190,7 @@ scripts/
   create-certs.sh         mkcert root + leaf, JKS keystore, JVM truststore.
   create-secrets.sh       k8s Secrets: explicit per-key, no folder dump.
   install_microk8s.sh     microk8s + addons.
+  tools/flight-plans.py   Component-version bundle catalog (list/show/promote-local/...).
 secrets/
   input/                  User-provided files (license). Gitignored.
   templates/              Committed templates rendered at deploy time.
@@ -282,6 +202,8 @@ apps/
   scsast                  ScanCentral SAST controller + workers.
   scdast/core, scdast/scanner   ScanCentral DAST.
   kubernetes-dashboard    Default operational Web UI and bounded token RBAC.
+docs/                     Full documentation site (MkDocs) — authoritative source.
+tests/                    Python test suite (unittest); run before opening a PR.
 ```
 
 ## Conventions and gotchas
@@ -310,6 +232,9 @@ apps/
   the chart's image ever ships a newer major (PostgreSQL 18 vs 17), the
   PVC must be wiped to re-init. We pin the image tag to avoid surprise
   upgrades.
+- **Re-running the wizard is safe.** Resume/repair and Start/Upgrade never
+  delete persistent data on their own; only the explicit, confirm-gated
+  **Destroy** action under a component's expert menu does.
 
 ## Cleanup
 
@@ -323,10 +248,23 @@ microk8s kubectl delete namespace fortify         # nuke everything else
 
 ## Contributing
 
-PRs welcome. For deployment errors, use **Operational guidance → Create
-sanitized diagnostics bundle**, inspect the allow-listed archive locally, and
-include only that minimum evidence plus the failed wizard step. Do not attach
-raw logs, `.env`, Secret values, license data, tokens, or private keys.
+PRs welcome. Before opening one:
+
+```bash
+python3 -m unittest discover -s tests    # run the test suite
+./scripts/validate-docs.sh               # if you touched docs/
+```
+
+See [Contributing documentation](docs/contributing/index.md) for the full
+docs-as-code workflow (sources of truth, screenshot sanitization, wizard help
+mappings, review checklist).
+
+For deployment errors, use **Operational guidance → Create sanitized diagnostics bundle**,
+inspect the allow-listed archive locally, and include only that minimum
+evidence plus the failed wizard step. Do not attach raw logs, `.env`, Secret
+values, license data, tokens, or private keys.
+
+Questions or ideas: open a [GitHub issue](https://github.com/treisland/fortifylab/issues).
 
 ## License
 

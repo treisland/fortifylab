@@ -5,11 +5,30 @@ HTTPS names. Client DNS or hosts entries must point them to the MicroK8s lab
 node. Pods also need the repository's CoreDNS mapping so service-to-ingress
 traffic preserves the expected hostname.
 
-TLS uses a lab-local mkcert CA. `scripts/create-certs.sh` creates the mkcert
-root material and a wildcard leaf for `DOMAIN` and `*.DOMAIN`;
+TLS defaults to a lab-local mkcert CA. `scripts/create-certs.sh` creates the
+mkcert root material and a wildcard leaf for `DOMAIN` and `*.DOMAIN`;
 `scripts/create-secrets.sh` stores that leaf in the Kubernetes TLS Secret
 `fortify/tls`. Import only the public `certs/rootCA.pem` on dedicated lab
-clients. Never copy or import `rootCA-key.pem`.
+clients. Never copy or import private keys such as `rootCA-key.pem` or
+`tls.key`.
+
+## TLS modes
+
+Set `FORTIFY_TLS_MODE` in `.env`:
+
+- `mkcert` is the default local-lab mode. Fortify Lab creates the mkcert root,
+  wildcard leaf, PKCS12/JKS keystore, truststore, and Kubernetes TLS Secret.
+- `byo` uses operator-provided PEM files. Set `FORTIFY_BYO_TLS_CERT`,
+  `FORTIFY_BYO_TLS_KEY`, and `FORTIFY_BYO_TLS_CA_CERT` to protected paths.
+  The leaf certificate must have SAN entries covering `ssc`, `sast`, `dast`,
+  `lim`, and `dashboard` under the configured `DOMAIN`, either as exact names
+  or a one-label wildcard such as `*.example.test`.
+
+In BYO mode, `scripts/create-certs.sh` validates the certificate, private key,
+key pair match, and required SAN coverage before copying normalized artifacts
+into `certs/`. `scripts/create-secrets.sh` repeats the generated cert/key/SAN
+checks before changing Kubernetes Secrets. The scripts print paths and metadata
+only; they must not display private key contents.
 
 ## MicroK8s ingress and Traefik
 
@@ -26,11 +45,21 @@ Traefik-native configuration:
 
 That default-certificate hook is what prevents browsers from seeing
 `TRAEFIK DEFAULT CERT` for valid lab hostnames. If certificates were regenerated
-or the ingress addon was recreated, rerun the Secrets step or run:
+or the ingress addon was recreated, rerun the Secrets step, or run the same
+command it uses:
 
 ```bash
 microk8s enable ingress --default-ssl-certificate fortify/tls
 ```
+
+Some MicroK8s ingress addon builds do not expose `--default-ssl-certificate`
+at all (the Secrets step detects this via `microk8s enable ingress --help`
+and tells you so). On those builds the command above will not work; the
+Secrets step instead falls back to a plain `kubectl rollout restart` of the
+Traefik workload so it re-reads its mounted certificate. If that doesn't
+clear a stale `TRAEFIK DEFAULT CERT`, this addon build has no supported way
+to set a default certificate, and TLS routing depends entirely on
+per-Ingress TLS blocks resolving correctly instead.
 
 Then verify the served certificate with SNI:
 
@@ -48,11 +77,11 @@ Check one layer at a time:
 2. The node is reachable on 443.
 3. MicroK8s ingress has a host rule for the requested name.
 4. The Kubernetes Service has ready endpoints.
-5. Traefik presents the mkcert wildcard certificate.
-6. The dedicated lab client trusts the mkcert root CA.
+5. Traefik presents the generated mkcert or BYO TLS certificate.
+6. The dedicated lab client trusts the mkcert root CA or BYO CA chain.
 
-A browser name error means DNS or hostname mismatch. An untrusted issuer usually
-means the lab CA is not installed. `TRAEFIK DEFAULT CERT` means Traefik is still
+A browser name error means DNS or hostname/SAN mismatch. An untrusted issuer usually
+means the lab CA or BYO CA chain is not installed. `TRAEFIK DEFAULT CERT` means Traefik is still
 serving its fallback certificate or the client reached a different proxy. A
 plain 404 from Traefik usually means the host rule did not match. Never solve
 these by disabling certificate verification.

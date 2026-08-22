@@ -20,9 +20,12 @@ Deployment also needs:
 - a browser that can reach the host by its LAN address, public address, or VPN;
 - a Fortify license file that is readable by your normal user;
 - a Docker Hub account entitled to pull `fortifydocker/*` and
-  `bitnamilegacy/*` images; and
+  `bitnamilegacy/*` images;
 - outbound access for Ubuntu packages, snaps, container images, Helm charts,
-  and Fortify update services.
+  and Fortify update services; and
+- `python3` resolving to 3.11 or newer (Ubuntu 22.04 ships 3.10 by default —
+  install a newer interpreter such as `python3.12` if needed), required by the
+  Flight Plans version-selection tool.
 
 Allow **15–20 minutes for Express deployment after prerequisites and images
 are available**. A first run on a new host commonly takes **30–60 minutes**
@@ -76,7 +79,7 @@ domain, and deployment profile. Use it to confirm where generated files and
 logs live before you deploy. From there, start Guided deployment or continue to
 the main menu.
 
-From the main menu choose one deployment mode:
+From the main menu, choose **1. Deploy**, then pick one deployment mode:
 
 === "Guided (recommended)"
 
@@ -95,10 +98,13 @@ From the main menu choose one deployment mode:
     after a 5-second countdown unless you take control.
 
     The prerequisite screen shows readiness indicators for JDK, Docker login,
-    mkcert, and MicroK8s access. When MicroK8s is installed but the current
-    shell has not picked up the `microk8s` group yet, choose `g` from that
-    screen to restart the wizard with group access, or run `newgrp microk8s`
-    before relaunching. Guided step and wait screens include Retry, Help, live
+    mkcert, and MicroK8s access. Installing Docker or MicroK8s from that
+    screen automatically activates the new `docker`/`microk8s` group
+    membership for the wizard — no manual `newgrp` or menu step needed. If a
+    shell was started before those groups existed, the wizard also refreshes
+    access automatically the next time it launches; `g` on the prerequisite
+    screen retriggers that refresh on demand. Guided step and wait screens
+    include Retry, Help, live
     diagnostics, diagnostics bundle export, interactive takeover, and
     contextual pod logs where a component owns pods. On completion, Guided
     shows a congratulations page with live service status, URLs, certificate
@@ -150,8 +156,8 @@ unhealthy dependency is more useful than restarting every pod.
 ## 3. Resume or repair safely
 
 If a step fails, read its named dependency and correct that condition. Then
-retry the same Guided step, or quit and later choose **3. Resume or repair
-deployment**. Resume inspects current files and live Kubernetes resources,
+retry the same Guided step, or quit and later choose **1. Deploy → 3. Resume
+or repair deployment**. Resume inspects current files and live Kubernetes resources,
 starts at the first incomplete required step, and does not store a separate
 progress file, password, or token.
 
@@ -195,8 +201,8 @@ Dashboard and SSC do not present `TRAEFIK DEFAULT CERT`. Follow
 
 ## 5. Open Kubernetes Dashboard
 
-Open `https://dashboard.<domain>`, then choose **5. Kubernetes Dashboard
-access** in the main menu. The same workflow is also available under
+Open `https://dashboard.<domain>`, then choose **m. More tools → 7. Kubernetes
+Dashboard access** in the main menu. The same workflow is also available under
 **Advanced setup and configuration → Configure DNS, SSC token, LIM, and
 Dashboard access**:
 
@@ -243,6 +249,18 @@ Two application tasks still require a person:
 
 Confirm that MySQL, SSC, and the SAST controller and worker are healthy before
 following the [first successful scan](../operations/first-scan.md) walkthrough.
+The completion screen also offers a **First scan handoff** that points to
+placeholder SAST/DAST command starters under `docs/examples/first-scan/`.
+Those starters keep SSC as the primary result destination, keep FoD optional,
+and require tokens and target URLs through environment variables.
+
+Once SSC and ScanCentral SAST report healthy, the main menu's **Essentials**
+screen also surfaces **5. First-scan one-click demo (SAST · IWA-Java)**
+directly -- no need to go through **m. More tools** to find it. It stays
+visible but disabled with a reason until those two components are ready, and
+still requires pasting an SSC token when run (never written to `.env` or
+disk). A **`?`** hotkey on the same screen jumps straight to the Help Center
+at any time, including before the cluster is up.
 
 ## Destructive actions are separate
 

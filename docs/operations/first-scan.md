@@ -28,6 +28,45 @@ the safety and verification boundaries below.
    broaden permissions, regenerate `secret.key`, or add workers to conceal an
    upstream failure. Follow [troubleshooting by symptom](troubleshooting.md).
 
+Optional command handoff starters are available under
+[`docs/examples/first-scan/`](../examples/first-scan/). They pair naturally with
+the wizard's **Tools and FCLI readiness** menu and the **Sample applications**
+menu. Generate them into a disposable directory and review them against your
+installed Fortify CLI, ScanCentral client, SSC, and DAST versions before use:
+
+```bash
+mkdir -p /tmp/fortifylab-first-scan
+docs/examples/first-scan/generate-first-scan-scripts.sh /tmp/fortifylab-first-scan
+```
+
+The generated files contain placeholders only. Keep tokens in environment
+variables, leave SSC as the primary result destination, and use FoD only when
+you intentionally choose an optional separate workflow.
+
+## One-click demo (real scan, not synthetic)
+
+If you already understand the verification path below and just want to see a
+real scan and real results fast, use **More tools -> First-scan one-click
+demo (SAST · IWA-Java)**. It runs a real ScanCentral SAST scan against
+IWA-Java (Fortify's own sample vulnerable Java app) and prints severity
+counts pulled straight from SSC.
+
+It reuses an already-logged-in SSC session or `FCLI_DEFAULT_SSC_TOKEN` when
+either is available (matching the read-if-present, never-written convention
+in the [FCLI runbooks](../runbooks/fcli.md)); otherwise it asks for an SSC token
+once, pasted into a hidden prompt — consistent with the rest of this wizard,
+no SSC credential is ever written to `.env` or disk. A session the demo logs
+into itself is logged back out when it finishes; a session it found already
+open is left alone. `FORTIFY_FIRST_SCAN_REPO_URL` defaults to the official
+[fortify/IWA-Java](https://github.com/fortify/IWA-Java) repository; override
+it in `.env` if you maintain your own fork or mirror. The demo also checks
+for a registered ScanCentral SAST sensor before submitting, so a missing
+worker fails fast with a clear message instead of queuing forever.
+
+This is a fast path, not a replacement for the walkthrough below — it does
+not teach the dependency chain, the token boundary, or the SSC verification
+habit the way working through each step by hand does.
+
 ## Synthetic SAST walkthrough
 
 ### 1. Establish SAST prerequisites
@@ -78,6 +117,11 @@ authentication mechanisms can change. A rejected submission belongs at the
 a queued job with no execution belongs at the worker-readiness boundary in the
 same section.
 
+The generated `first-sast-scan.sh` starter models this command handoff with
+`SSC_URL`, `SCSAST_CTRL_URL`, `SSC_CITOKEN`, and
+`SCSAST_CLIENT_AUTH_TOKEN` environment variables. Treat it as an editable
+example, not a product-version guarantee.
+
 ### 4. Verify the SAST result in SSC
 
 Wait for the job to finish, then open **Fortify Lab Training → Synthetic** in
@@ -92,7 +136,14 @@ application/version, then follow the [SSC and SAST result path](troubleshooting.
 
 ### 1. Record explicit target authorization
 
-Before entering a URL in DAST, record all of the following in your lab notes:
+For the fastest isolated lab path, deploy **Sample applications → Juice Shop**
+from the wizard and use `JUICE_SHOP_URL` as the DAST target. WebGoat and DVWA
+are also available, but Juice Shop is the recommended first DAST target because
+it is simple to identify, start, stop, and reset from the sample-app lifecycle
+menu.
+
+Before entering any URL in DAST, including a local sample app, record all of the
+following in your lab notes:
 
 - the exact scheme, hostname, port, and allowed path;
 - the target owner and the person granting authorization;
@@ -142,6 +193,13 @@ it leaves the authorized boundary or the target owner requests it. A scan that
 cannot start belongs at the [Core, scanner, or LIM
 boundary](troubleshooting.md#postgresql-lim-and-scancentral-dast); target errors
 belong at the [network and TLS boundary](troubleshooting.md#dns-ingress-urls-and-tls).
+
+The generated `first-dast-scan.sh` starter does not automate target creation or
+sample app deployment internals. If `JUICE_SHOP_URL` is set, it uses that as the
+default `AUTHORIZED_DAST_URL`; otherwise you must provide an explicit target. It
+prints the SSC destination, authorized URL, authorization note, and conservative
+scope checklist so you can use the DAST UI or a version-matched Fortify CLI flow
+without expanding the lab boundary.
 
 ### 4. Verify the DAST result in SSC
 

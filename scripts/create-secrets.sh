@@ -24,6 +24,9 @@ fi
 source "$FORTIFY_HOME_K8S/.env"
 source "$FORTIFY_HOME_K8S/scripts/lib/fortify-license.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"
+source "$FORTIFY_HOME_K8S/scripts/lib/tls.sh"
+# shellcheck source=scripts/lib/traefik-backend.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/traefik-backend.sh"
 
 # Running under sudo would create files in secrets/generated/ owned by root,
 # which then block subsequent normal-user runs from rebuilding the directory.
@@ -46,6 +49,11 @@ trap 'rm -f "$PRESERVED_SECRET_KEY"' EXIT
 
 KUBECTL="microk8s kubectl"
 
+# Set by configure_microk8s_ingress_default_tls when Traefik's default
+# certificate could not be refreshed; checked at the end of the script so a
+# stale cert isn't a console-only warning that set -euo pipefail can't catch.
+TRAEFIK_DEFAULT_CERT_REFRESH_FAILED=0
+
 configure_microk8s_ingress_default_tls() {
   local cert_ref="$NAMESPACE/tls"
 
@@ -56,10 +64,43 @@ configure_microk8s_ingress_default_tls() {
   if microk8s enable ingress --help 2>&1 | grep -q -- '--default-ssl-certificate'; then
     if microk8s enable ingress --default-ssl-certificate "$cert_ref" >/dev/null 2>&1; then
       echo "✅ MicroK8s ingress default TLS certificate set to $cert_ref"
+      # `microk8s enable` is called with this same reference on every run, so
+      # it can report success without Traefik ever re-reading a rotated tls
+      # Secret. Force it with a rollout restart of the addon's own Traefik
+      # workload, discovered by container image since its name/namespace is
+      # not stable across MicroK8s tracks.
+      if fortify_traefik_rollout_restart; then
+        echo "✅ Restarted MicroK8s ingress (Traefik) to pick up the updated certificate."
+      else
+        echo "⚠️ Could not find or restart the MicroK8s ingress (Traefik) workload."
+        echo "   If Traefik still serves TRAEFIK DEFAULT CERT, restart it manually."
+        TRAEFIK_DEFAULT_CERT_REFRESH_FAILED=1
+      fi
     else
       echo "⚠️ Could not update MicroK8s ingress default TLS certificate to $cert_ref."
       echo "   If Traefik still serves TRAEFIK DEFAULT CERT, run:"
       echo "   microk8s enable ingress --default-ssl-certificate $cert_ref"
+      TRAEFIK_DEFAULT_CERT_REFRESH_FAILED=1
+    fi
+  else
+    echo "⚠️ This MicroK8s ingress addon build does not support --default-ssl-certificate."
+    echo "   Best-effort fallback: restarting Traefik so it re-reads its mounted certificate."
+    # fortify_traefik_rollout_restart doesn't depend on the addon flag at
+    # all -- it finds Traefik by container image and does a plain rollout
+    # restart, so it's still worth trying here rather than telling the
+    # operator to "restart it manually" with no command. This branch stays
+    # best-effort either way (unlike the two branches above, it does not
+    # set TRAEFIK_DEFAULT_CERT_REFRESH_FAILED): on an addon build that
+    # never exposed --default-ssl-certificate, a successful restart still
+    # can't confirm the addon is serving this Secret as its default, so
+    # treating a failed restart here as a hard failure would block secret
+    # creation on older tracks over something we were never able to fix.
+    if fortify_traefik_rollout_restart; then
+      echo "✅ Restarted MicroK8s ingress (Traefik). If it still serves TRAEFIK DEFAULT CERT,"
+      echo "   this addon build has no supported way to set a default certificate."
+    else
+      echo "⚠️ Could not find or restart the MicroK8s ingress (Traefik) workload."
+      echo "   If Traefik still serves TRAEFIK DEFAULT CERT, restart it manually."
     fi
   fi
 }
@@ -71,10 +112,24 @@ configure_microk8s_ingress_default_tls() {
 
 fortify_resolve_license_file || exit 1
 
+TLS_MODE="$(fortify_tls_mode)"
+
 if [ ! -f "$TRUSTSTORE" ] || [ ! -f "$JVM_KEYSTORE" ]; then
   echo "❌ Certs/keystores not found. Run scripts/create-certs.sh first."
   exit 1
 fi
+
+fortify_tls_validate_cert_file "SERVER_CERT" "$SERVER_CERT" || exit 1
+fortify_tls_validate_key_file "SERVER_KEY" "$SERVER_KEY" || exit 1
+fortify_tls_cert_key_match "$SERVER_CERT" "$SERVER_KEY" || {
+  echo "❌ SERVER_CERT and SERVER_KEY do not match." >&2
+  exit 1
+}
+fortify_tls_validate_cert_hosts "$SERVER_CERT" || {
+  echo "❌ TLS certificate does not cover the configured lab hostnames." >&2
+  echo "   Re-run scripts/create-certs.sh after fixing DOMAIN/hostnames or BYO TLS inputs." >&2
+  exit 1
+}
 
 
 #--------------------------
@@ -269,3 +324,8 @@ $KUBECTL -n "$NAMESPACE" create secret generic lim-signing-certificate-password 
 refresh_registry_credentials
 echo
 echo "✅ Secrets created in namespace '$NAMESPACE'."
+
+if [ "$TRAEFIK_DEFAULT_CERT_REFRESH_FAILED" -eq 1 ]; then
+  echo "❌ Traefik's default TLS certificate may not have refreshed; see warnings above." >&2
+  exit 1
+fi

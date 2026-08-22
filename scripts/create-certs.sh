@@ -6,14 +6,22 @@
 # Idempotent clean rebuild of every cert artifact the lab needs.
 #
 # Outputs (all under $FORTIFY_CERTS):
-#   rootCA.pem, rootCA-key.pem      — copied from mkcert's CAROOT
-#   rootCA.pfx                      — PKCS12 of the root (LIM signing cert)
+#   rootCA.pem                      — mkcert root CA or operator-provided CA chain
+#   rootCA-key.pem                  — mkcert root key (mkcert mode only)
+#   rootCA.pfx                      — LIM signing/server-compatible PKCS12
 #   tls.crt, tls.key                — leaf cert for $DOMAIN (nginx ingress + SSC)
 #   keystore.p12                    — PKCS12 of the leaf
 #   keystore.jks                    — JKS form for SSC's HTTPS connector
-#   truststore                      — JVM truststore: leaf + mkcert rootCA
-#                                     + Amazon Root CA 1 (for update.fortify.com)
+#   truststore                      — SSC's own JVM truststore: leaf + mkcert
+#                                     rootCA + Amazon Root CA 1 (update.fortify.com)
+#   fcli-truststore                 — fcli client truststore: JDK default CA
+#                                     bundle + the same lab/update.fortify.com anchors
 #   update.fortify.com.crt          — leaf cert for the rulepack update server
+#
+# TLS modes:
+#   FORTIFY_TLS_MODE=mkcert (default) creates a lab-local mkcert CA + wildcard.
+#   FORTIFY_TLS_MODE=byo validates FORTIFY_BYO_TLS_CERT, FORTIFY_BYO_TLS_KEY,
+#   and FORTIFY_BYO_TLS_CA_CERT, then copies them into the generated layout.
 #
 # Read-only consumers (create-secrets.sh, app start.sh files) read these
 # directly from $FORTIFY_CERTS — there is no separate copy in secrets/generated/.
@@ -27,6 +35,25 @@ if [ -z "${FORTIFY_HOME_K8S:-}" ]; then
 fi
 
 source "$FORTIFY_HOME_K8S/.env"
+source "$FORTIFY_HOME_K8S/scripts/lib/tls.sh"
+
+# Newer than most .env files in the wild (added alongside the fcli-truststore
+# split): don't require it to be present there. set -u would otherwise turn a
+# not-yet-updated .env into a hard "unbound variable" crash instead of just
+# using the same default .env.example documents.
+FCLI_CLIENT_TRUSTSTORE="${FCLI_CLIENT_TRUSTSTORE:-$FORTIFY_CERTS/fcli-truststore}"
+
+TLS_MODE="$(fortify_tls_mode)"
+BYO_STAGING_DIR=""
+CA_IMPORT_DIR=""
+if [ "$TLS_MODE" = byo ]; then
+  fortify_tls_validate_byo_inputs
+  BYO_STAGING_DIR="$(mktemp -d)"
+  trap '[ -z "${BYO_STAGING_DIR:-}" ] || rm -rf "$BYO_STAGING_DIR"' EXIT
+  cp "$FORTIFY_BYO_TLS_CERT" "$BYO_STAGING_DIR/tls.crt"
+  cp "$FORTIFY_BYO_TLS_KEY" "$BYO_STAGING_DIR/tls.key"
+  cp "$FORTIFY_BYO_TLS_CA_CERT" "$BYO_STAGING_DIR/rootCA.pem"
+fi
 
 
 #--------------------------
@@ -38,14 +65,19 @@ source "$FORTIFY_HOME_K8S/.env"
 # rotate the lab's trust anchor. Refuse to do that.
 if [ "$(id -u)" -eq 0 ] || [ -n "${SUDO_USER:-}" ]; then
   echo "❌ Do not run create-certs.sh as root or via sudo."
-  echo "   mkcert is per-user; sudo would create a new CA at /root/... and"
-  echo "   invalidate every cert the lab has issued. Run as your normal user;"
-  echo "   mkcert will escalate privileges internally for the system trust"
-  echo "   store install."
+  if [ "$TLS_MODE" = mkcert ]; then
+    echo "   mkcert is per-user; sudo would create a new CA at /root/... and"
+    echo "   invalidate every cert the lab has issued. Run as your normal user;"
+    echo "   mkcert will escalate privileges internally for the system trust"
+    echo "   store install."
+  else
+    echo "   Run as your normal user so generated cert artifacts remain writable"
+    echo "   and protected private-key material does not become root-owned."
+  fi
   exit 1
 fi
 
-if ! command -v mkcert >/dev/null; then
+if [ "$TLS_MODE" = mkcert ] && ! command -v mkcert >/dev/null; then
   sudo apt install mkcert -y
 fi
 if ! command -v keytool >/dev/null; then
@@ -53,8 +85,10 @@ if ! command -v keytool >/dev/null; then
   exit 1
 fi
 
-# Install mkcert's CA into the system trust store (idempotent).
-mkcert -install
+if [ "$TLS_MODE" = mkcert ]; then
+  # Install mkcert's CA into the system trust store (idempotent).
+  mkcert -install
+fi
 
 
 #--------------------------
@@ -71,18 +105,28 @@ rm -f "$FORTIFY_CERTS"/*.pem \
       "$FORTIFY_CERTS"/*.jks \
       "$FORTIFY_CERTS/truststore"
 
-# Pull mkcert's root CA into $FORTIFY_CERTS so other scripts have a stable path.
-CAROOT="$(mkcert -CAROOT)"
-cp "$CAROOT/rootCA.pem"     "$ROOTCA_CERT"
-cp "$CAROOT/rootCA-key.pem" "$ROOTCA_KEY"
+if [ "$TLS_MODE" = mkcert ]; then
+  # Pull mkcert's root CA into $FORTIFY_CERTS so other scripts have a stable path.
+  CAROOT="$(mkcert -CAROOT)"
+  cp "$CAROOT/rootCA.pem"     "$ROOTCA_CERT"
+  cp "$CAROOT/rootCA-key.pem" "$ROOTCA_KEY"
+else
+  CAROOT="bring-your-own"
+  cp "$BYO_STAGING_DIR/rootCA.pem" "$ROOTCA_CERT"
+fi
 
 
 #--------------------------
 # SECTION: LEAF CERT FOR $DOMAIN
 #--------------------------
 
-# Leaf wildcard for *.$DOMAIN (covers ssc.$DOMAIN, lim.$DOMAIN, etc.).
-mkcert -key-file "$SERVER_KEY" -cert-file "$SERVER_CERT" "$DOMAIN" "*.$DOMAIN"
+if [ "$TLS_MODE" = mkcert ]; then
+  # Leaf wildcard for *.$DOMAIN (covers ssc.$DOMAIN, lim.$DOMAIN, etc.).
+  mkcert -key-file "$SERVER_KEY" -cert-file "$SERVER_CERT" "$DOMAIN" "*.$DOMAIN"
+else
+  cp "$BYO_STAGING_DIR/tls.crt" "$SERVER_CERT"
+  cp "$BYO_STAGING_DIR/tls.key" "$SERVER_KEY"
+fi
 
 
 #--------------------------
@@ -91,10 +135,17 @@ mkcert -key-file "$SERVER_KEY" -cert-file "$SERVER_CERT" "$DOMAIN" "*.$DOMAIN"
 # -legacy uses RC2-40/SHA-1 which .NET on Linux supports;
 # OpenSSL 3.x default is AES-256-CBC which .NET cannot read.
 
-# rootCA in PFX form (LIM signing cert).
-openssl pkcs12 -export -legacy -out "$ROOTCA_PFX" \
-    -inkey "$ROOTCA_KEY" -in "$ROOTCA_CERT" \
-    -password pass:"$DEFAULT_PASS"
+# mkcert mode preserves the historical rootCA PFX for LIM. BYO mode uses the
+# supplied leaf/key as the PFX because public CA private keys are not available.
+if [ "$TLS_MODE" = mkcert ]; then
+  openssl pkcs12 -export -legacy -out "$ROOTCA_PFX" \
+      -inkey "$ROOTCA_KEY" -in "$ROOTCA_CERT" \
+      -password pass:"$DEFAULT_PASS"
+else
+  openssl pkcs12 -export -legacy -out "$ROOTCA_PFX" \
+      -inkey "$SERVER_KEY" -in "$SERVER_CERT" -certfile "$ROOTCA_CERT" \
+      -password pass:"$DEFAULT_PASS"
+fi
 
 # Leaf in PKCS12 (intermediate format for the JKS keystore).
 openssl pkcs12 -export -legacy -name "$DEFAULT_ALIAS" \
@@ -114,20 +165,76 @@ keytool -importkeystore -alias "$DEFAULT_ALIAS" \
 # Java PKIX needs CA certs (not leaves) as trust anchors. We import:
 #   1. mkcert rootCA   — covers every cert we issue for $DOMAIN
 #   2. update.fortify.com root CA — covers rulepack updates across leaf rotations
+#
+# TRUSTSTORE is SSC's own server-side JVM trust store (mounted into the pod),
+# deliberately narrow to just those two anchors. FCLI_CLIENT_TRUSTSTORE is a
+# separate file for fcli client use: the same two anchors layered onto a copy
+# of the JDK's default CA bundle, since fcli also needs to reach arbitrary
+# external Fortify infrastructure (e.g. `fcli tool ... install`) that TRUSTSTORE
+# was never meant to cover. Reusing TRUSTSTORE for fcli previously broke that
+# with PKIX failures on anything outside the lab + update.fortify.com.
 
 # Seed the truststore with the leaf (lets keytool initialize the file).
 keytool -importkeystore -alias "$DEFAULT_ALIAS" \
     -srckeystore "$KEYSTORE" -srcstoretype pkcs12 -srcstorepass "$DEFAULT_PASS" \
     -destkeystore "$TRUSTSTORE" -deststorepass "$DEFAULT_PASS"
 
-# Import the mkcert rootCA so SSC can validate any cert we issue.
-keytool -import -alias mkcert-rootCA -file "$ROOTCA_CERT" \
-    -keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt
+# Seed the fcli client truststore from the JDK's own default CA bundle so
+# fcli keeps trusting the public internet once its truststore is pointed
+# here, not just the lab. Falls back to a copy of the narrow TRUSTSTORE if
+# the JDK's cacerts can't be located, so fcli at least still gets lab trust.
+JAVA_CACERTS_HOME="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v keytool)")")" 2>/dev/null)}"
+JAVA_CACERTS="${JAVA_CACERTS_HOME:+$JAVA_CACERTS_HOME/lib/security/cacerts}"
+cacerts_seeded=0
+if [ -n "$JAVA_CACERTS" ] && [ -s "$JAVA_CACERTS" ]; then
+  # "changeit" is the near-universal JKS cacerts default, but some
+  # distros' packaged JRE ships an empty store password instead -- try
+  # both rather than assuming, so a packaging difference degrades to the
+  # narrow fallback below instead of failing the whole cert rebuild.
+  # Each attempt writes to its own fresh scratch file rather than
+  # overwriting a previous attempt's file: some keytool builds leave a
+  # failed target in a state a later cp/chmod can't cleanly reuse.
+  for cacerts_src_pass in changeit ""; do
+    attempt_file="$(mktemp)"
+    cp "$JAVA_CACERTS" "$attempt_file"
+    chmod u+w "$attempt_file"
+    if keytool -storepasswd -keystore "$attempt_file" -storepass "$cacerts_src_pass" -new "$DEFAULT_PASS" >/dev/null 2>&1; then
+      mv "$attempt_file" "$FCLI_CLIENT_TRUSTSTORE"
+      cacerts_seeded=1
+      break
+    fi
+    rm -f "$attempt_file"
+  done
+fi
+if [ "$cacerts_seeded" -ne 1 ]; then
+  echo "⚠️  Could not seed fcli-truststore from the JDK default cacerts; fcli-truststore will only trust the lab and update.fortify.com, not the wider internet." >&2
+  keytool -importkeystore -alias "$DEFAULT_ALIAS" \
+      -srckeystore "$KEYSTORE" -srcstoretype pkcs12 -srcstorepass "$DEFAULT_PASS" \
+      -destkeystore "$FCLI_CLIENT_TRUSTSTORE" -deststorepass "$DEFAULT_PASS"
+fi
+
+# Import the lab CA or BYO CA bundle so SSC (and fcli) can validate served lab certs.
+CA_IMPORT_DIR="$(mktemp -d)"
+awk -v dir="$CA_IMPORT_DIR" '
+    /-----BEGIN CERTIFICATE-----/ { n++; file=sprintf("%s/ca-%02d.pem", dir, n) }
+    n > 0 { print > file }
+    /-----END CERTIFICATE-----/ { close(file) }
+' "$ROOTCA_CERT"
+ca_index=0
+for ca_file in "$CA_IMPORT_DIR"/*.pem; do
+  [ -s "$ca_file" ] || continue
+  ca_index=$((ca_index + 1))
+  keytool -import -alias "lab-tls-ca-$ca_index" -file "$ca_file" \
+      -keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt
+  keytool -import -alias "lab-tls-ca-$ca_index" -file "$ca_file" \
+      -keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt
+done
+[ "$ca_index" -gt 0 ] || { echo "❌ No CA certificates found in $ROOTCA_CERT."; exit 1; }
 
 # Pull the full chain from update.fortify.com (used by SSC for rulepack updates)
 # and import the root CA — durable across leaf rotations.
 UPDATE_CHAIN="$(mktemp)"
-trap 'rm -f "$UPDATE_CHAIN" "${ROOT_CA:-}"' EXIT
+trap 'rm -f "$UPDATE_CHAIN" "${ROOT_CA:-}"; [ -z "${BYO_STAGING_DIR:-}" ] || rm -rf "$BYO_STAGING_DIR"; [ -z "${CA_IMPORT_DIR:-}" ] || rm -rf "$CA_IMPORT_DIR"' EXIT
 openssl s_client -servername "$FORTIFY_RULES_DOMAIN" \
     -connect "$FORTIFY_RULES_DOMAIN":443 -showcerts </dev/null 2>/dev/null \
   | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' > "$UPDATE_CHAIN"
@@ -143,9 +250,16 @@ awk -v last="$(grep -c '^-----BEGIN CERTIFICATE-----' "$UPDATE_CHAIN")" '
     c==last' "$UPDATE_CHAIN" > "$ROOT_CA"
 keytool -import -alias update-fortify-root-ca -file "$ROOT_CA" \
     -keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt
+keytool -import -alias update-fortify-root-ca -file "$ROOT_CA" \
+    -keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt
 
 
 echo
 echo "✅ Certs rebuilt in $FORTIFY_CERTS"
-echo "   mkcert CAROOT: $CAROOT"
+echo "   TLS mode: $TLS_MODE"
+if [ "$TLS_MODE" = mkcert ]; then
+  echo "   mkcert CAROOT: $CAROOT"
+else
+  echo "   BYO cert/key validated for configured lab hostnames."
+fi
 echo "   Run scripts/create-secrets.sh next to materialize k8s Secrets."

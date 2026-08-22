@@ -42,6 +42,14 @@ Before every push, run the exact same entry point as CI:
 ./scripts/validate-docs.sh
 ```
 
+For Phase 3 Python work, also check the clone-and-run CLI wrapper directly when
+you touch `src/fortifylab/` or `bin/fortifylab`:
+
+```bash
+./bin/fortifylab --help
+python3 -m unittest tests.test_python_cli tests.test_python_command_adapter
+```
+
 The gate does not contact Kubernetes or require a Fortify license. It runs all
 unit tests and a strict MkDocs build. The project validator also checks internal
 links and anchors, navigation coverage, selected Markdown style rules,

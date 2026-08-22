@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
 import tempfile
 import unittest
 import subprocess
 from pathlib import Path
+
+from tests.wizard_source import read_wizard_source
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,8 +22,26 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn('FORTIFY_SSC_CHART_VERSION="26.2.0-1"', environment)
         self.assertIn('FORTIFY_SCSAST_CHART_VERSION="26.2.0-1"', environment)
 
+    def test_wizard_entrypoint_loads_modules_explicitly(self) -> None:
+        entrypoint = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        module_dir = ROOT / "scripts" / "wizard"
+        expected_modules = (
+            "env.sh",
+            "app-registry.sh",
+            "operations.sh",
+            "guided.sh",
+            "runbooks.sh",
+            "setup.sh",
+            "menu.sh",
+        )
+        self.assertIn("source_wizard_module()", entrypoint)
+        for module in expected_modules:
+            self.assertTrue((module_dir / module).exists(), module)
+            self.assertIn(f"source_wizard_module {module}", entrypoint)
+        self.assertLess(len(entrypoint.splitlines()), 250)
+
     def test_dependency_waits_abort_the_deployment(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         for gate in ("mysql", "postgresql", "ssc", "lim"):
             self.assertIn(f"{gate}_ready()", wizard)
         for probe in (
@@ -32,12 +53,12 @@ class WizardContractTests(unittest.TestCase):
             "health_lim_ingress_probe && health_lim_http_probe",
         ):
             self.assertIn(probe, wizard)
-        self.assertIn("guided_run_and_verify mysql", wizard)
-        self.assertIn("guided_run_and_verify ssc", wizard)
+        self.assertIn('guided_run_and_verify "$step"', wizard)
+        self.assertIn("mysql|postgresql|ssc|lim)", wizard)
         self.assertNotIn('"pod/$pod" || true', wizard)
 
     def test_fresh_install_refuses_existing_managed_releases(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         self.assertIn("fresh_deployment_guard()", wizard)
         self.assertIn("Managed releases already exist", wizard)
         self.assertIn("Resume or repair deployment", wizard)
@@ -56,7 +77,7 @@ class WizardContractTests(unittest.TestCase):
         self.assertFalse(any(path.startswith("apps/sonatype/") for path in tracked))
 
     def test_credentials_are_not_printed_or_passed_to_helm(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         sast = (ROOT / "apps/scsast/start.sh").read_text(encoding="utf-8")
         app_credentials = wizard.split("show_app_creds()", 1)[1].split(
             "# License menu", 1
@@ -178,6 +199,15 @@ class WizardContractTests(unittest.TestCase):
         self.assertNotIn("api.ingress.annotations.\"traefik\\\\.ingress\\\\.kubernetes\\\\.io/service", scdast)
 
 
+    def test_dast_upgradejob_can_write_vendor_artifacts_without_relaxing_runtime_services(self) -> None:
+        override = (ROOT / "apps" / "scdast" / "core" / "resource_override.yaml").read_text(encoding="utf-8")
+        self.assertIn("upgradejob:\n  resources: null", override)
+        self.assertIn("  containerSecurityContext:\n    runAsUser: 0", override)
+        self.assertIn("dast-*-start archives", override)
+        runtime_prefix = override.split("upgradejob:", 1)[0]
+        self.assertNotIn("runAsUser: 0", runtime_prefix)
+
+
     def test_app_starts_refresh_coredns_before_hostname_based_workloads(self) -> None:
         for relative in (
             "apps/ssc/start.sh",
@@ -191,7 +221,7 @@ class WizardContractTests(unittest.TestCase):
             self.assertIn("fortify_ensure_coredns_lab_hosts", script, relative)
 
     def test_wizard_dns_uses_shared_coredns_helper(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         helper = (ROOT / "scripts/lib/coredns-lab-hosts.sh").read_text(encoding="utf-8")
         self.assertIn("scripts/lib/coredns-lab-hosts.sh", wizard)
         self.assertIn("fortify_ensure_coredns_lab_hosts || return 1", wizard)
@@ -199,7 +229,7 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn("ScanCentral SAST workers call", wizard)
 
     def test_guided_status_surfaces_endpoint_and_hostname_detail(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         self.assertIn("guided_component_endpoint_detail", wizard)
         self.assertIn("health_http_detail", wizard)
         self.assertIn("FORTIFY_HEALTH_HTTP_MAX_TIME=3", wizard)
@@ -220,7 +250,7 @@ class WizardContractTests(unittest.TestCase):
         self.assertIn("TRAEFIK DEFAULT CERT", create_secrets)
 
     def test_registry_credentials_refresh_before_image_pull_steps(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         create_secrets = (ROOT / "scripts" / "create-secrets.sh").read_text(encoding="utf-8")
         helper = (ROOT / "scripts" / "lib" / "registry-credentials.sh").read_text(encoding="utf-8")
         self.assertIn('source "$FORTIFY_HOME_K8S/scripts/lib/registry-credentials.sh"', wizard)
@@ -357,18 +387,468 @@ exit 1
 
 
 
+    def test_wizard_has_python_config_bridge_with_bash_fallbacks(self) -> None:
+        wizard = read_wizard_source(ROOT)
+        for expected in (
+            "python_config_available()",
+            "python_config_diagnostics()",
+            "python_config_validate()",
+            "python_config_repair_domain_urls()",
+            "config diagnostics --env",
+            "config validate --env",
+            "config repair-derived --env",
+            "env_config_issue_lines()",
+            "env_repair_domain_urls()",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, wizard)
+
     def test_fcli_tools_menu_is_warning_only_and_version_pinned(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         environment = (ROOT / ".env.example").read_text(encoding="utf-8")
         self.assertIn('FORTIFY_RECOMMENDED_FCLI_VERSION="3.23.3"', environment)
         self.assertIn('FORTIFY_FCLI_INSTALL_DIR="$HOME/fortify/tools/bin"', environment)
         self.assertIn("Tools and FCLI readiness", wizard)
         self.assertIn("fcli_tools_menu()", wizard)
         self.assertIn("fcli_install_or_update()", wizard)
+        self.assertIn("fcli_configure_lab_trust()", wizard)
+        self.assertIn("Configure fcli trust for lab TLS", wizard)
+        self.assertIn("FCLI_TRUSTSTORE", wizard)
+        self.assertIn("FCLI_TRUSTSTORE_TYPE", wizard)
+        self.assertIn("FCLI_TRUSTSTORE_PWD", wizard)
         self.assertIn("FCLI missing; recommended", wizard)
         self.assertIn("does not block infrastructure deployment", wizard)
         preflight = wizard.split("preflight_check()", 1)[1].split("deploy_step()", 1)[0]
         self.assertNotIn("fcli", preflight.lower())
+
+
+    def test_fcli_path_handoff_is_current_session_and_persistent_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            bin_dir = home / "fortify" / "tools" / "bin"
+            profile = home / ".bashrc"
+            bin_dir.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text("# existing profile\n", encoding="utf-8")
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_FCLI_INSTALL_DIR="$3"
+                export FORTIFY_FCLI_PROFILE_FILE="$4"
+                export PATH=/usr/bin:/bin
+                source "$1"
+                fcli_export_current_path "$FORTIFY_FCLI_INSTALL_DIR"
+                fcli_export_current_path "$FORTIFY_FCLI_INSTALL_DIR"
+                fcli_persist_path "$FORTIFY_FCLI_INSTALL_DIR"
+                fcli_persist_path "$FORTIFY_FCLI_INSTALL_DIR"
+                printf 'PATH=%s\n' "$PATH"
+                printf 'PROFILE_COUNT=%s\n' "$(grep -cF "$FORTIFY_FCLI_INSTALL_DIR" "$FORTIFY_FCLI_PROFILE_FILE")"
+            """
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-path-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(bin_dir),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn(f"PATH={bin_dir}:/usr/bin:/bin", output)
+            self.assertIn("PROFILE_COUNT=1", output)
+
+
+    def test_fcli_lab_trust_handoff_is_current_session_and_persistent_without_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            certs = home / "fortify" / "certs"
+            profile = home / ".bashrc"
+            truststore = certs / "truststore"
+            certs.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text("# existing profile\n", encoding="utf-8")
+            truststore.write_text("fake-jks-for-contract-test\n", encoding="utf-8")
+            command = r'''
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_HOME_K8S="$PWD"
+                export FORTIFY_CERTS="$3"
+                export TRUSTSTORE="$4"
+                export DEFAULT_PASS="contract-secret"
+                export FORTIFY_FCLI_PROFILE_FILE="$5"
+                source "$1"
+                fcli_export_lab_trust "$TRUSTSTORE"
+                fcli_export_lab_trust "$TRUSTSTORE"
+                fcli_persist_lab_trust_hints "$TRUSTSTORE"
+                fcli_persist_lab_trust_hints "$TRUSTSTORE"
+                printf 'TRUSTSTORE=%s\\n' "$FCLI_TRUSTSTORE"
+                printf 'TRUSTSTORE_TYPE=%s\\n' "$FCLI_TRUSTSTORE_TYPE"
+                printf 'TRUSTSTORE_PWD_SET=%s\\n' "$([ -n "${FCLI_TRUSTSTORE_PWD:-}" ] && printf yes || printf no)"
+                printf 'PROFILE_TRUST_COUNT=%s\\n' "$(grep -cF "$TRUSTSTORE" "$FORTIFY_FCLI_PROFILE_FILE")"
+                printf 'PROFILE_TYPE_COUNT=%s\\n' "$(grep -cF 'export FCLI_TRUSTSTORE_TYPE="JKS"' "$FORTIFY_FCLI_PROFILE_FILE")"
+                if grep -F 'FCLI_TRUSTSTORE_PWD' "$FORTIFY_FCLI_PROFILE_FILE" >/dev/null; then
+                    printf 'PROFILE_SECRET=present\\n'
+                else
+                    printf 'PROFILE_SECRET=absent\\n'
+                fi
+            '''
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-trust-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(certs),
+                    str(truststore),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn(f"TRUSTSTORE={truststore}", output)
+            self.assertIn("TRUSTSTORE_TYPE=JKS", output)
+            self.assertIn("TRUSTSTORE_PWD_SET=yes", output)
+            self.assertIn("PROFILE_TRUST_COUNT=1", output)
+            self.assertIn("PROFILE_TYPE_COUNT=1", output)
+            self.assertIn("PROFILE_SECRET=absent", output)
+            self.assertNotIn("contract-secret", profile.read_text(encoding="utf-8"))
+
+    def test_fcli_truststore_path_prefers_explicit_client_truststore_env(self) -> None:
+        command = """
+            export WIZARD_NOMAIN=1 NO_COLOR=1
+            source "$1"
+            FCLI_CLIENT_TRUSTSTORE=/explicit/fcli-truststore
+            fcli_truststore_path
+        """
+        result = subprocess.run(
+            ["bash", "-c", command, "fcli-truststore-explicit-test", str(ROOT / "start_wizard.sh")],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "/explicit/fcli-truststore")
+
+    def test_fcli_truststore_path_defaults_to_fcli_truststore_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            certs = Path(directory) / "certs"
+            certs.mkdir()
+            (certs / "fcli-truststore").write_text("broad-jks-for-contract-test\n", encoding="utf-8")
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                source "$1"
+                FORTIFY_CERTS="$2"
+                fcli_truststore_path
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "fcli-truststore-default-test", str(ROOT / "start_wizard.sh"), str(certs)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), str(certs / "fcli-truststore"))
+
+    def test_fcli_truststore_path_falls_back_to_legacy_truststore_when_not_yet_generated(self) -> None:
+        # A lab that hasn't regenerated certs since this split still has the
+        # narrow, SSC-only truststore -- fcli must keep using that (lab trust
+        # only) rather than pointing at a fcli-truststore file that doesn't
+        # exist yet.
+        with tempfile.TemporaryDirectory() as directory:
+            certs = Path(directory) / "certs"
+            certs.mkdir()
+            (certs / "truststore").write_text("narrow-jks-for-contract-test\n", encoding="utf-8")
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                source "$1"
+                FORTIFY_CERTS="$2"
+                unset TRUSTSTORE
+                fcli_truststore_path
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "fcli-truststore-fallback-test", str(ROOT / "start_wizard.sh"), str(certs)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), str(certs / "truststore"))
+
+    def test_create_certs_builds_a_broader_fcli_truststore_than_sscs_own(self) -> None:
+        script = (ROOT / "scripts" / "create-certs.sh").read_text(encoding="utf-8")
+        self.assertIn("FCLI_CLIENT_TRUSTSTORE", script)
+        self.assertIn("JAVA_CACERTS", script)
+        self.assertIn('keytool -storepasswd -keystore "$attempt_file"', script)
+        self.assertIn('mv "$attempt_file" "$FCLI_CLIENT_TRUSTSTORE"', script)
+        # Both the lab CA(s) and the update.fortify.com root must land in
+        # both keystores -- SSC's narrow one and fcli's broader one -- not
+        # just the narrow one.
+        self.assertEqual(script.count('-keystore "$TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt'), 2)
+        self.assertEqual(script.count('-keystore "$FCLI_CLIENT_TRUSTSTORE" -storepass "$DEFAULT_PASS" -noprompt'), 2)
+
+    def test_create_certs_does_not_crash_under_set_u_when_env_predates_fcli_truststore(self) -> None:
+        # Bug: FCLI_CLIENT_TRUSTSTORE is new -- an existing .env written
+        # before this split doesn't define it, and create-certs.sh runs
+        # under `set -euo pipefail`, so referencing it without a safe
+        # default is a hard "unbound variable" crash on every lab that
+        # hasn't hand-edited .env to add the new var.
+        script = (ROOT / "scripts" / "create-certs.sh").read_text(encoding="utf-8")
+        source_line = 'source "$FORTIFY_HOME_K8S/.env"'
+        fallback_line = 'FCLI_CLIENT_TRUSTSTORE="${FCLI_CLIENT_TRUSTSTORE:-$FORTIFY_CERTS/fcli-truststore}"'
+        self.assertIn(fallback_line, script)
+        self.assertLess(script.index(source_line), script.index(fallback_line))
+        first_hard_use = script.index('"$FCLI_CLIENT_TRUSTSTORE"')
+        self.assertLess(
+            script.index(fallback_line),
+            first_hard_use,
+            "the safe-default fallback must run before any bare $FCLI_CLIENT_TRUSTSTORE reference",
+        )
+
+        # Functional proof, not just source-order: actually run the script's
+        # bootstrap under set -u with a .env that predates this var and
+        # confirm it resolves the documented default instead of crashing.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            certs = home / "certs"
+            (home / "scripts" / "lib").mkdir(parents=True)
+            shutil.copy(ROOT / "scripts" / "lib" / "tls.sh", home / "scripts" / "lib" / "tls.sh")
+            (home / ".env").write_text(
+                'export FORTIFY_CERTS="{certs}"\n'.format(certs=certs),
+                encoding="utf-8",
+            )
+            bootstrap_lines = script.splitlines(keepends=True)
+            end = next(i for i, line in enumerate(bootstrap_lines) if fallback_line in line) + 1
+            bootstrap = "".join(bootstrap_lines[:end]) + '\nprintf \'RESOLVED=%s\\n\' "$FCLI_CLIENT_TRUSTSTORE"\n'
+            bootstrap_script = home / "create-certs-bootstrap.sh"
+            bootstrap_script.write_text(bootstrap, encoding="utf-8")
+            bootstrap_script.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(bootstrap_script)],
+                env={"FORTIFY_HOME_K8S": str(home), "PATH": "/usr/bin:/bin"},
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(f"RESOLVED={certs}/fcli-truststore", result.stdout)
+
+    def test_jdk_cacerts_copy_and_repassword_mechanism_produces_a_broad_trust_store(self) -> None:
+        # Functional proof of the exact mechanism create-certs.sh uses to
+        # seed FCLI_CLIENT_TRUSTSTORE: copy the JDK's default cacerts, then
+        # reset its store password, using the real system keytool -- not a
+        # stub -- since a wrong cacerts path or password would silently
+        # produce an unusably narrow (or unreadable) truststore.
+        keytool = shutil.which("keytool")
+        if not keytool:
+            self.skipTest("keytool not available in this environment")
+        with tempfile.TemporaryDirectory() as directory:
+            java_home = subprocess.run(
+                ["bash", "-c", 'dirname "$(dirname "$(readlink -f "$(command -v keytool)")")"'],
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            cacerts = Path(java_home) / "lib" / "security" / "cacerts"
+            if not cacerts.is_file():
+                self.skipTest(f"JDK cacerts not found at {cacerts}")
+            # "changeit" is the near-universal JKS cacerts default, but some
+            # distros' packaged JRE ships an empty password instead -- mirror
+            # create-certs.sh's try-both fallback rather than assuming one.
+            # Each attempt gets its own fresh file/permissions rather than
+            # overwriting the previous attempt's file: some keytool builds
+            # leave a failed target in a state a later attempt can't just
+            # copy over (observed in CI as a plain PermissionError).
+            target = None
+            for attempt, cacerts_src_pass in enumerate(("changeit", "")):
+                candidate = Path(directory) / f"fcli-truststore-{attempt}"
+                shutil.copy(cacerts, candidate)
+                candidate.chmod(0o600)
+                result = subprocess.run(
+                    [keytool, "-storepasswd", "-keystore", str(candidate), "-storepass", cacerts_src_pass, "-new", "contract-secret"],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    target = candidate
+                    break
+            if target is None:
+                self.skipTest("This system's JDK cacerts uses neither the changeit nor empty default password")
+            listing = subprocess.run(
+                [keytool, "-list", "-keystore", str(target), "-storepass", "contract-secret"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            entry_count = listing.count("trustedCertEntry")
+            # A real JDK cacerts bundle ships well over 50 public root CAs;
+            # a narrow lab-only store (the bug this fixes) would have 1-2.
+            self.assertGreater(entry_count, 50, listing)
+
+    @staticmethod
+    def _write_fake_fcli(bin_dir: Path, call_log: Path) -> None:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        fcli = bin_dir / "fcli"
+        fcli.write_text(
+            "#!/usr/bin/env bash\n"
+            f'printf \'%s\\n\' "$*" >> "{call_log}"\n'
+            'if [ "$1" = "--version" ]; then printf \'fcli 3.23.3\\n\'; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        fcli.chmod(0o755)
+
+    def test_fcli_activate_reactivates_path_and_trust_when_already_installed(self) -> None:
+        # Simulates the gap: fcli was installed in a prior session, and this
+        # is a fresh shell/process where PATH and trust were never activated.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            bin_dir = home / "fortify" / "tools" / "bin"
+            certs = home / "fortify" / "certs"
+            profile = home / ".bashrc"
+            truststore = certs / "truststore"
+            call_log = Path(directory) / "fcli-calls.log"
+            certs.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text("# existing profile\n", encoding="utf-8")
+            truststore.write_text("fake-jks-for-contract-test\n", encoding="utf-8")
+            self._write_fake_fcli(bin_dir, call_log)
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_HOME_K8S="$PWD"
+                export FORTIFY_FCLI_INSTALL_DIR="$3"
+                export FORTIFY_CERTS="$4"
+                export TRUSTSTORE="$5"
+                export DEFAULT_PASS="contract-secret"
+                export FORTIFY_FCLI_PROFILE_FILE="$6"
+                export PATH=/usr/bin:/bin
+                source "$1"
+                fcli_activate
+                printf 'PATH=%s\\n' "$PATH"
+                printf 'TRUSTSTORE=%s\\n' "$FCLI_TRUSTSTORE"
+                printf 'TRUSTSTORE_PWD_SET=%s\\n' "$([ -n "${FCLI_TRUSTSTORE_PWD:-}" ] && printf yes || printf no)"
+            """
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-activate-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(bin_dir),
+                    str(certs),
+                    str(truststore),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn(f"PATH={bin_dir}:/usr/bin:/bin", output)
+            self.assertIn(f"TRUSTSTORE={truststore}", output)
+            self.assertIn("TRUSTSTORE_PWD_SET=yes", output)
+            calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+            self.assertIn("config truststore set", calls)
+            self.assertIn(f"--file {truststore}", calls)
+            self.assertIn("--password contract-secret", calls)
+
+    def test_fcli_activate_is_a_noop_when_nothing_is_installed_or_generated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            bin_dir = home / "fortify" / "tools" / "bin"
+            profile = home / ".bashrc"
+            home.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_FCLI_INSTALL_DIR="$3"
+                export FORTIFY_FCLI_PROFILE_FILE="$4"
+                export PATH=/usr/bin:/bin
+                source "$1"
+                fcli_activate
+                rc=$?
+                printf 'RC=%s\\n' "$rc"
+                printf 'PATH=%s\\n' "$PATH"
+            """
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-activate-noop-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(bin_dir),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn("RC=0", output)
+            self.assertIn("PATH=/usr/bin:/bin", output)
+            self.assertFalse(profile.exists())
+
+    def test_certs_regen_reimports_fcli_trust_unconditionally(self) -> None:
+        # Even when the current shell already looks "active" (matching env
+        # vars from a prior truststore), a cert regeneration must re-run the
+        # persistent fcli trust import rather than skipping it as a no-op —
+        # the truststore's content just changed even though its path did not.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            bin_dir = home / "fortify" / "tools" / "bin"
+            certs = home / "fortify" / "certs"
+            profile = home / ".bashrc"
+            truststore = certs / "truststore"
+            call_log = Path(directory) / "fcli-calls.log"
+            certs.mkdir(parents=True)
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text("# existing profile\n", encoding="utf-8")
+            truststore.write_text("regenerated-jks-for-contract-test\n", encoding="utf-8")
+            self._write_fake_fcli(bin_dir, call_log)
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export HOME="$2"
+                export FORTIFY_HOME_K8S="$PWD"
+                export FORTIFY_FCLI_INSTALL_DIR="$3"
+                export FORTIFY_CERTS="$4"
+                export TRUSTSTORE="$5"
+                export DEFAULT_PASS="contract-secret"
+                export FORTIFY_FCLI_PROFILE_FILE="$6"
+                export PATH="$3:/usr/bin:/bin"
+                source "$1"
+                # Simulate trust already looking active from before regeneration.
+                export FCLI_TRUSTSTORE="$TRUSTSTORE"
+                export FCLI_TRUSTSTORE_TYPE="JKS"
+                export FCLI_TRUSTSTORE_PWD="contract-secret"
+                fcli_reimport_trust_after_regen
+                printf 'DONE=%s\\n' "$?"
+            """
+            output = subprocess.check_output(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "fcli-reimport-test",
+                    str(ROOT / "start_wizard.sh"),
+                    str(home),
+                    str(bin_dir),
+                    str(certs),
+                    str(truststore),
+                    str(profile),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            self.assertIn("DONE=0", output)
+            calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+            self.assertIn("config truststore set", calls)
+            self.assertIn(f"--file {truststore}", calls)
 
     def test_fcli_command_templates_are_secret_safe(self) -> None:
         command = """
@@ -397,7 +877,7 @@ exit 1
         self.assertNotIn("actual-fod-secret", output)
 
     def test_sample_apps_have_isolated_lifecycle_contracts(self) -> None:
-        wizard = (ROOT / "start_wizard.sh").read_text(encoding="utf-8")
+        wizard = read_wizard_source(ROOT)
         environment = (ROOT / ".env.example").read_text(encoding="utf-8")
         hosts = (ROOT / "scripts" / "lib" / "coredns-lab-hosts.sh").read_text(encoding="utf-8")
         for expected in (

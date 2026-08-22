@@ -1,0 +1,45 @@
+schema_version = 1
+default_flight_plan = "fortify-26.2"
+
+[database_defaults]
+FORTIFY_MYSQL_CHART_VERSION = "9.19.0"
+FORTIFY_MYSQL_IMAGE_TAG = "8.0.36-debian-11-r2"
+FORTIFY_POSTGRES_CHART_VERSION = "18.6.2"
+FORTIFY_POSTGRES_IMAGE_TAG = "17.6.0-debian-12-r4"
+
+[flight_plans."fortify-26.2"]
+label = "Fortify 26.2"
+status = "recommended"
+family = "26.2"
+notes = "Default CLI lab baseline. Review vendor documentation before treating this as a production compatibility matrix."
+
+[flight_plans."fortify-26.2".components]
+FORTIFY_SSC_CHART_VERSION = "26.2.0-1"
+FORTIFY_SSC_IMAGE_TAG = "26.2.0.0183"
+FORTIFY_SCSAST_CHART_VERSION = "26.2.0-1"
+FORTIFY_SCSAST_CTRL_IMAGE_TAG = "26.2.0"
+FORTIFY_SCSAST_WORKER_IMAGE_TAG = "25.2.0"
+FORTIFY_SCDAST_CHART_VERSION = "24.4.0-2"
+FORTIFY_LIM_CHART_VERSION = "24.4.0-3"
+
+[flight_plans."fortify-26.2".repositories]
+FORTIFY_SSC_CHART_VERSION = "fortifydocker/helm-ssc"
+FORTIFY_SSC_IMAGE_TAG = "fortifydocker/ssc-webapp"
+FORTIFY_SCSAST_CHART_VERSION = "fortifydocker/helm-scancentral-sast"
+FORTIFY_SCDAST_CHART_VERSION = "fortifydocker/helm-scancentral-dast-core, fortifydocker/helm-scancentral-dast-scanner"
+FORTIFY_LIM_CHART_VERSION = "fortifydocker/helm-lim"
+
+[flight_plans."fortify-25.x"]
+label = "Fortify 25.x"
+status = "candidate"
+family = "25"
+notes = "Placeholder candidate for repo-owner review. Use discovery to draft exact component tags before promotion."
+
+[flight_plans."fortify-25.x".components]
+FORTIFY_SSC_CHART_VERSION = ""
+FORTIFY_SSC_IMAGE_TAG = ""
+FORTIFY_SCSAST_CHART_VERSION = ""
+FORTIFY_SCSAST_CTRL_IMAGE_TAG = ""
+FORTIFY_SCSAST_WORKER_IMAGE_TAG = ""
+FORTIFY_SCDAST_CHART_VERSION = ""
+FORTIFY_LIM_CHART_VERSION = ""
