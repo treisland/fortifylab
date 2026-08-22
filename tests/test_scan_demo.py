@@ -427,13 +427,15 @@ class ScanDemoContractTests(unittest.TestCase):
                 bin_dir / "fcli",
                 "#!/usr/bin/env bash\n"
                 f'printf \'%s\\n\' "$*" > "{captured}"\n'
-                "printf 'scanState: COMPLETE\\n'\n"
+                "printf 'Job token  Has files  Scan state  Publish state  SSC processing state  Endpoint version  Action\\n'\n"
+                "printf 'tok true COMPLETED COMPLETED PROCESS_COMPLETE 4 SCAN_REQUESTED\\n'\n"
                 "exit 0\n",
             )
             command = """
                 export WIZARD_NOMAIN=1 NO_COLOR=1
                 export FORTIFY_FCLI_INSTALL_DIR="$2"
                 export PATH="$2:$PATH"
+                export FORTIFY_FIRST_SCAN_POLL_INTERVAL=0 FORTIFY_FIRST_SCAN_POLL_TIMEOUT=5
                 source "$1"
                 FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
                 scan_type_poll_sast_iwa_java
@@ -463,13 +465,14 @@ class ScanDemoContractTests(unittest.TestCase):
                 "#!/usr/bin/env bash\n"
                 "cat <<'TABLE'\n"
                 "Job token                             Has files  Scan state  Publish state  SSC processing state  Endpoint version  Action\n"
-                "d2d63825-eaa5-4dd2-b7e9-24a4076e861d  true       COMPLETE    QUEUED         QUEUED                 4                 SCAN_REQUESTED\n"
+                "d2d63825-eaa5-4dd2-b7e9-24a4076e861d  true       COMPLETED   COMPLETED      PROCESS_COMPLETE       4                 SCAN_REQUESTED\n"
                 "TABLE\n",
             )
             command = """
                 export WIZARD_NOMAIN=1 NO_COLOR=1
                 export FORTIFY_FCLI_INSTALL_DIR="$2"
                 export PATH="$2:$PATH"
+                export FORTIFY_FIRST_SCAN_POLL_INTERVAL=0 FORTIFY_FIRST_SCAN_POLL_TIMEOUT=5
                 source "$1"
                 FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
                 scan_type_poll_sast_iwa_java
@@ -483,9 +486,65 @@ class ScanDemoContractTests(unittest.TestCase):
             )
             output = result.stdout
             self.assertIn("RC=0", output, output + result.stderr)
-            self.assertIn("Scan status: scanState=COMPLETE publishState=QUEUED", output)
+            self.assertIn(
+                "Scan status: scanState=COMPLETED publishState=COMPLETED sscProcessingState=PROCESS_COMPLETE",
+                output,
+            )
             self.assertNotIn("Job token", output)
             self.assertNotIn("SCAN_REQUESTED", output)
+
+    def test_poll_waits_for_ssc_processing_to_finish_not_just_the_scan_job(self) -> None:
+        # Reported from a real run: scan_type_results_sast_iwa_java's
+        # severity summary collapsed into a single "Low" row with the total
+        # count of every issue, instead of four rows (Critical/High/Medium/
+        # Low). Root cause: scanState and publishState reach COMPLETED as
+        # soon as SSC accepts the uploaded artifact, but SSC then indexes
+        # that artifact into issues/folders separately (its own
+        # sscArtifactState) -- querying issue counts before that finishes
+        # returns wrong results. Poll must keep waiting while
+        # sscProcessingState is still PROCESSING, only stopping once it
+        # reaches PROCESS_COMPLETE.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            call_count_file = Path(directory) / "call-count.txt"
+            call_count_file.write_text("0", encoding="utf-8")
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'count_file="{call_count_file}"\n'
+                'n="$(cat "$count_file")"\n'
+                'n=$((n + 1))\n'
+                'printf "%s" "$n" > "$count_file"\n'
+                "printf 'Job token  Has files  Scan state  Publish state  SSC processing state  Endpoint version  Action\\n'\n"
+                'if [ "$n" -lt 3 ]; then\n'
+                "  printf 'tok true COMPLETED COMPLETED PROCESSING 4 SCAN_REQUESTED\\n'\n"
+                "else\n"
+                "  printf 'tok true COMPLETED COMPLETED PROCESS_COMPLETE 4 SCAN_REQUESTED\\n'\n"
+                "fi\n"
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                export FORTIFY_FIRST_SCAN_POLL_INTERVAL=0 FORTIFY_FIRST_SCAN_POLL_TIMEOUT=30
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                scan_type_poll_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "poll-ssc-processing-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            output = result.stdout
+            self.assertIn("RC=0", output, output + result.stderr)
+            self.assertIn("sscProcessingState=PROCESSING", output)
+            self.assertIn("sscProcessingState=PROCESS_COMPLETE", output)
+            self.assertEqual(int(call_count_file.read_text(encoding="utf-8")), 3)
 
     def test_verify_accepts_completed_state_as_success(self) -> None:
         command = """

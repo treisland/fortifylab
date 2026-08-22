@@ -170,7 +170,7 @@ scan_type_submit_sast_iwa_java() {
 # scan_type_verify_sast_iwa_java decides whether that terminal state means
 # the scan actually succeeded.
 scan_type_poll_sast_iwa_java() {
-    local fcli_bin elapsed=0 status data_row
+    local fcli_bin elapsed=0 status data_row scan_state publish_state ssc_state
     fcli_bin="$(fcli_path)" || return 1
     while [ "$elapsed" -lt "$FORTIFY_FIRST_SCAN_POLL_TIMEOUT" ]; do
         status="$("$fcli_bin" sc-sast scan status ::first_scan_job::jobToken \
@@ -181,8 +181,26 @@ scan_type_poll_sast_iwa_java() {
         # line (as before) mashed the header into the data row. Print just
         # the data row's scan/publish state instead of the full table.
         data_row="$(printf '%s\n' "$status" | tail -n1)"
-        note "Scan status: $(printf '%s' "$data_row" | awk '{print "scanState="$3, "publishState="$4}')"
-        if printf '%s' "$status" | grep -qiE 'COMPLETE|FAULTED|FAILED|CANCELED|TIMEOUT'; then
+        scan_state="$(printf '%s' "$data_row" | awk '{print $3}')"
+        publish_state="$(printf '%s' "$data_row" | awk '{print $4}')"
+        ssc_state="$(printf '%s' "$data_row" | awk '{print $5}')"
+        note "Scan status: scanState=$scan_state publishState=$publish_state sscProcessingState=$ssc_state"
+        if printf '%s' "$status" | grep -qiE 'FAULTED|FAILED|CANCELED|TIMEOUT'; then
+            LAST_SCAN_STATUS="$status"
+            return 0
+        fi
+        # scanState/publishState reaching COMPLETED only means the scan job
+        # itself finished and SSC accepted the upload -- SSC then indexes
+        # the artifact into issues/folders separately (its own
+        # sscArtifactState, terminal value PROCESS_COMPLETE per fcli's
+        # SCSastScanJobArtifactState; falls back to publishState's value on
+        # older endpoints that don't report it). Querying issue counts
+        # before that finishes returns incomplete/collapsed results --
+        # confirmed against a real run: a single "Low" row summing every
+        # severity instead of four, while scanState/publishState already
+        # showed COMPLETED and sscProcessingState still showed PROCESSING.
+        if [ "$scan_state" = "COMPLETED" ] && [ "$publish_state" = "COMPLETED" ] \
+            && { [ "$ssc_state" = "PROCESS_COMPLETE" ] || [ "$ssc_state" = "COMPLETED" ]; }; then
             LAST_SCAN_STATUS="$status"
             return 0
         fi
