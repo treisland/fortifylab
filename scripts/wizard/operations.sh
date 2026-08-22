@@ -3665,10 +3665,11 @@ prereqs_menu() {
         prereqs_status_table
         echo
         echo "  1. JDK 17 (apt)"
-        echo "  2. Docker (apt) + docker login"
-        echo "  3. mkcert (apt)"
-        echo "  4. microk8s (snap) + addons (dns, ingress, nfs, dashboard, community)"
-        echo "  5. All of the above"
+        echo "  2. Maven (apt)"
+        echo "  3. Docker (apt) + docker login"
+        echo "  4. mkcert (apt)"
+        echo "  5. microk8s (snap) + addons (dns, ingress, nfs, dashboard, community)"
+        echo "  6. All of the above"
         echo "  g. Refresh group access (microk8s/docker) now"
         echo
         echo "  r. Return"
@@ -3677,10 +3678,11 @@ prereqs_menu() {
 
         case "$choice" in
             1) install_jdk;        prereqs_install_summary ;;
-            2) install_docker;     prereqs_install_summary ;;
-            3) install_mkcert;     prereqs_install_summary ;;
-            4) install_microk8s;   prereqs_install_summary ;;
-            5) install_jdk; install_docker; install_mkcert; install_microk8s; prereqs_install_summary ;;
+            2) install_maven;      prereqs_install_summary ;;
+            3) install_docker;     prereqs_install_summary ;;
+            4) install_mkcert;     prereqs_install_summary ;;
+            5) install_microk8s;   prereqs_install_summary ;;
+            6) install_jdk; install_maven; install_docker; install_mkcert; install_microk8s; prereqs_install_summary ;;
             [Gg]) prereqs_refresh_group_access ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
@@ -3810,6 +3812,7 @@ EOF
 }
 
 install_jdk()      { command -v java   &>/dev/null && note "Already installed."  || sudo apt install -y openjdk-17-jre-headless; }
+install_maven()    { command -v mvn    &>/dev/null && note "Already installed."  || sudo apt install -y maven; }
 install_mkcert()   { command -v mkcert &>/dev/null && note "Already installed."  || sudo apt install -y mkcert; }
 install_docker()   {
     if command -v docker &>/dev/null; then
@@ -3861,6 +3864,7 @@ docker_ready() {
 
 mkcert_ready() { command -v mkcert >/dev/null 2>&1; }
 java_ready() { command -v java >/dev/null 2>&1 && command -v keytool >/dev/null 2>&1; }
+maven_ready() { command -v mvn >/dev/null 2>&1; }
 
 microk8s_access_ready() {
     command -v microk8s >/dev/null 2>&1 || return 1
@@ -3870,6 +3874,7 @@ microk8s_access_ready() {
 
 prereqs_status_table() {
     printf '  %-24s %s\n' "JDK 17" "$(prereq_status java_ready)"
+    printf '  %-24s %s\n' "Maven" "$(prereq_status maven_ready)"
     printf '  %-24s %s\n' "Docker + login" "$(prereq_status docker_ready)"
     printf '  %-24s %s\n' "mkcert" "$(prereq_status mkcert_ready)"
     printf '  %-24s %s\n' "MicroK8s access" "$(prereq_status microk8s_access_ready)"
@@ -3878,6 +3883,7 @@ prereqs_status_table() {
 prereqs_ready_count() {
     local ready=0
     java_ready && ready=$((ready + 1))
+    maven_ready && ready=$((ready + 1))
     docker_ready && ready=$((ready + 1))
     mkcert_ready && ready=$((ready + 1))
     microk8s_access_ready && ready=$((ready + 1))
@@ -3888,8 +3894,8 @@ prereqs_install_summary() {
     local ready pending
     ready=$(prereqs_ready_count)
     printf '\n'
-    note "Host prerequisites: $ready/4 ready."
-    if [ "$ready" -eq 4 ]; then
+    note "Host prerequisites: $ready/5 ready."
+    if [ "$ready" -eq 5 ]; then
         note "All prerequisite indicators are complete."
     else
         pending="$(fortify_groups_pending_activation)"
