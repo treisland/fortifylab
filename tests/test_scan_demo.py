@@ -65,7 +65,7 @@ class ScanDemoContractTests(unittest.TestCase):
         self.assertIn(
             "fcli sc-sast scan start --file=<zip> --publish-to=<av> --ssc-session=fortifylab-first-scan", output
         )
-        self.assertIn("fcli ssc issue count --av=<av> --by=folder --ssc-session=fortifylab-first-scan", output)
+        self.assertIn("fcli ssc issue count --av=<av> --ssc-session=fortifylab-first-scan", output)
         self.assertIn("fcli ssc session logout --ssc-session=fortifylab-first-scan", output)
 
     def test_scan_demo_module_defines_the_full_scan_type_shape(self) -> None:
@@ -317,6 +317,108 @@ class ScanDemoContractTests(unittest.TestCase):
             args = captured.read_text(encoding="utf-8")
             self.assertIn("--sc-client-version 25.2.0", args)
 
+    def test_results_step_does_not_pass_a_lowercase_by_grouping(self) -> None:
+        # --by is matched case-sensitively against SSC's own dynamic
+        # grouping list (display name or GUID); fcli's own --by default is
+        # "FOLDER" (uppercase), and passing "folder" (lowercase) failed
+        # against real SSC with "No grouping found with display name or id
+        # folder". Leave --by unset so fcli's own default applies.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            captured = Path(directory) / "fcli-args.txt"
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'printf \'%s\\n\' "$*" > "{captured}"\n'
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                section() { :; }
+                scan_type_results_sast_iwa_java "IWA-Java:my-first-scan"
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "results-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+            args = captured.read_text(encoding="utf-8")
+            self.assertIn("ssc issue count", args)
+            self.assertIn("--av=IWA-Java:my-first-scan", args)
+            self.assertNotIn("--by", args)
+
+    def test_appversion_url_builds_the_ssc_web_ui_deep_link(self) -> None:
+        # Same URL shape SSC's own built-in fcli actions use for an
+        # appversion's audit page (<SSC_URL>/html/ssc/version/<id>/audit) --
+        # resolved from the numeric id, not the "App:Version" name string.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                "printf 'Id\\n42\\n'\n"
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                SSC_URL=https://ssc.fortifylab.test
+                scan_type_appversion_url_sast_iwa_java "IWA-Java:my-first-scan"
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "appversion-url-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+            self.assertIn("https://ssc.fortifylab.test/html/ssc/version/42/audit", result.stdout)
+
+    def test_appversion_url_fails_closed_when_the_id_cannot_be_resolved(self) -> None:
+        # A garbled/error table (or a future fcli output-shape change)
+        # shouldn't produce a broken link -- fail rather than printing a
+        # URL built from non-numeric junk.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                "echo 'No application version found' >&2\n"
+                "exit 1\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                SSC_URL=https://ssc.fortifylab.test
+                url="$(scan_type_appversion_url_sast_iwa_java "IWA-Java:my-first-scan")"
+                printf 'RC=%s URL=[%s]\\n' "$?" "$url"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "appversion-url-fail-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=1", result.stdout, result.stdout + result.stderr)
+            self.assertIn("URL=[]", result.stdout)
+
     def test_setup_appversion_step_creates_the_appversion_if_missing(self) -> None:
         # `sc-sast scan start --publish-to` resolves the target appversion
         # via SSC's getRequiredAppVersion, which throws rather than
@@ -389,13 +491,15 @@ class ScanDemoContractTests(unittest.TestCase):
                 bin_dir / "fcli",
                 "#!/usr/bin/env bash\n"
                 f'printf \'%s\\n\' "$*" > "{captured}"\n'
-                "printf 'scanState: COMPLETE\\n'\n"
+                "printf 'Job token  Has files  Scan state  Publish state  SSC processing state  Endpoint version  Action\\n'\n"
+                "printf 'tok true COMPLETED COMPLETED PROCESS_COMPLETE 4 SCAN_REQUESTED\\n'\n"
                 "exit 0\n",
             )
             command = """
                 export WIZARD_NOMAIN=1 NO_COLOR=1
                 export FORTIFY_FCLI_INSTALL_DIR="$2"
                 export PATH="$2:$PATH"
+                export FORTIFY_FIRST_SCAN_POLL_INTERVAL=0 FORTIFY_FIRST_SCAN_POLL_TIMEOUT=5
                 source "$1"
                 FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
                 scan_type_poll_sast_iwa_java
@@ -411,6 +515,135 @@ class ScanDemoContractTests(unittest.TestCase):
             args = captured.read_text(encoding="utf-8")
             self.assertIn("::first_scan_job::jobToken", args)
             self.assertNotIn("::first_scan_job::scanId", args)
+
+    def test_poll_prints_a_clean_one_line_status_not_a_mangled_repeated_table(self) -> None:
+        # `sc-sast scan status` prints its header + one data row on every
+        # call; collapsing that to one line with tr+head-c mashed the header
+        # into the data row and cut it off mid-word (reported from a real
+        # run). Print just the scan/publish state fields from the data row.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                "cat <<'TABLE'\n"
+                "Job token                             Has files  Scan state  Publish state  SSC processing state  Endpoint version  Action\n"
+                "d2d63825-eaa5-4dd2-b7e9-24a4076e861d  true       COMPLETED   COMPLETED      PROCESS_COMPLETE       4                 SCAN_REQUESTED\n"
+                "TABLE\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                export FORTIFY_FIRST_SCAN_POLL_INTERVAL=0 FORTIFY_FIRST_SCAN_POLL_TIMEOUT=5
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                scan_type_poll_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "poll-format-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            output = result.stdout
+            self.assertIn("RC=0", output, output + result.stderr)
+            self.assertIn(
+                "Scan status: scanState=COMPLETED publishState=COMPLETED sscProcessingState=PROCESS_COMPLETE",
+                output,
+            )
+            self.assertNotIn("Job token", output)
+            self.assertNotIn("SCAN_REQUESTED", output)
+
+    def test_poll_prefixes_each_status_line_with_a_timestamp(self) -> None:
+        # A multi-minute scan showed identical-looking status lines with no
+        # sense of elapsed/wall time -- a timestamp answers "is this still
+        # actually going" without cross-referencing terminal scrollback.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                "cat <<'TABLE'\n"
+                "Job token  Has files  Scan state  Publish state  SSC processing state  Endpoint version  Action\n"
+                "tok true COMPLETED COMPLETED PROCESS_COMPLETE 4 SCAN_REQUESTED\n"
+                "TABLE\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                export FORTIFY_FIRST_SCAN_POLL_INTERVAL=0 FORTIFY_FIRST_SCAN_POLL_TIMEOUT=5
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                scan_type_poll_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "poll-timestamp-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            output = result.stdout
+            self.assertIn("RC=0", output, output + result.stderr)
+            self.assertRegex(output, r"\[\d{2}:\d{2}:\d{2}\] Scan status: scanState=COMPLETED")
+
+    def test_poll_waits_for_ssc_processing_to_finish_not_just_the_scan_job(self) -> None:
+        # Reported from a real run: scan_type_results_sast_iwa_java's
+        # severity summary collapsed into a single "Low" row with the total
+        # count of every issue, instead of four rows (Critical/High/Medium/
+        # Low). Root cause: scanState and publishState reach COMPLETED as
+        # soon as SSC accepts the uploaded artifact, but SSC then indexes
+        # that artifact into issues/folders separately (its own
+        # sscArtifactState) -- querying issue counts before that finishes
+        # returns wrong results. Poll must keep waiting while
+        # sscProcessingState is still PROCESSING, only stopping once it
+        # reaches PROCESS_COMPLETE.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            call_count_file = Path(directory) / "call-count.txt"
+            call_count_file.write_text("0", encoding="utf-8")
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                f'count_file="{call_count_file}"\n'
+                'n="$(cat "$count_file")"\n'
+                'n=$((n + 1))\n'
+                'printf "%s" "$n" > "$count_file"\n'
+                "printf 'Job token  Has files  Scan state  Publish state  SSC processing state  Endpoint version  Action\\n'\n"
+                'if [ "$n" -lt 3 ]; then\n'
+                "  printf 'tok true COMPLETED COMPLETED PROCESSING 4 SCAN_REQUESTED\\n'\n"
+                "else\n"
+                "  printf 'tok true COMPLETED COMPLETED PROCESS_COMPLETE 4 SCAN_REQUESTED\\n'\n"
+                "fi\n"
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                export FORTIFY_FIRST_SCAN_POLL_INTERVAL=0 FORTIFY_FIRST_SCAN_POLL_TIMEOUT=30
+                source "$1"
+                FORTIFY_FIRST_SCAN_SSC_SESSION=fortifylab-first-scan
+                scan_type_poll_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "poll-ssc-processing-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            output = result.stdout
+            self.assertIn("RC=0", output, output + result.stderr)
+            self.assertIn("sscProcessingState=PROCESSING", output)
+            self.assertIn("sscProcessingState=PROCESS_COMPLETE", output)
+            self.assertEqual(int(call_count_file.read_text(encoding="utf-8")), 3)
 
     def test_verify_accepts_completed_state_as_success(self) -> None:
         command = """

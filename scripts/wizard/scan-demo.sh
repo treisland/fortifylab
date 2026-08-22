@@ -170,13 +170,37 @@ scan_type_submit_sast_iwa_java() {
 # scan_type_verify_sast_iwa_java decides whether that terminal state means
 # the scan actually succeeded.
 scan_type_poll_sast_iwa_java() {
-    local fcli_bin elapsed=0 status
+    local fcli_bin elapsed=0 status data_row scan_state publish_state ssc_state
     fcli_bin="$(fcli_path)" || return 1
     while [ "$elapsed" -lt "$FORTIFY_FIRST_SCAN_POLL_TIMEOUT" ]; do
         status="$("$fcli_bin" sc-sast scan status ::first_scan_job::jobToken \
             --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" 2>&1)"
-        note "Scan status: $(printf '%s' "$status" | tr '\n' ' ' | head -c 200)"
-        if printf '%s' "$status" | grep -qiE 'COMPLETE|FAULTED|FAILED|CANCELED|TIMEOUT'; then
+        # Default table output is "Job token, Has files, Scan state, Publish
+        # state, SSC processing state, Endpoint version, Action" with the
+        # header repeated on every call; collapsing that whole thing to one
+        # line (as before) mashed the header into the data row. Print just
+        # the data row's scan/publish state instead of the full table.
+        data_row="$(printf '%s\n' "$status" | tail -n1)"
+        scan_state="$(printf '%s' "$data_row" | awk '{print $3}')"
+        publish_state="$(printf '%s' "$data_row" | awk '{print $4}')"
+        ssc_state="$(printf '%s' "$data_row" | awk '{print $5}')"
+        note "[$(date '+%H:%M:%S')] Scan status: scanState=$scan_state publishState=$publish_state sscProcessingState=$ssc_state"
+        if printf '%s' "$status" | grep -qiE 'FAULTED|FAILED|CANCELED|TIMEOUT'; then
+            LAST_SCAN_STATUS="$status"
+            return 0
+        fi
+        # scanState/publishState reaching COMPLETED only means the scan job
+        # itself finished and SSC accepted the upload -- SSC then indexes
+        # the artifact into issues/folders separately (its own
+        # sscArtifactState, terminal value PROCESS_COMPLETE per fcli's
+        # SCSastScanJobArtifactState; falls back to publishState's value on
+        # older endpoints that don't report it). Querying issue counts
+        # before that finishes returns incomplete/collapsed results --
+        # confirmed against a real run: a single "Low" row summing every
+        # severity instead of four, while scanState/publishState already
+        # showed COMPLETED and sscProcessingState still showed PROCESSING.
+        if [ "$scan_state" = "COMPLETED" ] && [ "$publish_state" = "COMPLETED" ] \
+            && { [ "$ssc_state" = "PROCESS_COMPLETE" ] || [ "$ssc_state" = "COMPLETED" ]; }; then
             LAST_SCAN_STATUS="$status"
             return 0
         fi
@@ -205,7 +229,27 @@ scan_type_results_sast_iwa_java() {
     local av_name="$1" fcli_bin
     fcli_bin="$(fcli_path)" || return 1
     section "Severity summary for $av_name"
-    "$fcli_bin" ssc issue count --av="$av_name" --by=folder --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION"
+    # --by is matched case-sensitively against SSC's own dynamic grouping
+    # list (display name or GUID); "folder" (lowercase) doesn't match.
+    # Leave it unset so fcli uses its own --by default (FOLDER), which is
+    # guaranteed to match rather than guessing at SSC's exact casing.
+    "$fcli_bin" ssc issue count --av="$av_name" --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION"
+}
+
+# Resolves av_name to its numeric SSC appversion id and prints the direct
+# web UI link for it -- same URL shape SSC's own built-in fcli actions use
+# (e.g. #ssc.appVersionAuditUrl in the action SpEL functions):
+# <SSC_URL>/html/ssc/version/<id>/audit. Prints nothing and returns 1 if the
+# id can't be resolved, so callers can fall back to a plain name reference.
+scan_type_appversion_url_sast_iwa_java() {
+    local av_name="$1" fcli_bin id
+    fcli_bin="$(fcli_path)" || return 1
+    id="$("$fcli_bin" ssc appversion get "$av_name" --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" -o table=id 2>/dev/null | tail -n1 | awk '{print $1}')"
+    case "$id" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ -n "${SSC_URL:-}" ] || return 1
+    printf '%s/html/ssc/version/%s/audit\n' "$SSC_URL" "$id"
 }
 
 scan_type_logout_sast_iwa_java() {
@@ -284,14 +328,14 @@ scan_demo_menu() {
     fcli ssc action run --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION package --source-dir <src> --av <av> --output <zip>
     fcli sc-sast scan start --file=<zip> --publish-to=<av> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
     fcli sc-sast scan status <jobToken> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION   (polled)
-    fcli ssc issue count --av=<av> --by=folder --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli ssc issue count --av=<av> --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
     fcli ssc session logout --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION   (only if this run logged in)
 
 EOF
     scan_type_prereqs_sast_iwa_java || { press_any; return 1; }
     confirm "Continue?" || return 0
 
-    local workdir av_name rc=0 SCAN_DEMO_SESSION_OWNED=0 acquire_rc=0
+    local workdir av_name av_url rc=0 SCAN_DEMO_SESSION_OWNED=0 acquire_rc=0
     scan_demo_acquire_session || acquire_rc=$?
     if [ "$acquire_rc" -eq 2 ]; then
         press_any
@@ -333,7 +377,13 @@ EOF
     fi
     if [ "$rc" -eq 0 ]; then
         scan_type_results_sast_iwa_java "$av_name"
-        note "Full detail: open $av_name in the SSC web UI, or run 'fcli ssc issue list --av=\"$av_name\"'."
+        av_url="$(scan_type_appversion_url_sast_iwa_java "$av_name")"
+        if [ -n "$av_url" ]; then
+            note "Full detail: $av_url"
+        else
+            note "Full detail: open $av_name in the SSC web UI, or run 'fcli ssc issue list --av=\"$av_name\"'."
+        fi
+        note "Or run 'fcli ssc issue list --av=\"$av_name\"' for full detail on the command line."
     fi
 
     press_any
