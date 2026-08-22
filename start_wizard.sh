@@ -76,6 +76,8 @@ source "$FORTIFY_HOME_K8S/scripts/lib/tls.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/wizard-logging.sh"
 # shellcheck source=scripts/lib/coredns-lab-hosts.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/coredns-lab-hosts.sh"
+# shellcheck source=scripts/lib/k8s-scale.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/k8s-scale.sh"
 
 
 # ============================================================
