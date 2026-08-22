@@ -253,8 +253,6 @@ class GuidedWizardTests(unittest.TestCase):
             "FortifyLab does not store or display that vendor default password",
             "Credential availability",
             "Certificate trust",
-            "First scan handoff",
-            "docs/examples/first-scan",
         ):
             self.assertIn(expected, WIZARD)
         self.assertNotIn("see initial admin password in SSC startup logs", WIZARD)
@@ -267,12 +265,18 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("2. Tools and FCLI readiness", completion_menu)
         self.assertIn("2) fcli_tools_menu", completion_menu)
 
-    def test_completion_screen_links_first_scan_handoff(self) -> None:
-        self.assertIn("First scan handoff", WIZARD)
-        self.assertIn("first_scan_handoff()", WIZARD)
+    def test_completion_screen_links_the_real_first_scan_demo(self) -> None:
+        # The old "First scan handoff" wizard entry only generated
+        # placeholder starter scripts; scan_demo_menu() actually runs a
+        # real ScanCentral SAST scan. first_scan_handoff() itself (and its
+        # underlying generate-first-scan-scripts.sh) is intentionally kept
+        # as a standalone, documented CLI path (docs/operations/first-scan.md)
+        # for the broader SAST+DAST placeholder walkthrough -- just no
+        # longer wired into the guided wizard's completion menu.
+        self.assertNotIn("first_scan_handoff()", WIZARD)
         completion_menu = WIZARD.split("guided_completion_screen()", 1)[1].split("guided_deployment_menu()", 1)[0]
-        self.assertIn("3. First scan handoff", completion_menu)
-        self.assertIn("3) first_scan_handoff", completion_menu)
+        self.assertIn("3. Run a first scan", completion_menu)
+        self.assertIn("3) scan_demo_menu", completion_menu)
 
     def test_completion_screen_lists_profile_status_and_next_actions(self) -> None:
         result = self.run_wizard_functions(
@@ -1234,7 +1238,7 @@ class GuidedWizardTests(unittest.TestCase):
 
     def test_prerequisite_menu_shows_completion_indicators(self) -> None:
         self.assertIn("prereqs_status_table()", WIZARD)
-        self.assertIn('"Host prerequisites: $ready/4 ready."', WIZARD)
+        self.assertIn('"Host prerequisites: $ready/5 ready."', WIZARD)
         self.assertIn("All prerequisite indicators are complete", WIZARD)
         self.assertIn("Next missing: group access in this shell", WIZARD)
         self.assertIn("Refresh group access (microk8s/docker) now", WIZARD)

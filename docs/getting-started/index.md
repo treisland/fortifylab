@@ -249,10 +249,17 @@ Two application tasks still require a person:
 
 Confirm that MySQL, SSC, and the SAST controller and worker are healthy before
 following the [first successful scan](../operations/first-scan.md) walkthrough.
-The completion screen also offers a **First scan handoff** that points to
-placeholder SAST/DAST command starters under `docs/examples/first-scan/`.
-Those starters keep SSC as the primary result destination, keep FoD optional,
-and require tokens and target URLs through environment variables.
+The completion screen also offers **Run a first scan**, which runs the same
+one-click demo described below directly from guided setup.
+
+For a broader SAST+DAST placeholder command walkthrough (useful when FoD is
+also in play, or for planning a DAST scan), run
+`docs/examples/first-scan/generate-first-scan-scripts.sh` directly -- it
+writes local starter scripts with placeholders only, keeping SSC as the
+primary result destination and requiring tokens and target URLs through
+environment variables. It's no longer wired into the guided wizard's
+completion menu, since the one-click demo now covers the SAST/IWA-Java case
+end to end with real results instead of starter scripts to fill in.
 
 Once SSC and ScanCentral SAST report healthy, the main menu's **Essentials**
 screen also surfaces **5. First-scan one-click demo (SAST · IWA-Java)**

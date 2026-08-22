@@ -1777,39 +1777,6 @@ guided_completion_print_next_steps() {
 }
 
 
-first_scan_handoff() {
-    local default_dir="${HOME:-.}/fortifylab-first-scan" choice output_dir
-    title "First scan handoff"
-    cat <<EOF
-
-  This handoff prepares starter commands for a first synthetic SAST scan and a
-  conservative DAST planning checklist. SSC remains the primary lab system of
-  record. FoD is optional and only shown as a placeholder path.
-
-  The generator writes local starter scripts with placeholders only. Tokens,
-  passwords, client secrets, and target authorization details must be provided
-  through environment variables at runtime and are not written by the wizard.
-
-  Documentation:
-    docs/operations/first-scan.md
-    docs/examples/first-scan/README.md
-
-  Default output directory:
-    $default_dir
-
-EOF
-    confirm "Generate first-scan starter scripts now?" || { press_any; return; }
-    ask output_dir "Output directory [$default_dir]:"
-    output_dir="${output_dir:-$default_dir}"
-    "$FORTIFY_HOME_K8S/docs/examples/first-scan/generate-first-scan-scripts.sh" "$output_dir" || {
-        error "Could not generate first-scan starter scripts."
-        press_any
-        return 1
-    }
-    note "Generated first-scan starters in $output_dir. Review them before use."
-    press_any
-}
-
 guided_completion_screen() {
     local choice
     while true; do
@@ -1834,7 +1801,7 @@ EOF
 
   1. Access & credentials
   2. Tools and FCLI readiness
-  3. First scan handoff
+  3. Run a first scan
   4. Certificate trust instructions
   5. View deployment plan summary
   6. View wizard log
@@ -1847,7 +1814,7 @@ EOF
         case "$choice" in
             1) urls_creds ;;
             2) fcli_tools_menu ;;
-            3) first_scan_handoff ;;
+            3) scan_demo_menu ;;
             4) certificate_trust_handoff ;;
             5) wizard_deployment_plan; press_any ;;
             6) wizard_log_viewer ;;
