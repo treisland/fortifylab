@@ -15,12 +15,13 @@
 #
 # Scan-type shape (Phase 1 of the design): every scan type implements
 # scan_type_prereqs_<type>, scan_type_login_<type>, scan_type_sensor_check_<type>,
-# scan_type_setup_appversion_<type>, scan_type_acquire_<type>,
-# scan_type_package_<type>, scan_type_submit_<type>, scan_type_poll_<type>,
-# scan_type_verify_<type>, scan_type_results_<type>, scan_type_logout_<type>.
-# scan_demo_run dispatches through that shape by name, so adding SCA
-# (Debricked) or DAST later is a new set of functions, not a rework of the
-# menu/orchestration below. Only "sast_iwa_java" exists today.
+# scan_type_rulepack_check_<type>, scan_type_setup_appversion_<type>,
+# scan_type_acquire_<type>, scan_type_package_<type>, scan_type_submit_<type>,
+# scan_type_poll_<type>, scan_type_verify_<type>, scan_type_results_<type>,
+# scan_type_logout_<type>. scan_demo_run dispatches through that shape by
+# name, so adding SCA (Debricked) or DAST later is a new set of functions,
+# not a rework of the menu/orchestration below. Only "sast_iwa_java" exists
+# today.
 
 FORTIFY_FIRST_SCAN_APP="${FORTIFY_FIRST_SCAN_APP:-IWA-Java}"
 FORTIFY_FIRST_SCAN_REPO_URL="${FORTIFY_FIRST_SCAN_REPO_URL:-https://github.com/fortify/IWA-Java}"
@@ -39,8 +40,13 @@ FORTIFY_FIRST_SCAN_POLL_TIMEOUT="${FORTIFY_FIRST_SCAN_POLL_TIMEOUT:-1800}"
 scan_type_prereqs_sast_iwa_java() {
     local ok=1
     if ! fcli_path >/dev/null 2>&1; then
-        error "fcli is not installed. Use Tools and FCLI readiness -> Install or update FCLI."
-        ok=0
+        if confirm "fcli is not installed. Install it now?"; then
+            fcli_install_or_update
+        fi
+        if ! fcli_path >/dev/null 2>&1; then
+            error "fcli is not installed. Use Tools and FCLI readiness -> Install or update FCLI."
+            ok=0
+        fi
     fi
     if [ -z "${SSC_URL:-}" ]; then
         error "SSC_URL is not set. Configure it before running the first-scan demo."
@@ -51,7 +57,10 @@ scan_type_prereqs_sast_iwa_java() {
         ok=0
     fi
     command -v git >/dev/null 2>&1 || { error "git is required to clone $FORTIFY_FIRST_SCAN_APP."; ok=0; }
-    command -v mvn >/dev/null 2>&1 || { error "Maven (mvn) is required to package $FORTIFY_FIRST_SCAN_APP for ScanCentral SAST."; ok=0; }
+    if ! command -v mvn >/dev/null 2>&1; then
+        error "Maven (mvn) is required to package $FORTIFY_FIRST_SCAN_APP for ScanCentral SAST. Install it from Advanced setup -> Install prerequisites."
+        ok=0
+    fi
     [ "$ok" -eq 1 ]
 }
 
@@ -105,6 +114,25 @@ scan_type_sensor_check_sast_iwa_java() {
     if printf '%s' "$output" | grep -qiE 'no (sensors|entries|results) (found|available)|^\s*$'; then
         error "No ScanCentral SAST sensor is registered. Submitting now would queue forever."
         note "Confirm a worker is deployed and connected before retrying."
+        return 1
+    fi
+}
+
+# Fails closed if SSC has no Fortify Security Content rulepacks installed --
+# a scan submitted against an empty rulepack set finds nothing, which looks
+# indistinguishable from "the demo worked but the app is secure" unless
+# caught here first.
+scan_type_rulepack_check_sast_iwa_java() {
+    local fcli_bin output line_count
+    fcli_bin="$(fcli_path)" || return 1
+    output="$("$fcli_bin" ssc system-state list-rulepacks --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" 2>&1)" || {
+        error "Could not list SSC Fortify Security Content rulepacks: $output"
+        return 1
+    }
+    line_count="$(printf '%s\n' "$output" | grep -cv '^[[:space:]]*$')"
+    if [ "$line_count" -le 1 ]; then
+        error "No Fortify Security Content rulepacks are installed in SSC. A scan would find nothing."
+        note "Update Fortify Security Content in SSC before running the first-scan demo."
         return 1
     fi
 }
@@ -323,6 +351,7 @@ scan_demo_menu() {
 
     fcli ssc session login --url $SSC_URL --token=*** --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
     fcli sc-sast sensor list --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
+    fcli ssc system-state list-rulepacks --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION
     fcli ssc action run --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION setup-appversion --av <av>
     git clone --depth 1 $FORTIFY_FIRST_SCAN_REPO_URL
     fcli ssc action run --ssc-session=$FORTIFY_FIRST_SCAN_SSC_SESSION package --source-dir <src> --av <av> --output <zip>
@@ -353,6 +382,10 @@ EOF
     note "Checking for an available ScanCentral SAST sensor..."
     scan_type_sensor_check_sast_iwa_java || { rc=1; }
 
+    if [ "$rc" -eq 0 ]; then
+        note "Checking for installed SSC Fortify Security Content..."
+        scan_type_rulepack_check_sast_iwa_java || rc=1
+    fi
     if [ "$rc" -eq 0 ]; then
         note "Ensuring $av_name exists in SSC..."
         scan_type_setup_appversion_sast_iwa_java "$av_name" || rc=1

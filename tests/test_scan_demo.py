@@ -55,6 +55,9 @@ class ScanDemoContractTests(unittest.TestCase):
         )
         self.assertIn("fcli sc-sast sensor list --ssc-session=fortifylab-first-scan", output)
         self.assertIn(
+            "fcli ssc system-state list-rulepacks --ssc-session=fortifylab-first-scan", output
+        )
+        self.assertIn(
             "fcli ssc action run --ssc-session=fortifylab-first-scan setup-appversion --av <av>", output
         )
         self.assertIn("git clone --depth 1 https://github.com/fortify/IWA-Java", output)
@@ -74,6 +77,7 @@ class ScanDemoContractTests(unittest.TestCase):
             "scan_type_prereqs_sast_iwa_java",
             "scan_type_login_sast_iwa_java",
             "scan_type_sensor_check_sast_iwa_java",
+            "scan_type_rulepack_check_sast_iwa_java",
             "scan_type_setup_appversion_sast_iwa_java",
             "scan_type_acquire_sast_iwa_java",
             "scan_type_package_sast_iwa_java",
@@ -186,6 +190,59 @@ class ScanDemoContractTests(unittest.TestCase):
             self.assertIn("RC=1", result.stdout)
             self.assertIn("Maven (mvn) is required", result.stdout + result.stderr)
 
+    def test_prereqs_offers_to_install_fcli_when_missing_and_respects_decline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                confirm() { return 1; }
+                fcli_install_or_update() { echo SHOULD_NOT_BE_CALLED; }
+                SSC_URL=https://ssc.fortifylab.test
+                FORTIFY_FIRST_SCAN_REPO_URL=https://example.invalid/iwa-java.git
+                scan_type_prereqs_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "prereqs-fcli-declined-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=1", result.stdout)
+            self.assertIn("fcli is not installed", result.stdout + result.stderr)
+            self.assertNotIn("SHOULD_NOT_BE_CALLED", result.stdout)
+
+    def test_prereqs_installs_fcli_inline_when_missing_and_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                confirm() { return 0; }
+                fcli_install_or_update() {
+                    printf '#!/usr/bin/env bash\\nexit 0\\n' > "$FORTIFY_FCLI_INSTALL_DIR/fcli"
+                    chmod +x "$FORTIFY_FCLI_INSTALL_DIR/fcli"
+                }
+                SSC_URL=https://ssc.fortifylab.test
+                FORTIFY_FIRST_SCAN_REPO_URL=https://example.invalid/iwa-java.git
+                scan_type_prereqs_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "prereqs-fcli-installed-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+
     def test_sensor_check_fails_closed_when_no_sensor_is_registered(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bin_dir = Path(directory) / "bin"
@@ -233,6 +290,65 @@ class ScanDemoContractTests(unittest.TestCase):
             """
             result = subprocess.run(
                 ["bash", "-c", command, "sensor-ok-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=0", result.stdout, result.stdout + result.stderr)
+
+    def test_rulepack_check_fails_closed_when_no_rulepacks_are_installed(self) -> None:
+        # A scan submitted against an empty rulepack set finds nothing --
+        # indistinguishable from "the demo worked but found no issues"
+        # unless caught here first.
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                'if [[ "$*" == *"list-rulepacks"* ]]; then exit 0; fi\n'
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                scan_type_rulepack_check_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "rulepack-empty-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("RC=1", result.stdout)
+            self.assertIn(
+                "No Fortify Security Content rulepacks are installed", result.stdout + result.stderr
+            )
+
+    def test_rulepack_check_passes_when_rulepacks_are_installed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            _write_executable(
+                bin_dir / "fcli",
+                "#!/usr/bin/env bash\n"
+                'if [[ "$*" == *"list-rulepacks"* ]]; then '
+                "printf 'Id  Name  Updated\\n1   Core Rulepack  2026-01-01\\n'; exit 0; fi\n"
+                "exit 0\n",
+            )
+            command = """
+                export WIZARD_NOMAIN=1 NO_COLOR=1
+                export FORTIFY_FCLI_INSTALL_DIR="$2"
+                export PATH="$2:$PATH"
+                source "$1"
+                scan_type_rulepack_check_sast_iwa_java
+                printf 'RC=%s\\n' "$?"
+            """
+            result = subprocess.run(
+                ["bash", "-c", command, "rulepack-ok-test", str(ROOT / "start_wizard.sh"), str(bin_dir)],
                 cwd=ROOT,
                 text=True,
                 capture_output=True,
@@ -876,6 +992,7 @@ class ScanDemoContractTests(unittest.TestCase):
                 scan_type_prereqs_sast_iwa_java() {{ return 0; }}
                 scan_type_session_usable_sast_iwa_java() {{ return 0; }}
                 scan_type_sensor_check_sast_iwa_java() {{ return 0; }}
+                scan_type_rulepack_check_sast_iwa_java() {{ return 0; }}
                 scan_type_setup_appversion_sast_iwa_java() {{ printf '%s' "$1" > "{captured}"; return 1; }}
                 scan_demo_menu
             """
@@ -897,6 +1014,7 @@ class ScanDemoContractTests(unittest.TestCase):
             scan_type_prereqs_sast_iwa_java() { return 0; }
             scan_type_login_sast_iwa_java() { return 0; }
             scan_type_sensor_check_sast_iwa_java() { return 0; }
+            scan_type_rulepack_check_sast_iwa_java() { return 0; }
             scan_type_setup_appversion_sast_iwa_java() { return 0; }
             scan_type_acquire_sast_iwa_java() { return 0; }
             scan_type_package_sast_iwa_java() { return 0; }
