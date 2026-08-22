@@ -184,7 +184,7 @@ scan_type_poll_sast_iwa_java() {
         scan_state="$(printf '%s' "$data_row" | awk '{print $3}')"
         publish_state="$(printf '%s' "$data_row" | awk '{print $4}')"
         ssc_state="$(printf '%s' "$data_row" | awk '{print $5}')"
-        note "Scan status: scanState=$scan_state publishState=$publish_state sscProcessingState=$ssc_state"
+        note "[$(date '+%H:%M:%S')] Scan status: scanState=$scan_state publishState=$publish_state sscProcessingState=$ssc_state"
         if printf '%s' "$status" | grep -qiE 'FAULTED|FAILED|CANCELED|TIMEOUT'; then
             LAST_SCAN_STATUS="$status"
             return 0
@@ -234,6 +234,22 @@ scan_type_results_sast_iwa_java() {
     # Leave it unset so fcli uses its own --by default (FOLDER), which is
     # guaranteed to match rather than guessing at SSC's exact casing.
     "$fcli_bin" ssc issue count --av="$av_name" --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION"
+}
+
+# Resolves av_name to its numeric SSC appversion id and prints the direct
+# web UI link for it -- same URL shape SSC's own built-in fcli actions use
+# (e.g. #ssc.appVersionAuditUrl in the action SpEL functions):
+# <SSC_URL>/html/ssc/version/<id>/audit. Prints nothing and returns 1 if the
+# id can't be resolved, so callers can fall back to a plain name reference.
+scan_type_appversion_url_sast_iwa_java() {
+    local av_name="$1" fcli_bin id
+    fcli_bin="$(fcli_path)" || return 1
+    id="$("$fcli_bin" ssc appversion get "$av_name" --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" -o table=id 2>/dev/null | tail -n1 | awk '{print $1}')"
+    case "$id" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ -n "${SSC_URL:-}" ] || return 1
+    printf '%s/html/ssc/version/%s/audit\n' "$SSC_URL" "$id"
 }
 
 scan_type_logout_sast_iwa_java() {
@@ -319,7 +335,7 @@ EOF
     scan_type_prereqs_sast_iwa_java || { press_any; return 1; }
     confirm "Continue?" || return 0
 
-    local workdir av_name rc=0 SCAN_DEMO_SESSION_OWNED=0 acquire_rc=0
+    local workdir av_name av_url rc=0 SCAN_DEMO_SESSION_OWNED=0 acquire_rc=0
     scan_demo_acquire_session || acquire_rc=$?
     if [ "$acquire_rc" -eq 2 ]; then
         press_any
@@ -361,7 +377,13 @@ EOF
     fi
     if [ "$rc" -eq 0 ]; then
         scan_type_results_sast_iwa_java "$av_name"
-        note "Full detail: open $av_name in the SSC web UI, or run 'fcli ssc issue list --av=\"$av_name\"'."
+        av_url="$(scan_type_appversion_url_sast_iwa_java "$av_name")"
+        if [ -n "$av_url" ]; then
+            note "Full detail: $av_url"
+        else
+            note "Full detail: open $av_name in the SSC web UI, or run 'fcli ssc issue list --av=\"$av_name\"'."
+        fi
+        note "Or run 'fcli ssc issue list --av=\"$av_name\"' for full detail on the command line."
     fi
 
     press_any
