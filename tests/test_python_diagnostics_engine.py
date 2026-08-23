@@ -13,6 +13,14 @@ from fortifylab.diagnostics.registry import docker_auth_findings, regcred_findin
 
 
 class PythonDiagnosticsEngineTests(unittest.TestCase):
+    def test_default_runner_calls_run_command_with_a_valid_timeout_kwarg(self) -> None:
+        # Regression: _default_runner previously called run_command(...,
+        # timeout_seconds=20), but run_command's real parameter is
+        # `timeout` -- a TypeError on every real (non-injected-runner) use,
+        # uncaught because every other test here injects a fake runner.
+        result = ClusterCollector._default_runner(("true",))
+        self.assertTrue(result.ok)
+
     def test_cluster_collector_uses_read_only_kubectl_and_helm_commands(self) -> None:
         commands: list[tuple[str, ...]] = []
 

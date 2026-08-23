@@ -72,6 +72,17 @@ class GuidedDeployScreen(Screen):
             self.armed = not self.armed
             return NavigationCommand.stay()
         if event.key == "enter":
-            self.last_result = self.service.run_next(execute=self.armed)
+            executing = self.armed
+            result = self.service.run_next(execute=executing)
+            if result is not None:
+                self.last_result = result
+            if executing:
+                # Auto-disarm after every real execution: arming is a
+                # per-step decision, not a per-session one. Without this, a
+                # stray extra "enter" (key repeat, a fumbled double-press)
+                # while still armed would silently run the *next* real
+                # deployment step against the live cluster instead of
+                # falling back to preview mode.
+                self.armed = False
             return NavigationCommand.stay()
         return NavigationCommand.stay()

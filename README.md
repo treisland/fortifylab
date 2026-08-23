@@ -118,8 +118,13 @@ preview, `q` to quit) is available from a terminal with:
 ./bin/fortifylab tui --interactive
 ```
 
-It's navigation-only so far — selecting an item shows its description, the
-same as `deploy --plan` does today, not a live run.
+Most items are still navigation-only — selecting one shows its description,
+the same as `deploy --plan` does today, not a live run. One exception:
+selecting **Deploy / Resume** and pressing `o` opens a live Guided
+deployment screen for the SSC-only profile. It previews dry-run by default
+and requires pressing `a` to arm real execution before `enter` runs
+anything against your cluster — the same posture as the Bash wizard's
+Guided deployment.
 
 Install `requirements-python.txt` only if you're developing or previewing
 those CLI/TUI slices (kept separate from `requirements-docs.txt`, which is

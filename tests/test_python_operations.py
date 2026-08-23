@@ -9,6 +9,14 @@ from fortifylab.operations import OperationCatalog, OperationImpact, OperationKi
 
 
 class PythonOperationsTests(unittest.TestCase):
+    def test_default_runner_calls_run_command_with_a_valid_timeout_kwarg(self) -> None:
+        # Regression: _default_runner previously called run_command(...,
+        # timeout_seconds=600), but run_command's real parameter is
+        # `timeout` -- a TypeError on every real (non-injected-runner) use,
+        # uncaught because every other test here injects a fake runner.
+        result = OperationRunner._default_runner(("true",))
+        self.assertTrue(result.ok)
+
     def test_catalog_describes_certificate_secret_app_log_and_runbook_operations(self) -> None:
         catalog = OperationCatalog()
         specs = catalog.list()

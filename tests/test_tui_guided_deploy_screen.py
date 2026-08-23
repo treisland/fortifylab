@@ -61,6 +61,30 @@ class GuidedDeployScreenTests(unittest.TestCase):
         self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
         self.assertIn("Operation completed", screen.render())
 
+    def test_arming_auto_disarms_after_one_real_execution(self) -> None:
+        # Security review finding: arming was session-sticky, so a stray
+        # extra "enter" after arming would silently execute the *next*
+        # step for real too. Arming must be a one-shot, per-step decision.
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("true",))
+        screen = GuidedDeployScreen(style=TerminalStyle(color=False, symbols=False), service=service, armed=True)
+
+        screen.handle_event(KeyEvent("enter"))
+        self.assertFalse(screen.armed)
+        self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
+
+        # A follow-up "enter" without re-arming must stay a dry-run preview.
+        screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(service.states["secrets"].status, StepStatus.PENDING)
+
+    def test_disarming_without_executing_leaves_armed_state_unchanged(self) -> None:
+        # Pressing "enter" while not armed is a dry-run preview and must not
+        # touch the armed flag either way.
+        screen = _plain_screen()
+        screen.handle_event(KeyEvent("enter"))
+        self.assertFalse(screen.armed)
+
     def test_q_pops_back_to_the_previous_screen(self) -> None:
         screen = _plain_screen()
         command = screen.handle_event(KeyEvent("q"))

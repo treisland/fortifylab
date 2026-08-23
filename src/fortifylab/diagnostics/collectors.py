@@ -48,4 +48,4 @@ class ClusterCollector:
 
     @staticmethod
     def _default_runner(command: tuple[str, ...]) -> CommandResult:
-        return run_command(command, timeout_seconds=20)
+        return run_command(command, timeout=20)

@@ -104,7 +104,10 @@ one profile (SSC-only).
   renders the whole plan's per-step status, is dry-run by default, and
   requires pressing `a` to arm real execution before `enter` does anything
   destructive -- the same dry-run-unless-told-otherwise posture
-  `OperationCatalog`/`OperationRunner` already use elsewhere.
+  `OperationCatalog`/`OperationRunner` already use elsewhere. Arming is
+  one-shot: it auto-disarms after each real execution, so a stray extra
+  `enter` afterward falls back to a dry-run preview instead of silently
+  running the next step for real too (security review finding, fixed).
 - Reachable from the main menu: select "Deploy / Resume", press `o` to
   open. `MainMenuScreen` gained a small `key -> screen factory` registry
   (`_SCREEN_FACTORIES`) so future milestones add a real screen by
@@ -127,6 +130,17 @@ ordered plan; dry-run previews are repeatable and never advance the DAG;
 `execute=True` runs a step for real, commits its status, and unlocks
 dependents; `GuidedDeployScreen` is reachable from the main menu and starts
 dry-run by default. All met in this PR.
+
+**Known follow-up, not fixed here:** `DeployService` imports
+`build_profile` from `fortifylab.tui.profiles` (deferred inside `__init__`
+to avoid a circular import with `tui.screens.guided_deploy`). Code review
+correctly flagged this as a services-depending-on-tui layering inversion --
+`tui/profiles.py` is pure profile data with no rendering/terminal I/O, it
+just historically sits in the `tui` package. The tactical deferred-import
+fix is sound and covered by tests, but the real fix is relocating that
+profile data to a neutral location (e.g. `fortifylab.orchestration.profiles`)
+so `tui` depends on it too, not the other way around. Deferred to a
+follow-up since it touches already-shipped M1/M2 modules and their tests.
 
 ### M4 — Applications, configuration, logs screens (tracked, not in this PR)
 
