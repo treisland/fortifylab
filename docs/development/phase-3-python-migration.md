@@ -3,6 +3,10 @@
 Phase 3 turns Fortify Lab from a Bash-centered wizard into a Python application
 while preserving the clone-and-run workflow used for demos and classrooms.
 
+For the concrete milestone breakdown, acceptance criteria, and issue tracking
+for the interactive TUI and menu port, see the
+[Python TUI migration roadmap](python-tui-roadmap.md).
+
 ## Primary operators
 
 Phase 3 optimizes for:
