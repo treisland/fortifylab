@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
                 action="store_true",
                 help="render a deterministic guided deployment prototype screen",
             )
+            sub.add_argument(
+                "--interactive",
+                action="store_true",
+                help="open the real interactive operator console (requires a TTY)",
+            )
     return parser
 
 
@@ -177,6 +182,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "tui" and args.demo_screen:
         print(render_guided_step(build_demo_snapshot()), end="")
         return 0
+    if args.command == "tui" and args.interactive:
+        from .app import run_tui
+
+        return run_tui()
     print(args.message)
     return 0
 
