@@ -14,6 +14,7 @@ from .profiles import DeploymentProfile, build_profile, expand_components, profi
 from .router import Router
 from .screens import (
     ApplicationsScreen,
+    CertificatesScreen,
     ConfigurationScreen,
     DashboardAccessScreen,
     DiagnosticsScreen,
@@ -32,6 +33,7 @@ from .theme import TerminalStyle
 
 __all__ = [
     "ApplicationsScreen",
+    "CertificatesScreen",
     "ConfigurationScreen",
     "ControlMode",
     "DashboardAccessScreen",

@@ -119,8 +119,8 @@ preview, `q` to quit) is available from a terminal with:
 ```
 
 Most items are still navigation-only — selecting one shows its description,
-the same as `deploy --plan` does today, not a live run. Ten items are live
-screens instead (press `o` to open): **Deploy / Resume** (a Guided
+the same as `deploy --plan` does today, not a live run. Eleven items are
+live screens instead (press `o` to open): **Deploy / Resume** (a Guided
 deployment screen for the SSC-only profile), **Applications** (start/stop
 for ssc/lim/mysql/postgresql and the sample apps Juice Shop/WebGoat/DVWA),
 **Configuration** (redacted `.env` view plus
@@ -128,11 +128,13 @@ backup/rollback), **Logs** (pick a component, then a pod, then tail it),
 **Kubernetes Dashboard** (generate a 1-hour view-only or administrator
 access token), **URLs & Credentials** (service URLs, short login guidance,
 and an opt-in check of whether a credential is present -- never its
-value), **Diagnostics** (run the read-only collector and write a
-sanitized bundle), **Runbooks** (safe previews of the first-scan, backup,
-and troubleshooting topics), **Tools** (Flight Plans: list the catalog and
-compare a plan's components against the current `.env`), and **Help** (the
-offline Help Center topics). The mutating screens (Deploy, Applications,
+value), **Certificates & Trust** (the mkcert root CA path and lab
+hostnames to import it for), **Diagnostics** (run the read-only collector
+and write a sanitized bundle), **Runbooks** (safe previews of the
+first-scan, backup, and troubleshooting topics), **Tools** (Flight Plans:
+list the catalog and compare a plan's components against the current
+`.env`), and **Help** (the offline Help Center topics). The mutating
+screens (Deploy, Applications,
 Configuration, Kubernetes Dashboard) preview dry-run by default and
 require pressing `a` to arm real execution before `enter` (or, on
 Kubernetes Dashboard, `m`) runs anything against your cluster — the same
@@ -147,9 +149,11 @@ the same reason -- Bash requires typing the literal word `PERSISTENT` for
 those. Promoting a Flight Plan candidate, applying one (writes `.env`),
 and Docker Hub discovery also stay Bash-wizard-only, same reason. Revealing
 an actual credential value from URLs & Credentials stays Bash-wizard-only
-too -- Bash requires typing the literal word `REVEAL` first. The fcli
-activation/trust-import lifecycle also stays Bash-wizard-only, deliberately
-not yet ported (see the roadmap).
+too -- Bash requires typing the literal word `REVEAL` first. Generating or
+regenerating TLS artifacts, bringing your own certificate and key, and
+staging fcli trust configuration also stay Bash-wizard-only -- Certificates
+& Trust is display-only. The fcli activation/trust-import lifecycle also
+stays Bash-wizard-only, deliberately not yet ported (see the roadmap).
 
 `./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`
 and it execs into the Python TUI above (after the same acknowledgement,

@@ -453,13 +453,44 @@ retrieval commands and the standalone SSC login-guidance screen are not
 rendered anywhere in this screen -- that's still Bash-wizard-only, not a
 gap in this PR's own claims.
 
+### M11 — Certificates & Trust screen (fifth pick from the follow-up)
+
+The fifth slice of #446: `certificate_trust_handoff()` in
+`scripts/wizard/operations.sh`. Entirely read-only and static -- no
+`kubectl`/service calls at all, just `.env` values rendered as text.
+
+- `src/fortifylab/tui/screens/certificates.py` (new) —
+  `CertificatesScreen` shows the mkcert root CA path (`ROOTCA_CERT` from
+  `.env`, falling back to `$FORTIFY_CERTS/rootCA.pem` the same way Bash's
+  default does when `ROOTCA_CERT` isn't set) and the five lab hostnames
+  (`ssc`/`lim`/`sast`/`dast`/`dashboard`.`$DOMAIN`), ported verbatim from
+  Bash's text. It never reads or renders `ROOTCA_KEY` (the private key
+  path) or any workload TLS material -- only the public root CA's path.
+- Wired to the existing `MenuItem("certificates", "Certificates & Trust",
+  ...)`, which was added to `OPERATOR_MENU` early in this migration but
+  had never had a screen built for it until now.
+- **Scope trim, deliberate**: the broader "TLS certificates and trust"
+  submenu in `scripts/wizard/setup.sh` -- generating/regenerating lab TLS
+  artifacts, bringing your own certificate and key, staging a root CA
+  export, and staging fcli trust configuration -- is not wired. Every one
+  of those is either mutating (writes certs/keys to disk) or would need
+  free-text input (a BYO cert/key path); none of that exists in the TUI
+  yet.
+
+**Done when:** `CertificatesScreen` is reachable from the main menu (`o`
+on Certificates & Trust); the root CA path and lab hostnames render from
+`.env`, matching Bash's `certificate_trust_handoff()` text; the private
+key path is never rendered anywhere in this screen. All met in this PR.
+Generating, regenerating, or bringing your own TLS material stays
+Bash-wizard-only, not a gap in this PR's own claims.
+
 ## What this PR actually delivers
 
 M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
-(Kubernetes Dashboard access), and M10 (URLs & Credentials) as the first
-four picks from the post-M6 follow-up -- M6 delivered as an opt-in
-preview hook, not a default cutover, because the parity that cutover
-depends on doesn't exist yet.
+(Kubernetes Dashboard access), M10 (URLs & Credentials), and M11
+(Certificates & Trust) as the first five picks from the post-M6
+follow-up -- M6 delivered as an opt-in preview hook, not a default
+cutover, because the parity that cutover depends on doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked
 here rather than claimed. This keeps the claim in this document honest:

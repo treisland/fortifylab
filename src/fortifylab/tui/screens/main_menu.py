@@ -19,6 +19,7 @@ from ..menu import OPERATOR_MENU, MenuItem
 from ..theme import TerminalStyle
 from .applications import ApplicationsScreen
 from .base import NavigationCommand, Screen
+from .certificates import CertificatesScreen
 from .configuration import ConfigurationScreen
 from .dashboard_access import DashboardAccessScreen
 from .diagnostics import DiagnosticsScreen
@@ -38,6 +39,7 @@ _QUIT_KEYS = {"q", "Q"}
 _SCREEN_FACTORIES: dict[str, Callable[[], Screen]] = {
     "deploy": GuidedDeployScreen,
     "applications": ApplicationsScreen,
+    "certificates": CertificatesScreen,
     "configuration": ConfigurationScreen,
     "logs": LogsScreen,
     "diagnostics": DiagnosticsScreen,

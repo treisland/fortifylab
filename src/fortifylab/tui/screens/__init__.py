@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .applications import ApplicationsScreen
 from .base import NavigationCommand, NavigationKind, Screen
+from .certificates import CertificatesScreen
 from .configuration import ConfigurationScreen
 from .dashboard_access import DashboardAccessScreen
 from .diagnostics import DiagnosticsScreen
@@ -20,6 +21,7 @@ __all__ = [
     "NavigationKind",
     "Screen",
     "ApplicationsScreen",
+    "CertificatesScreen",
     "ConfigurationScreen",
     "DashboardAccessScreen",
     "DiagnosticsScreen",
