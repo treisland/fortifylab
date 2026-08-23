@@ -48,6 +48,27 @@ class GuidedTuiPrototypeTests(unittest.TestCase):
         self.assertEqual(output.count(TerminalScreen.ERASE_TO_END), 2)
         self.assertTrue(output.endswith(TerminalScreen.SHOW_CURSOR))
 
+    def test_each_line_is_cleared_to_end_so_a_shorter_line_has_no_leftover_text(self) -> None:
+        # Regression: erasing only from the cursor's final position after
+        # writing the whole frame left stale characters to the right of any
+        # row that got shorter than the previous frame's same row -- the
+        # cursor has already moved past that row by the time a single
+        # end-of-screen erase runs. Each line must be individually cleared
+        # to end-of-line as it's written.
+        stream = io.StringIO()
+        screen = TerminalScreen(stream)
+
+        screen.render("1. Software Security Center    start\n2. MySQL\n")
+        screen.render("1. MySQL\n")
+
+        output = stream.getvalue()
+        self.assertEqual(output.count(TerminalScreen.ERASE_LINE_TO_END), 3)
+        second_render = output.split(TerminalScreen.CURSOR_HOME)[-1]
+        self.assertEqual(
+            second_render,
+            f"1. MySQL{TerminalScreen.ERASE_LINE_TO_END}\n{TerminalScreen.ERASE_TO_END}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
