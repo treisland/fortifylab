@@ -142,10 +142,45 @@ profile data to a neutral location (e.g. `fortifylab.orchestration.profiles`)
 so `tui` depends on it too, not the other way around. Deferred to a
 follow-up since it touches already-shipped M1/M2 modules and their tests.
 
-### M4 — Applications, configuration, logs screens (tracked, not in this PR)
+### M4 — Applications, configuration, logs screens
 
-Port `apps_menu`, `edit_env`, `logs_menu`/`stream_logs` to `Screen`
-subclasses backed by the existing `operations`/`config` packages.
+Ports `apps_menu`, `edit_env`, `logs_menu`/`stream_logs` to `Screen`
+subclasses backed by the existing `operations`/`config` packages -- no new
+service layer needed for applications/configuration, since `OperationCatalog`
++ `OperationRunner` and `ConfigStore` + `envfile` already are that layer.
+
+- `src/fortifylab/tui/screens/applications.py` — `ApplicationsScreen` lists
+  start/stop for the four apps `OperationCatalog` already knows
+  (`ssc`, `lim`, `mysql`, `postgresql`), dry-run by default with the same
+  one-shot arm-to-execute posture as `GuidedDeployScreen`.
+- `src/fortifylab/tui/screens/configuration.py` — `ConfigurationScreen`
+  shows the current `.env` with secret-shaped keys redacted (reusing
+  `envfile.display_value`'s existing `SECRET_KEY_RE` pattern -- not a new
+  redaction rule), plus backup (unarmed, since it's additive/non-destructive)
+  and rollback-to-last-backup (armed).
+- `src/fortifylab/tui/screens/logs.py` + `src/fortifylab/services/logs_service.py`
+  (new) — `LogsScreen` picks a component, looks up matching pods, and either
+  auto-selects a single match or shows the matches to arrow-select --
+  mirroring `should_skip_selection`/`matching_pods` from `operations/logs.py`,
+  which the Bash `logs_menu()` already uses for the same reason. Caught and
+  fixed along the way: `tui.profiles.LOG_SCOPES` values are Bash glob
+  patterns (e.g. `"ssc-webapp*"`), but `matching_pods()` does a plain
+  `str.startswith()` -- the literal `*` defeated every match until the glob
+  suffix is stripped first.
+- **Scope trim, deliberate**: destroy (`apps_menu`'s destroy action) and
+  free-text `.env` value editing are **not** wired in this milestone.
+  Both need typed input (an exact `DESTROY <app>` confirmation phrase, or a
+  key + new value) and the TUI has no text-entry widget yet. Mapping a
+  single keypress to "yes, do the destructive thing" to work around that
+  would defeat the confirmation-phrase design these operations already
+  have; better to leave both as Bash-wizard-only until real text entry
+  exists, than to build an unsafe shortcut.
+
+**Done when:** `ApplicationsScreen`/`ConfigurationScreen`/`LogsScreen` are
+reachable from the main menu (`o` on Applications/Configuration/Logs);
+applications start/stop dry-run by default and require arming; config
+view never renders a secret-shaped value; logs lookup matches the Bash
+wizard's skip-selection-when-one-match behavior. All met in this PR.
 
 ### M5 — Diagnostics, runbooks, help, fcli/trust lifecycle (tracked, not in this PR)
 
@@ -162,7 +197,7 @@ runway branch to `dev`.
 
 ## What this PR actually delivers
 
-M1, M2, and M3, fully implemented and tested. M4-M6 are filed as tracked
+M1 through M4, fully implemented and tested. M5-M6 are filed as tracked
 GitHub issues (see below) for follow-on PRs against this runway branch —
 they are not implemented here. This keeps the claim in this document
 honest: an 11,000-line Bash wizard does not get ported in one PR, and

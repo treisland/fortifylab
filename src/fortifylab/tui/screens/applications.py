@@ -1,0 +1,94 @@
+"""Applications screen -- the interactive replacement for ``apps_menu()``'s
+start/stop actions in ``scripts/wizard/menu.sh``, for the apps
+``OperationCatalog`` already knows how to run (``ssc``, ``lim``, ``mysql``,
+``postgresql``).
+
+Destroy is intentionally not wired here: every destroy operation requires
+typing an exact confirmation phrase (``OperationSpec.confirmation_phrase``,
+e.g. ``"DESTROY ssc"``), and there is no text-entry widget in the TUI yet.
+Mapping a single keypress to "yes, destroy it" to work around that would be
+exactly the kind of unsafe shortcut this codebase's confirmation-phrase
+design exists to prevent, so destroy stays a Bash-wizard-only action until
+the TUI has real text input (tracked in the roadmap, not invented here).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from fortifylab.operations import OperationCatalog, OperationExecution, OperationRunner
+
+from ..events import Event, KeyEvent
+from ..theme import TerminalStyle
+from .base import NavigationCommand, Screen
+
+_APPS: tuple[tuple[str, str], ...] = (
+    ("ssc", "Software Security Center"),
+    ("lim", "License and Infrastructure Manager"),
+    ("mysql", "MySQL"),
+    ("postgresql", "PostgreSQL"),
+)
+_ACTIONS: tuple[str, ...] = ("start", "stop")
+
+
+@dataclass
+class ApplicationsScreen(Screen):
+    style: TerminalStyle = field(default_factory=TerminalStyle.from_environment)
+    catalog: OperationCatalog = field(default_factory=OperationCatalog)
+    runner: OperationRunner = field(default_factory=OperationRunner)
+    rows: tuple[tuple[str, str, str], ...] = field(
+        default_factory=lambda: tuple((app_id, label, action) for app_id, label in _APPS for action in _ACTIONS)
+    )
+    selected_index: int = 0
+    armed: bool = False
+    last_execution: OperationExecution | None = None
+
+    def render(self) -> str:
+        lines = [self.style.heading("Applications"), ""]
+        for index, (_app_id, label, action) in enumerate(self.rows):
+            marker = self.style.paint(">", "1;36") if index == self.selected_index else " "
+            lines.append(f" {marker} {label:<32} {action}")
+        lines.append("")
+        mode_label = "EXECUTE (armed)" if self.armed else "dry-run (preview only)"
+        lines.append(f"Mode: {mode_label}")
+        if self.last_execution is not None:
+            state = "ran" if self.last_execution.executed else "previewed"
+            outcome = "ok" if self.last_execution.ok else "failed"
+            lines.append(f"Last: {self.last_execution.operation_id} ({state}, {outcome}) -- {self.last_execution.detail}")
+        lines.extend(
+            (
+                "",
+                self.style.muted("up/down to move, enter to run, a: toggle execute/dry-run, q: back"),
+                self.style.muted("(destroy is not available here -- use the Bash wizard's expert menu)"),
+            )
+        )
+        return "\n".join(lines) + "\n"
+
+    def handle_event(self, event: Event) -> NavigationCommand:
+        if not isinstance(event, KeyEvent):
+            return NavigationCommand.stay()
+        if event.key in ("q", "Q", "escape"):
+            return NavigationCommand.pop()
+        if event.key in ("up", "k"):
+            self.selected_index = (self.selected_index - 1) % len(self.rows)
+            return NavigationCommand.stay()
+        if event.key in ("down", "j"):
+            self.selected_index = (self.selected_index + 1) % len(self.rows)
+            return NavigationCommand.stay()
+        if event.key in ("a", "A"):
+            self.armed = not self.armed
+            return NavigationCommand.stay()
+        if event.key == "enter":
+            self._run_selected()
+            return NavigationCommand.stay()
+        return NavigationCommand.stay()
+
+    def _run_selected(self) -> None:
+        app_id, _label, action = self.rows[self.selected_index]
+        executing = self.armed
+        spec = self.catalog.app(app_id, action)
+        self.last_execution = self.runner.run(spec, execute=executing)
+        if executing:
+            # One-shot arming, same rationale as GuidedDeployScreen: arming
+            # is a per-action decision, not a per-session one.
+            self.armed = False

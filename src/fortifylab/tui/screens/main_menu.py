@@ -17,17 +17,23 @@ from dataclasses import dataclass, field
 from ..events import Event, KeyEvent
 from ..menu import OPERATOR_MENU, MenuItem
 from ..theme import TerminalStyle
+from .applications import ApplicationsScreen
 from .base import NavigationCommand, Screen
+from .configuration import ConfigurationScreen
 from .guided_deploy import GuidedDeployScreen
+from .logs import LogsScreen
 
 _UP_KEYS = {"up", "k"}
 _DOWN_KEYS = {"down", "j"}
 _QUIT_KEYS = {"q", "Q"}
 
 # Menu item key -> factory for its real screen. An item not listed here is
-# still preview-only; add its factory here once its screen exists (M4/M5).
+# still preview-only; add its factory here once its screen exists (M5+).
 _SCREEN_FACTORIES: dict[str, Callable[[], Screen]] = {
     "deploy": GuidedDeployScreen,
+    "applications": ApplicationsScreen,
+    "configuration": ConfigurationScreen,
+    "logs": LogsScreen,
 }
 
 
