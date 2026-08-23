@@ -29,6 +29,23 @@ class ApplicationsScreenTests(unittest.TestCase):
         self.assertIn("start", rendered)
         self.assertIn("stop", rendered)
 
+    def test_includes_sample_apps_alongside_core_apps(self) -> None:
+        # sample_apps_menu in Bash is a separate menu number from apps_menu,
+        # but the underlying operation shape is identical, so this one
+        # screen covers both rather than duplicating the same logic twice.
+        screen = _plain_screen()
+        rendered = screen.render()
+        for label in ("Juice Shop (sample)", "WebGoat (sample)", "DVWA (sample)"):
+            self.assertIn(label, rendered)
+
+    def test_sample_app_rows_run_through_the_real_catalog(self) -> None:
+        screen = _plain_screen()
+        juice_shop_index = next(i for i, (app_id, _l, _a) in enumerate(screen.rows) if app_id == "juice-shop")
+        screen.selected_index = juice_shop_index
+        screen.handle_event(KeyEvent("enter"))
+        self.assertIsNotNone(screen.last_execution)
+        self.assertIn("juice-shop", screen.last_execution.operation_id)
+
     def test_no_row_offers_destroy(self) -> None:
         # Destroy needs a typed confirmation phrase; there's no text-entry
         # widget yet, so it must not appear as a selectable row.

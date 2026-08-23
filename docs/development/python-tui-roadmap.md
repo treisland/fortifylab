@@ -343,11 +343,38 @@ Tools); every catalog plan renders; a plan's components compare correctly
 against `.env` (aligned/drifted/review-required); a missing or malformed
 catalog shows an error instead of crashing. All met in this PR.
 
+### M8 — Sample apps folded into Applications (second pick from the follow-up)
+
+The second slice of #446: `sample_apps_menu()`'s start/stop actions
+(Juice Shop, WebGoat, DVWA). Bash keeps this on a separate menu number
+from `apps_menu()`, but the underlying operation shape is identical
+(`OperationCatalog.app()` already treats every app the same way --
+a start/stop script and an optional destroy with a confirmation phrase),
+so rather than building a second near-identical screen, the three sample
+apps became three more rows on the existing `ApplicationsScreen`, labeled
+`(sample)`.
+
+- `src/fortifylab/operations/catalog.py` — `OperationCatalog.app()`'s
+  script-path table gained `juice-shop`, `webgoat`, `dvwa`, mapped to
+  `apps/samples/<id>/{action}.sh` (a different path shape than the core
+  apps' `apps/<id>/{action}.sh` -- worth its own test, since it's an easy
+  template to get wrong for a new app id).
+- `src/fortifylab/tui/screens/applications.py` — `_APPS` gained the three
+  sample apps; no other logic changed (same dry-run/arm/run/destroy-free
+  behavior as the four core apps).
+
+**Done when:** all three sample apps appear as start/stop rows on
+`ApplicationsScreen`, run through the same real `OperationCatalog`/
+`OperationRunner` path as the core apps, and `OperationCatalog.app()` has
+a test locking in the `apps/samples/<id>/` path shape so a future core-app
+addition doesn't silently reuse the wrong template. All met in this PR.
+
 ## What this PR actually delivers
 
-M1 through M6, plus M7 (Flight Plans screen) as the first pick from the
-post-M6 follow-up -- M6 delivered as an opt-in preview hook, not a default
-cutover, because the parity that cutover depends on doesn't exist yet.
+M1 through M6, plus M7 (Flight Plans screen) and M8 (sample apps) as the
+first two picks from the post-M6 follow-up -- M6 delivered as an opt-in
+preview hook, not a default cutover, because the parity that cutover
+depends on doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked
 here rather than claimed. This keeps the claim in this document honest:

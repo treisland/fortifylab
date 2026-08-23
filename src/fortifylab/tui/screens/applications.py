@@ -1,7 +1,14 @@
 """Applications screen -- the interactive replacement for ``apps_menu()``'s
-start/stop actions in ``scripts/wizard/menu.sh``, for the apps
-``OperationCatalog`` already knows how to run (``ssc``, ``lim``, ``mysql``,
-``postgresql``).
+and ``sample_apps_menu()``'s start/stop actions in ``scripts/wizard/menu.sh``,
+for the apps ``OperationCatalog`` already knows how to run (``ssc``,
+``lim``, ``mysql``, ``postgresql``, and the sample apps ``juice-shop``,
+``webgoat``, ``dvwa``).
+
+Bash keeps core apps and sample apps on separate menu numbers, but the
+underlying operation shape is identical (start/stop via a script,
+`OperationCatalog.app()` already treats them the same way), so this one
+screen covers both rather than duplicating the same list/arm/run logic in
+a second near-identical screen -- sample apps are just labeled "(sample)".
 
 Destroy is intentionally not wired here: every destroy operation requires
 typing an exact confirmation phrase (``OperationSpec.confirmation_phrase``,
@@ -27,6 +34,9 @@ _APPS: tuple[tuple[str, str], ...] = (
     ("lim", "License and Infrastructure Manager"),
     ("mysql", "MySQL"),
     ("postgresql", "PostgreSQL"),
+    ("juice-shop", "Juice Shop (sample)"),
+    ("webgoat", "WebGoat (sample)"),
+    ("dvwa", "DVWA (sample)"),
 )
 _ACTIONS: tuple[str, ...] = ("start", "stop")
 

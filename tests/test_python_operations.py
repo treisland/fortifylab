@@ -32,6 +32,19 @@ class PythonOperationsTests(unittest.TestCase):
         self.assertEqual(catalog.secrets().impact, OperationImpact.MUTATION)
         self.assertIn("secret.key", catalog.secrets().warning)
 
+    def test_catalog_supports_sample_apps_alongside_core_apps(self) -> None:
+        # Sample apps (Juice Shop, WebGoat, DVWA) live under apps/samples/
+        # rather than apps/<id>/ -- a distinct script path template from
+        # the core apps, easy to get wrong when adding a new app id.
+        catalog = OperationCatalog()
+        self.assertEqual(catalog.app("juice-shop", "start").command, ("./apps/samples/juice-shop/start.sh",))
+        self.assertEqual(catalog.app("webgoat", "stop").command, ("./apps/samples/webgoat/stop.sh",))
+        self.assertEqual(catalog.app("dvwa", "start").command, ("./apps/samples/dvwa/start.sh",))
+
+    def test_unsupported_app_id_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            OperationCatalog().app("not-a-real-app", "start")
+
     def test_mutating_operations_are_dry_run_by_default(self) -> None:
         calls: list[tuple[str, ...]] = []
         runner = OperationRunner(lambda command: calls.append(command) or CommandResult(command, 0, "ok", "", 0.01))

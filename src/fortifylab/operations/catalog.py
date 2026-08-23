@@ -70,6 +70,9 @@ class OperationCatalog:
             "lim": "apps/lim/{action}.sh",
             "mysql": "apps/mysql/{action}.sh",
             "postgresql": "apps/postgresql/{action}.sh",
+            "juice-shop": "apps/samples/juice-shop/{action}.sh",
+            "webgoat": "apps/samples/webgoat/{action}.sh",
+            "dvwa": "apps/samples/dvwa/{action}.sh",
         }.get(app_id)
         if script is None:
             raise ValueError(f"Unsupported app operation: {app_id}")
