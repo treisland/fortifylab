@@ -23,7 +23,10 @@ class ConfigurationScreenTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)
         self.env_path = Path(self.tempdir.name) / ".env"
-        self.env_path.write_text("DOMAIN=fortifydemo.com\nDEFAULT_PASS=super-secret\n", encoding="utf-8")
+        self.env_path.write_text(
+            "DOMAIN=fortifydemo.com\nDEFAULT_PASS=super-secret\nLIM_SIGNING_CERT_PWD=another-secret\n",
+            encoding="utf-8",
+        )
         self.store = ConfigStore(self.env_path)
 
     def _screen(self) -> ConfigurationScreen:
@@ -35,6 +38,8 @@ class ConfigurationScreenTests(unittest.TestCase):
         self.assertIn("fortifydemo.com", rendered)
         self.assertIn("DEFAULT_PASS", rendered)
         self.assertNotIn("super-secret", rendered)
+        self.assertIn("LIM_SIGNING_CERT_PWD", rendered)
+        self.assertNotIn("another-secret", rendered)
         self.assertIn("<redacted>", rendered)
 
     def test_missing_env_file_shows_a_message_instead_of_crashing(self) -> None:

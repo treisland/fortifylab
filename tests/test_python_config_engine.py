@@ -15,9 +15,27 @@ from fortifylab.config import (
     preview_changes,
     validate_hosts_and_urls,
 )
+from fortifylab.config.envfile import display_value
 
 
 class PythonConfigEngineTests(unittest.TestCase):
+    def test_display_value_redacts_pwd_suffixed_keys_too(self) -> None:
+        # Security review finding: LIM_SIGNING_CERT_PWD (a real key in
+        # .env.example) uses the PWD abbreviation rather than PASS/PASSWORD,
+        # and slipped through SECRET_KEY_RE unredacted -- the first screen
+        # rendering a live .env (ConfigurationScreen, M4) would have shown
+        # a real password in plaintext right next to correctly-redacted
+        # siblings.
+        self.assertEqual(display_value("LIM_SIGNING_CERT_PWD", "hunter2"), "<redacted>")
+        self.assertEqual(display_value("PWD", "hunter2"), "<redacted>")
+        self.assertEqual(display_value("MY_PWD_BACKUP", "hunter2"), "<redacted>")
+
+    def test_display_value_does_not_over_redact_unrelated_keys(self) -> None:
+        # CWD ends in the letters "WD" but is not a PWD-suffixed key, and
+        # must not be swept up by a careless PWD pattern.
+        self.assertEqual(display_value("CWD", "/home/user"), "/home/user")
+        self.assertEqual(display_value("DOMAIN", "fortifydemo.com"), "fortifydemo.com")
+
     def test_parse_and_apply_updates_preserves_comments_and_unknown_keys(self) -> None:
         document = parse_env_text('# keep\nexport DOMAIN="old.test"\nCUSTOM_FLAG=yes\n')
 

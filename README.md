@@ -119,12 +119,16 @@ preview, `q` to quit) is available from a terminal with:
 ```
 
 Most items are still navigation-only — selecting one shows its description,
-the same as `deploy --plan` does today, not a live run. One exception:
-selecting **Deploy / Resume** and pressing `o` opens a live Guided
-deployment screen for the SSC-only profile. It previews dry-run by default
-and requires pressing `a` to arm real execution before `enter` runs
-anything against your cluster — the same posture as the Bash wizard's
-Guided deployment.
+the same as `deploy --plan` does today, not a live run. Four items are live
+screens instead (press `o` to open): **Deploy / Resume** (a Guided
+deployment screen for the SSC-only profile), **Applications** (start/stop
+for ssc/lim/mysql/postgresql), **Configuration** (redacted `.env` view plus
+backup/rollback), and **Logs** (pick a component, then a pod, then tail it).
+Each previews dry-run by default and requires pressing `a` to arm real
+execution before `enter` runs anything against your cluster — the same
+posture as the Bash wizard. Destroy actions and free-text `.env` editing
+stay Bash-wizard-only for now: both need a typed confirmation phrase or a
+key/value the TUI has no text-entry widget for yet.
 
 Install `requirements-python.txt` only if you're developing or previewing
 those CLI/TUI slices (kept separate from `requirements-docs.txt`, which is

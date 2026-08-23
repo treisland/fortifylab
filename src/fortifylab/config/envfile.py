@@ -8,7 +8,7 @@ import shlex
 
 
 ASSIGNMENT_RE = re.compile(r"^(?P<prefix>\s*(?:export\s+)?)(?P<key>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.*)$")
-SECRET_KEY_RE = re.compile(r"(PASS|PASSWORD|TOKEN|SECRET|KEY|LICENSE|CREDENTIAL)")
+SECRET_KEY_RE = re.compile(r"(PASS|PASSWORD|(?:^|_)PWD(?:_|$)|TOKEN|SECRET|KEY|LICENSE|CREDENTIAL)")
 
 
 @dataclass(frozen=True)
