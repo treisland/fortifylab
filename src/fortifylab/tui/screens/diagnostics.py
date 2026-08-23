@@ -76,5 +76,9 @@ class DiagnosticsScreen(Screen):
             return
         files = {f"{result.name}.txt": result.output for result in self.results}
         files["README.txt"] = "Fortify Lab sanitized diagnostics bundle.\n"
-        bundle = write_bundle(self.bundle_dir, files)
+        try:
+            bundle = write_bundle(self.bundle_dir, files)
+        except OSError as exc:
+            self.message = self.style.fail(f"Could not write diagnostics bundle to {self.bundle_dir}: {exc}")
+            return
         self.message = self.style.ok(f"Diagnostics bundle written: {bundle.path}")

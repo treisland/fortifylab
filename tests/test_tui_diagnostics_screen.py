@@ -65,6 +65,22 @@ class DiagnosticsScreenTests(unittest.TestCase):
             self.assertIn("Diagnostics bundle written", screen.message)
             self.assertTrue((bundle_dir / "fortifylab-diagnostics.tar.gz").exists())
 
+    def test_bundle_write_failure_shows_an_error_not_a_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            # A regular file where a directory is expected makes `mkdir(parents=True)`
+            # raise NotADirectoryError -- this must surface as an error message, not
+            # propagate out of handle_event and crash the TUI event loop.
+            blocker = Path(directory) / "blocker"
+            blocker.write_text("not a directory")
+            screen = DiagnosticsScreen(
+                style=TerminalStyle(color=False, symbols=False),
+                collector=_collector(all_ok=True),
+                bundle_dir=blocker / "diagnostics",
+            )
+            screen.handle_event(KeyEvent("enter"))
+            screen.handle_event(KeyEvent("b"))
+            self.assertIn("Could not write diagnostics bundle", screen.message)
+
     def test_q_pops(self) -> None:
         screen = DiagnosticsScreen(style=TerminalStyle(color=False, symbols=False))
         command = screen.handle_event(KeyEvent("q"))

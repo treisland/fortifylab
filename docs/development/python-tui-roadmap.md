@@ -246,6 +246,26 @@ runbook previews match `OperationCatalog.runbook()`'s existing three
 topics; every listed help topic loads its real, committed `docs/help/*.txt`
 content. All met in this PR.
 
+**Review fixes landed on top of the initial implementation:**
+
+- Code review caught an uncaught `OSError` crashing the TUI on a bundle-write
+  failure in `DiagnosticsScreen._write_bundle` (e.g. a blocked/unwritable
+  path) -- now caught and shown as a fail-styled message, matching every
+  other screen's "surface the error, don't crash the event loop" posture.
+- Security review flagged `diagnostics.sanitize_text()`'s keyword/line-based
+  redaction as a thin guard now that a screen persists collector output to
+  disk for the first time (M4's `LogsScreen` only ever rendered
+  transiently). Not exploitable today -- `ClusterCollector` only runs
+  `get`-style read commands, none of which surface Secret values -- but
+  flagged as something to revisit structurally (not just by widening the
+  keyword list) before any future collector reads `-o yaml`, `describe`,
+  or configmap/secret contents.
+- Documentation review confirmed the fcli-exclusion claim is literally true
+  (no fcli code anywhere in the diff) and the 13-topic Help Center
+  transcription is exact against `scripts/lib/help.sh`, and posted a
+  clarifying comment on #442 since its original scope bundled the fcli
+  lifecycle in with M5.
+
 ### M6 — Cutover readiness (tracked, not in this PR)
 
 `start_wizard.sh` launches the Python TUI once M2-M5 reach parity; manual
