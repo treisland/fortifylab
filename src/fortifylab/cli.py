@@ -11,6 +11,7 @@ from .dependencies import dependency_checks, migration_status_lines
 from .diagnostics import ClusterCollector, write_bundle
 from .operations import OperationCatalog, OperationRunner
 from .orchestration import BashOperationAdapter
+from .services import adapter_step_ids
 from .tui import TerminalStyle, build_demo_snapshot, build_profile, render_guided_step, render_operator_menu
 from .version import __version__
 
@@ -83,22 +84,6 @@ def build_parser() -> argparse.ArgumentParser:
                 help="open the real interactive operator console (requires a TTY)",
             )
     return parser
-
-
-def adapter_step_ids() -> set[str]:
-    return {
-        "certs",
-        "dashboard",
-        "secrets",
-        "mysql",
-        "postgresql",
-        "ssc",
-        "lim",
-        "sast_controller",
-        "sast_sensor",
-        "dast_core",
-        "dast_scanner",
-    }
 
 
 def main(argv: list[str] | None = None) -> int:

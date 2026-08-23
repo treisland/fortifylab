@@ -41,7 +41,7 @@ class OperationController:
         last_detail = ""
         while attempts < self.retry_policy.max_attempts:
             attempts += 1
-            result = run_command(step.command, timeout_seconds=step.timeout_seconds)
+            result = run_command(step.command, timeout=step.timeout_seconds)
             if result.ok:
                 return OperationResult(step.step_id, StepStatus.COMPLETE, attempts, "Operation completed.", step.command)
             if result.timed_out:

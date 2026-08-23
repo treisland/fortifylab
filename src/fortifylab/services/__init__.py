@@ -5,6 +5,7 @@ in sync by construction."""
 
 from __future__ import annotations
 
+from .deploy_service import DeployService, adapter_step_ids
 from .flight_plan_service import EnvComparison, FlightPlanService
 
-__all__ = ["EnvComparison", "FlightPlanService"]
+__all__ = ["DeployService", "EnvComparison", "FlightPlanService", "adapter_step_ids"]

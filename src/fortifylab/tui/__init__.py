@@ -12,13 +12,14 @@ from .guided import (
 from .menu import MenuItem, OPERATOR_MENU, render_operator_menu
 from .profiles import DeploymentProfile, build_profile, expand_components, profile_components_for
 from .router import Router
-from .screens import MainMenuScreen, NavigationCommand, NavigationKind, Screen
+from .screens import GuidedDeployScreen, MainMenuScreen, NavigationCommand, NavigationKind, Screen
 from .theme import TerminalStyle
 
 __all__ = [
     "ControlMode",
     "DeploymentProfile",
     "Event",
+    "GuidedDeployScreen",
     "GuidedStep",
     "KeyEvent",
     "MainMenuScreen",

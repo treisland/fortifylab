@@ -51,6 +51,29 @@ class DeploymentOrchestrationModelTests(unittest.TestCase):
         self.assertEqual(result.attempts, 0)
         self.assertIn("not executed", result.detail)
 
+    def test_operation_controller_executes_a_real_command_successfully(self) -> None:
+        # Regression: OperationController.run(dry_run=False) called
+        # run_command(..., timeout_seconds=...) but core.command.run_command
+        # takes `timeout`, not `timeout_seconds` -- every prior test only
+        # exercised dry_run=True, so this TypeError went uncaught until the
+        # Python TUI migration's guided-deployment screen (M3) actually
+        # executed a step for the first time.
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        step = DeploymentStep("noop", "No-op", ("true",))
+
+        result = controller.run(step, dry_run=False)
+
+        self.assertEqual(result.status, StepStatus.COMPLETE)
+        self.assertEqual(result.attempts, 1)
+
+    def test_operation_controller_reports_failure_of_a_real_command(self) -> None:
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        step = DeploymentStep("noop", "No-op", ("false",))
+
+        result = controller.run(step, dry_run=False)
+
+        self.assertEqual(result.status, StepStatus.FAILED)
+
     def test_cancelled_controller_returns_cancelled_result(self) -> None:
         controller = OperationController()
         controller.cancel()

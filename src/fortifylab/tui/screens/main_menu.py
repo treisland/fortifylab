@@ -1,24 +1,34 @@
 """Main menu screen — the interactive replacement for ``main_menu()`` in
 ``scripts/wizard/menu.sh``.
 
-Scope for this milestone (M2): navigation and preview only. Selecting an
-item shows its description, matching what ``./bin/fortifylab deploy --plan``
+Most items are still navigation and preview only (M2 scope): selecting one
+shows its description, matching what ``./bin/fortifylab deploy --plan``
 already does for a mutating operation today — a readable preview, not a
-live run. Wiring real execution behind these entries is M3+.
+live run. An item gets a real screen (opened with "o") only once one has
+actually been built for it -- see ``_SCREEN_FACTORIES`` below; "deploy" is
+the first (M3).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..events import Event, KeyEvent
 from ..menu import OPERATOR_MENU, MenuItem
 from ..theme import TerminalStyle
 from .base import NavigationCommand, Screen
+from .guided_deploy import GuidedDeployScreen
 
 _UP_KEYS = {"up", "k"}
 _DOWN_KEYS = {"down", "j"}
 _QUIT_KEYS = {"q", "Q"}
+
+# Menu item key -> factory for its real screen. An item not listed here is
+# still preview-only; add its factory here once its screen exists (M4/M5).
+_SCREEN_FACTORIES: dict[str, Callable[[], Screen]] = {
+    "deploy": GuidedDeployScreen,
+}
 
 
 @dataclass
@@ -40,9 +50,12 @@ class MainMenuScreen(Screen):
                     "",
                     self.style.heading(f"Preview: {selected.label}"),
                     f"  {selected.description}",
-                    self.style.muted("  (preview only -- no action has been taken)"),
                 )
             )
+            if selected.key in _SCREEN_FACTORIES:
+                lines.append(self.style.muted("  press o to open"))
+            else:
+                lines.append(self.style.muted("  (preview only -- no action has been taken)"))
         lines.extend(
             (
                 "",
@@ -73,6 +86,11 @@ class MainMenuScreen(Screen):
             return NavigationCommand.stay()
         if event.key.isdigit():
             self._select_by_position(int(event.key))
+            return NavigationCommand.stay()
+        if event.key in ("o", "O"):
+            factory = _SCREEN_FACTORIES.get(self.items[self.selected_index].key)
+            if factory is not None:
+                return NavigationCommand.push(factory())
             return NavigationCommand.stay()
         return NavigationCommand.stay()
 

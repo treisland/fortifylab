@@ -86,12 +86,47 @@ destructive actions wired yet (navigation only — selecting an item shows its
 description as a preview, matching today's `deploy --plan` behavior, not a
 live run).
 
-### M3 — Deploy service + live guided deployment (tracked, not in this PR)
+### M3 — Deploy service + live guided deployment
 
-Wire `services/deploy_service.py` to the existing `orchestration` DAG and
+Wires `services/deploy_service.py` to the existing `orchestration` DAG and
 `BashOperationAdapter` so Guided deployment runs for real through the TUI for
-one profile (SSC-only) end-to-end, with live status feeding the screen via
-`TickEvent`.
+one profile (SSC-only).
+
+- `src/fortifylab/services/deploy_service.py` — `DeployService` builds the
+  SSC-only plan (`certs` -> `secrets`/`dashboard` -> `mysql` -> `ssc`,
+  filtered to steps `BashOperationAdapter` already knows how to run) and
+  drives it one step at a time: `run_next(execute=False)` (the default)
+  previews the next runnable step without touching the DAG, so a preview
+  stays repeatable; `run_next(execute=True)` actually runs it via
+  `OperationController` and commits the resulting status, unlocking
+  dependents.
+- `src/fortifylab/tui/screens/guided_deploy.py` — `GuidedDeployScreen`
+  renders the whole plan's per-step status, is dry-run by default, and
+  requires pressing `a` to arm real execution before `enter` does anything
+  destructive -- the same dry-run-unless-told-otherwise posture
+  `OperationCatalog`/`OperationRunner` already use elsewhere.
+- Reachable from the main menu: select "Deploy / Resume", press `o` to
+  open. `MainMenuScreen` gained a small `key -> screen factory` registry
+  (`_SCREEN_FACTORIES`) so future milestones add a real screen by
+  registering it, not by branching further.
+- Fixed along the way: `OperationController.run(dry_run=False)` had never
+  actually been exercised by any existing test (everything before M3 only
+  used the dry-run path) and called `run_command()` with a keyword
+  argument that didn't match its real signature -- a live TypeError on
+  every real execution. Fixed, with regression tests.
+
+There is no background/async execution here: `OperationController.run()` is
+a blocking subprocess call, same as every other Bash-backed operation in
+this codebase, so "live" means "the screen reflects real state after each
+step returns," not a background poller. `TickEvent` is wired into the
+screen (it counts ticks) but isn't load-bearing yet -- true async/parallel
+execution is out of scope until a profile actually needs it.
+
+**Done when:** `DeployService("ssc_only")` builds a validated, correctly
+ordered plan; dry-run previews are repeatable and never advance the DAG;
+`execute=True` runs a step for real, commits its status, and unlocks
+dependents; `GuidedDeployScreen` is reachable from the main menu and starts
+dry-run by default. All met in this PR.
 
 ### M4 — Applications, configuration, logs screens (tracked, not in this PR)
 
@@ -113,11 +148,12 @@ runway branch to `dev`.
 
 ## What this PR actually delivers
 
-M1 and M2, fully implemented and tested. M3-M6 are filed as tracked GitHub
-issues (see below) for follow-on PRs against this runway branch — they are
-not implemented here. This keeps the claim in this document honest: an
-11,000-line Bash wizard does not get ported in one PR, and pretending
-otherwise would just move the risk from "still Bash" to "untested Python."
+M1, M2, and M3, fully implemented and tested. M4-M6 are filed as tracked
+GitHub issues (see below) for follow-on PRs against this runway branch —
+they are not implemented here. This keeps the claim in this document
+honest: an 11,000-line Bash wizard does not get ported in one PR, and
+pretending otherwise would just move the risk from "still Bash" to
+"untested Python."
 
 ## Issue tracking
 
