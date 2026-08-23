@@ -116,6 +116,21 @@ source_wizard_module scan-demo.sh
 source_wizard_module menu.sh
 
 # ============================================================
+# Python TUI preview (opt-in; not the default menu -- see
+# docs/development/python-tui-roadmap.md's M6 section for why)
+# ============================================================
+
+fortifylab_python_tui_preview_requested() {
+    [ "${FORTIFY_PYTHON_TUI_PREVIEW:-0}" = "1" ]
+}
+
+launch_python_tui_preview() {
+    note "Launching the Python TUI preview (opt-in via FORTIFY_PYTHON_TUI_PREVIEW=1)."
+    note "It does not yet have full parity with this Bash menu -- see docs/development/python-tui-roadmap.md."
+    exec "$FORTIFY_HOME_K8S/bin/fortifylab" tui --interactive
+}
+
+# ============================================================
 # Entry
 # ============================================================
 
@@ -142,6 +157,10 @@ Environment overrides:
   NO_COLOR            Disable color output if set to any value.
   WIZARD_NOMAIN       Set to 1 to source this file without entering the menu
                       (for tests / scripting).
+  FORTIFY_PYTHON_TUI_PREVIEW
+                      Set to 1 to launch the opt-in Python TUI preview instead
+                      of this Bash menu. Preview only -- it does not yet have
+                      full menu parity; see docs/development/python-tui-roadmap.md.
 
 Run as your normal user — the wizard sudo's only the commands that genuinely
 need root (apt, snap). Avoid 'sudo ./start_wizard.sh': it would create an
@@ -194,6 +213,9 @@ if [ -z "${WIZARD_NOMAIN:-}" ]; then
     guided_apply_deployment_profile "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}"
     if [ "$first_launch" -eq 1 ]; then
         fortifylab_first_time_welcome_menu
+    fi
+    if fortifylab_python_tui_preview_requested; then
+        launch_python_tui_preview
     fi
     main_menu
 fi

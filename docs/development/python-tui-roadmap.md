@@ -266,19 +266,67 @@ content. All met in this PR.
   clarifying comment on #442 since its original scope bundled the fcli
   lifecycle in with M5.
 
-### M6 — Cutover readiness (tracked, not in this PR)
+### M6 — Cutover readiness
 
-`start_wizard.sh` launches the Python TUI once M2-M5 reach parity; manual
-test gates from `phase-3-python-migration.md` re-run before promoting the
-runway branch to `dev`.
+This milestone's own gate, stated plainly in its original scope, is
+**"once M2-M5 reach parity."** They have not, and this PR does not pretend
+otherwise. Concretely: `scripts/wizard/menu.sh`'s "More tools" menu has 22
+actions (`setup_menu`, `guided_deployment_menu`, `deploy_from_scratch`,
+`resume_repair`, `versions_menu`, `apps_menu`, `sample_apps_menu`,
+`dashboard_access_menu`, `live_status`, `advanced_menu`,
+`lab_lifecycle_menu`, `stream_logs`, `cluster_status`, `logs_menu`,
+`urls_creds`, `fcli_tools_menu`, `runbooks_menu`, `edit_env`,
+`help_center`, `operational_guidance_menu`, `wizard_log_viewer`,
+`scan_demo_menu`). Roughly seven of those have any Python screen behind
+them today (deploy, applications, logs, diagnostics/live-status,
+runbooks, configuration/edit-env, help), and every one of those seven is
+narrower than its Bash counterpart: one deployment profile, not a picker;
+four apps, not the full app registry; view + backup/rollback, not a full
+`.env` editor; no destroy anywhere. Fifteen actions -- including the
+Flight Plan version manager, sample apps, dashboard access, host-level
+setup, lab lifecycle controls, URLs/credentials, fcli readiness, and the
+first-scan demo -- have no Python screen at all. Making `start_wizard.sh`
+launch the Python TUI *by default* at this point would be a real
+regression for every operator who relies on those fifteen actions, and
+would directly violate this repo's own compatibility rule (ADR 0002:
+`start_wizard.sh` "continues to start the normal guided workflow"; this
+roadmap's own ground rules: "keeps working, unmodified in behavior, until
+a Python screen has reached parity with the Bash menu it replaces").
+
+**What this PR actually adds for M6**: an explicit, opt-in preview hook,
+not a cutover. Setting `FORTIFY_PYTHON_TUI_PREVIEW=1` makes
+`start_wizard.sh` exec `./bin/fortifylab tui --interactive` instead of
+entering `main_menu` -- after the same lab-use acknowledgement, env
+bootstrap, and fcli activation every path already goes through. Unset (the
+default for every existing user), behavior is byte-for-byte unchanged.
+This is the same "compatibility launcher, real behavior stays Bash until
+proven" posture ADR 0002 already commits to, made concrete rather than
+skipped.
+
+**Still not done, tracked for a real follow-up milestone**: the fifteen
+unported actions above, full parity for the seven partial ones, the fcli
+lifecycle (M5's own deferral), flipping the *default* entrypoint once
+parity is real, and the manual test gates from
+`phase-3-python-migration.md` -- those need a human with a real terminal
+and a live MicroK8s cluster, neither of which exists in the sandbox this
+branch was built in. None of that is faked here.
+
+**Done when:** an operator can opt into the Python TUI without it
+becoming the default, and every existing operator's `./start_wizard.sh`
+behavior is provably unchanged. Both met in this PR, verified by tests
+that exercise the actual hook (not just its presence) and by the
+pre-existing wizard contract tests continuing to pass unmodified.
 
 ## What this PR actually delivers
 
-M1 through M5, fully implemented and tested. M6 is filed as a tracked
-GitHub issue (see below) for a follow-on PR against this runway branch —
-it is not implemented here. This keeps the claim in this document honest:
-an 11,000-line Bash wizard does not get ported in one PR, and pretending
-otherwise would just move the risk from "still Bash" to "untested Python."
+M1 through M6, as scoped above -- M6 delivered as an opt-in preview hook,
+not a default cutover, because the parity that cutover depends on doesn't
+exist yet. Full menu parity, the fcli lifecycle, and the actual default
+flip are real, sizeable follow-on work, tracked here rather than claimed.
+This keeps the claim in this document honest: an 11,000-line Bash wizard
+does not get ported in one PR, and pretending otherwise would just move
+the risk from "still Bash" to "untested Python," or worse, "silently
+regressed Bash."
 
 ## Issue tracking
 
