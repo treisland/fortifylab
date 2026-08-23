@@ -18,6 +18,41 @@ from enum import Enum
 from ..events import Event
 
 
+@dataclass
+class Armable:
+    """Shared one-shot arm-to-execute state.
+
+    Three screens now need the same dry-run-unless-armed posture
+    (``GuidedDeployScreen``, ``ApplicationsScreen``, ``ConfigurationScreen``):
+    dry-run is the default and stays repeatable; a real execution requires
+    explicitly arming first ("a"), and arming auto-clears after one real
+    execution -- arming is a per-action decision, not a per-session one.
+    Without that auto-clear, a stray extra keypress (key repeat, a fumbled
+    double-press) while still armed would silently run a second real
+    operation instead of falling back to preview mode.
+    """
+
+    armed: bool = False
+
+    def toggle_armed(self) -> None:
+        self.armed = not self.armed
+
+    def consume_arm(self) -> bool:
+        """Report whether to execute for real right now, disarming if so.
+
+        Call this once per action attempt in place of reading ``armed``
+        directly: it hands back the current arm state and, if it was armed,
+        clears it in the same step so the caller can't forget to disarm.
+        """
+        executing = self.armed
+        if executing:
+            self.armed = False
+        return executing
+
+    def mode_label(self, *, armed_text: str = "EXECUTE (armed)", dry_run_text: str = "dry-run (preview only)") -> str:
+        return armed_text if self.armed else dry_run_text
+
+
 class NavigationKind(str, Enum):
     STAY = "stay"
     PUSH = "push"

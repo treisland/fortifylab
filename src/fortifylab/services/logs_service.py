@@ -14,7 +14,7 @@ input widget yet.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Sequence
 
 from fortifylab.core.command import run_command
 from fortifylab.operations import OperationCatalog, OperationExecution, OperationRunner, matching_pods, should_skip_selection
@@ -44,6 +44,30 @@ class LogsService:
 
     def matching_pods(self, prefix: str) -> tuple[str, ...]:
         return matching_pods(self.list_pods(), prefix)
+
+    def matching_pods_for_scope(self, prefix: str, sibling_prefixes: Sequence[str] = ()) -> tuple[str, ...]:
+        """Like ``matching_pods``, but excludes pods that belong to a more
+        specific sibling scope.
+
+        The TUI's log scopes (``tui.profiles.LOG_SCOPES``) are plain prefix
+        matches, but some of them overlap: ``sast_sensor``'s prefix
+        ``"scancentral-sast"`` is itself a prefix of ``sast_controller``'s
+        pods (``scancentral-sast-controller-0``), and ``dast_scanner``'s
+        ``"sdast"`` is a prefix of ``dast_core``'s pods
+        (``sdast-core-...``). A plain ``matching_pods("scancentral-sast")``
+        would therefore also return the controller's pods when the operator
+        picked the sensor scope. When another known scope's prefix is
+        strictly longer than, and itself starts with, `prefix`, any pod
+        that also matches that longer prefix belongs to the more specific
+        scope, so it's excluded here.
+        """
+        matches = self.matching_pods(prefix)
+        more_specific = tuple(
+            other for other in sibling_prefixes if other != prefix and other.startswith(prefix) and len(other) > len(prefix)
+        )
+        if not more_specific:
+            return matches
+        return tuple(pod for pod in matches if not any(pod.startswith(other) for other in more_specific))
 
     def should_skip_selection(self, prefix: str) -> bool:
         return should_skip_selection(self.list_pods(), prefix)

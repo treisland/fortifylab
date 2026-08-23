@@ -32,6 +32,38 @@ class LogsServiceTests(unittest.TestCase):
         service = LogsService(pod_lister=lambda: ("mysql-0", "mysql-1"))
         self.assertFalse(service.should_skip_selection("mysql"))
 
+    def test_matching_pods_for_scope_excludes_more_specific_sibling(self) -> None:
+        # sast_sensor's stripped prefix "scancentral-sast" is itself a
+        # prefix of sast_controller's pods -- without exclusion, selecting
+        # the sensor scope would also pull in the controller's pod.
+        service = LogsService(
+            pod_lister=lambda: ("scancentral-sast-controller-0", "scancentral-sast-sensor-0")
+        )
+        matches = service.matching_pods_for_scope(
+            "scancentral-sast", sibling_prefixes=("scancentral-sast-controller", "scancentral-sast")
+        )
+        self.assertEqual(matches, ("scancentral-sast-sensor-0",))
+
+    def test_matching_pods_for_scope_unaffected_for_the_more_specific_scope(self) -> None:
+        service = LogsService(
+            pod_lister=lambda: ("scancentral-sast-controller-0", "scancentral-sast-sensor-0")
+        )
+        matches = service.matching_pods_for_scope(
+            "scancentral-sast-controller", sibling_prefixes=("scancentral-sast-controller", "scancentral-sast")
+        )
+        self.assertEqual(matches, ("scancentral-sast-controller-0",))
+
+    def test_matching_pods_for_scope_handles_dast_core_vs_scanner_overlap(self) -> None:
+        service = LogsService(pod_lister=lambda: ("sdast-core-0", "sdast-scanner-0"))
+        matches = service.matching_pods_for_scope(
+            "sdast", sibling_prefixes=("sdast-core", "sdast")
+        )
+        self.assertEqual(matches, ("sdast-scanner-0",))
+
+    def test_matching_pods_for_scope_no_siblings_behaves_like_matching_pods(self) -> None:
+        service = LogsService(pod_lister=lambda: ("mysql-0", "mysql-1"))
+        self.assertEqual(service.matching_pods_for_scope("mysql", ()), ("mysql-0", "mysql-1"))
+
     def test_tail_runs_the_read_only_logs_operation_without_needing_execute(self) -> None:
         def fake_runner(command: tuple[str, ...]) -> CommandResult:
             self.assertIn("logs", command)

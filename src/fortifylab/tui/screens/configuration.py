@@ -19,14 +19,13 @@ from fortifylab.config.store import ConfigStore
 
 from ..events import Event, KeyEvent
 from ..theme import TerminalStyle
-from .base import NavigationCommand, Screen
+from .base import Armable, NavigationCommand, Screen
 
 
 @dataclass
-class ConfigurationScreen(Screen):
+class ConfigurationScreen(Armable, Screen):
     style: TerminalStyle = field(default_factory=TerminalStyle.from_environment)
     store: ConfigStore = field(default_factory=lambda: ConfigStore(Path(".env")))
-    armed: bool = False
     last_message: str | None = None
 
     def render(self) -> str:
@@ -49,8 +48,7 @@ class ConfigurationScreen(Screen):
             lines.append(f"  most recent: {backups[0].name}")
 
         lines.append("")
-        mode_label = "armed" if self.armed else "not armed"
-        lines.append(f"Mode: {mode_label}")
+        lines.append(f"Mode: {self.mode_label(armed_text='armed', dry_run_text='not armed')}")
         if self.last_message is not None:
             lines.append(f"Last: {self.last_message}")
 
@@ -68,7 +66,7 @@ class ConfigurationScreen(Screen):
         if event.key in ("q", "Q", "escape"):
             return NavigationCommand.pop()
         if event.key in ("a", "A"):
-            self.armed = not self.armed
+            self.toggle_armed()
             return NavigationCommand.stay()
         if event.key in ("b", "B"):
             self._create_backup()
@@ -87,7 +85,7 @@ class ConfigurationScreen(Screen):
             self.last_message = f"Backup failed: {exc}"
 
     def _rollback(self) -> None:
-        if not self.armed:
+        if not self.consume_arm():
             self.last_message = "Press a to arm, then r again to roll back."
             return
         try:
@@ -95,7 +93,3 @@ class ConfigurationScreen(Screen):
             self.last_message = f"Rolled back from: {backup.name}"
         except FileNotFoundError as exc:
             self.last_message = f"Rollback failed: {exc}"
-        finally:
-            # One-shot arming, same rationale as GuidedDeployScreen/
-            # ApplicationsScreen: arming is a per-action decision.
-            self.armed = False

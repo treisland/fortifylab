@@ -20,7 +20,7 @@ from fortifylab.operations import OperationCatalog, OperationExecution, Operatio
 
 from ..events import Event, KeyEvent
 from ..theme import TerminalStyle
-from .base import NavigationCommand, Screen
+from .base import Armable, NavigationCommand, Screen
 
 _APPS: tuple[tuple[str, str], ...] = (
     ("ssc", "Software Security Center"),
@@ -32,7 +32,7 @@ _ACTIONS: tuple[str, ...] = ("start", "stop")
 
 
 @dataclass
-class ApplicationsScreen(Screen):
+class ApplicationsScreen(Armable, Screen):
     style: TerminalStyle = field(default_factory=TerminalStyle.from_environment)
     catalog: OperationCatalog = field(default_factory=OperationCatalog)
     runner: OperationRunner = field(default_factory=OperationRunner)
@@ -40,7 +40,6 @@ class ApplicationsScreen(Screen):
         default_factory=lambda: tuple((app_id, label, action) for app_id, label in _APPS for action in _ACTIONS)
     )
     selected_index: int = 0
-    armed: bool = False
     last_execution: OperationExecution | None = None
 
     def render(self) -> str:
@@ -49,8 +48,7 @@ class ApplicationsScreen(Screen):
             marker = self.style.paint(">", "1;36") if index == self.selected_index else " "
             lines.append(f" {marker} {label:<32} {action}")
         lines.append("")
-        mode_label = "EXECUTE (armed)" if self.armed else "dry-run (preview only)"
-        lines.append(f"Mode: {mode_label}")
+        lines.append(f"Mode: {self.mode_label()}")
         if self.last_execution is not None:
             state = "ran" if self.last_execution.executed else "previewed"
             outcome = "ok" if self.last_execution.ok else "failed"
@@ -71,12 +69,21 @@ class ApplicationsScreen(Screen):
             return NavigationCommand.pop()
         if event.key in ("up", "k"):
             self.selected_index = (self.selected_index - 1) % len(self.rows)
+            # Arming is a decision about *this* row's action, not a
+            # session-wide toggle. Unlike GuidedDeployScreen (one linear
+            # "next step" target), this screen has many independently
+            # selectable rows, so without disarming on navigation an
+            # operator could arm intending to run one action, arrow to a
+            # different row by mistake, and press enter to silently
+            # execute the *wrong* app/action for real.
+            self.armed = False
             return NavigationCommand.stay()
         if event.key in ("down", "j"):
             self.selected_index = (self.selected_index + 1) % len(self.rows)
+            self.armed = False
             return NavigationCommand.stay()
         if event.key in ("a", "A"):
-            self.armed = not self.armed
+            self.toggle_armed()
             return NavigationCommand.stay()
         if event.key == "enter":
             self._run_selected()
@@ -85,10 +92,6 @@ class ApplicationsScreen(Screen):
 
     def _run_selected(self) -> None:
         app_id, _label, action = self.rows[self.selected_index]
-        executing = self.armed
+        executing = self.consume_arm()
         spec = self.catalog.app(app_id, action)
         self.last_execution = self.runner.run(spec, execute=executing)
-        if executing:
-            # One-shot arming, same rationale as GuidedDeployScreen: arming
-            # is a per-action decision, not a per-session one.
-            self.armed = False

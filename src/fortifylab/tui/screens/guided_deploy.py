@@ -17,7 +17,7 @@ from fortifylab.services.deploy_service import DeployService
 
 from ..events import Event, KeyEvent, TickEvent
 from ..theme import TerminalStyle
-from .base import NavigationCommand, Screen
+from .base import Armable, NavigationCommand, Screen
 
 _STATUS_SYMBOLS = {
     StepStatus.COMPLETE: "ok",
@@ -28,10 +28,9 @@ _STATUS_SYMBOLS = {
 
 
 @dataclass
-class GuidedDeployScreen(Screen):
+class GuidedDeployScreen(Armable, Screen):
     style: TerminalStyle = field(default_factory=TerminalStyle.from_environment)
     service: DeployService = field(default_factory=DeployService)
-    armed: bool = False
     last_result: OperationResult | None = None
     ticks: int = 0
 
@@ -42,8 +41,7 @@ class GuidedDeployScreen(Screen):
             marker = self.style.symbol(_STATUS_SYMBOLS.get(status, "next" if status is StepStatus.PENDING else "-"))
             lines.append(f"  {marker} {step.label:<32} {status.value}")
         lines.append("")
-        mode_label = "EXECUTE (armed)" if self.armed else "dry-run (preview only)"
-        lines.append(f"Mode: {mode_label}")
+        lines.append(f"Mode: {self.mode_label()}")
         if self.last_result is not None:
             lines.append(f"Last: {self.last_result.detail}")
         if self.service.is_complete:
@@ -69,20 +67,12 @@ class GuidedDeployScreen(Screen):
         if event.key in ("q", "Q", "escape"):
             return NavigationCommand.pop()
         if event.key in ("a", "A"):
-            self.armed = not self.armed
+            self.toggle_armed()
             return NavigationCommand.stay()
         if event.key == "enter":
-            executing = self.armed
+            executing = self.consume_arm()
             result = self.service.run_next(execute=executing)
             if result is not None:
                 self.last_result = result
-            if executing:
-                # Auto-disarm after every real execution: arming is a
-                # per-step decision, not a per-session one. Without this, a
-                # stray extra "enter" (key repeat, a fumbled double-press)
-                # while still armed would silently run the *next* real
-                # deployment step against the live cluster instead of
-                # falling back to preview mode.
-                self.armed = False
             return NavigationCommand.stay()
         return NavigationCommand.stay()

@@ -182,6 +182,30 @@ applications start/stop dry-run by default and require arming; config
 view never renders a secret-shaped value; logs lookup matches the Bash
 wizard's skip-selection-when-one-match behavior. All met in this PR.
 
+**Review fixes landed on top of the initial implementation:**
+
+- Security review caught `envfile.SECRET_KEY_RE` missing `PWD`-suffixed
+  keys -- `LIM_SIGNING_CERT_PWD` (a real key in `.env.example`) slipped
+  through unredacted, since `ConfigurationScreen` is the first screen to
+  render a live `.env`. Fixed with an underscore-aware pattern
+  (`(?:^|_)PWD(?:_|$)`, not `\bPWD\b`, since `\b` doesn't create a boundary
+  between an underscore and a letter).
+- Code review found the `rstrip("*")` glob fix was necessary but not
+  sufficient: `LOG_SCOPES` prefixes genuinely overlap once stripped
+  (`sast_sensor`'s `"scancentral-sast"` is itself a prefix of
+  `sast_controller`'s pods; `dast_scanner`'s `"sdast"` is a prefix of
+  `dast_core`'s). Added `LogsService.matching_pods_for_scope()`, which
+  excludes pods that also match a more specific sibling scope's prefix.
+- Code review also found an arming footgun specific to `ApplicationsScreen`:
+  unlike `GuidedDeployScreen`'s single linear "next step" target, this
+  screen has many independently selectable rows, and arming was
+  session-wide rather than row-scoped -- an operator could arm, arrow to a
+  different row by mistake, and execute the wrong app/action for real.
+  Fixed by disarming on navigation.
+- The resulting duplicated arm/disarm/mode-label logic across
+  `GuidedDeployScreen`, `ApplicationsScreen`, and `ConfigurationScreen` was
+  factored into a shared `Armable` dataclass mixin (`tui/screens/base.py`).
+
 ### M5 — Diagnostics, runbooks, help, fcli/trust lifecycle (tracked, not in this PR)
 
 Port `live_status`, `runbooks_menu`, `help_center`, and the fcli

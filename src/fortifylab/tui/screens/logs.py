@@ -116,8 +116,14 @@ class LogsScreen(Screen):
         _step_id, _label, prefix = self.scopes[self.selected_scope_index]
         # LOG_SCOPES values are Bash glob patterns (e.g. "ssc-webapp*"), but
         # matching_pods() does a plain str.startswith() -- strip the glob
-        # suffix so the literal "*" doesn't defeat every match.
-        matches = self.service.matching_pods(prefix.rstrip("*"))
+        # suffix so the literal "*" doesn't defeat every match. Some scopes'
+        # prefixes overlap once stripped (sast_sensor's "scancentral-sast"
+        # is itself a prefix of sast_controller's pods, and dast_scanner's
+        # "sdast" is a prefix of dast_core's pods), so pass every other
+        # scope's stripped prefix along to exclude those sibling pods.
+        stripped_prefix = prefix.rstrip("*")
+        sibling_prefixes = tuple(other.rstrip("*") for _s, _l, other in self.scopes)
+        matches = self.service.matching_pods_for_scope(stripped_prefix, sibling_prefixes)
         if not matches:
             self.message = self.style.fail(f"No pods found matching '{prefix}'.")
             return

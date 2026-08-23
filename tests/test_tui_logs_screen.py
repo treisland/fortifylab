@@ -65,6 +65,40 @@ class LogsScreenTests(unittest.TestCase):
         self.assertEqual(screen.stage, _Stage.OUTPUT)
         self.assertEqual(screen.selected_pod_index, 1)
 
+    def test_sast_sensor_scope_excludes_the_controller_pod(self) -> None:
+        # scancentral-sast-controller-0 also starts with sast_sensor's
+        # stripped prefix "scancentral-sast" -- the sensor scope must not
+        # pull in the controller's pod (or worse, auto-tail it if it's
+        # the only pod up so far).
+        service = LogsService(
+            pod_lister=lambda: ("scancentral-sast-controller-0", "scancentral-sast-sensor-0"),
+            runner=_runner_returning("log output\n"),
+        )
+        screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), service=service)
+        sensor_index = next(i for i, (step_id, _l, _p) in enumerate(screen.scopes) if step_id == "sast_sensor")
+        screen.selected_scope_index = sensor_index
+
+        screen.handle_event(KeyEvent("enter"))
+
+        self.assertEqual(screen.stage, _Stage.OUTPUT)
+        self.assertEqual(screen.pods, ("scancentral-sast-sensor-0",))
+
+    def test_sast_controller_scope_is_unaffected_by_the_sensor_overlap(self) -> None:
+        service = LogsService(
+            pod_lister=lambda: ("scancentral-sast-controller-0", "scancentral-sast-sensor-0"),
+            runner=_runner_returning("log output\n"),
+        )
+        screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), service=service)
+        controller_index = next(
+            i for i, (step_id, _l, _p) in enumerate(screen.scopes) if step_id == "sast_controller"
+        )
+        screen.selected_scope_index = controller_index
+
+        screen.handle_event(KeyEvent("enter"))
+
+        self.assertEqual(screen.stage, _Stage.OUTPUT)
+        self.assertEqual(screen.pods, ("scancentral-sast-controller-0",))
+
     def test_no_matching_pods_shows_a_message_and_stays_on_scopes(self) -> None:
         service = LogsService(pod_lister=lambda: ())
         screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), service=service)

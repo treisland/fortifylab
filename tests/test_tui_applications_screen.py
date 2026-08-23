@@ -73,6 +73,27 @@ class ApplicationsScreenTests(unittest.TestCase):
         screen.handle_event(KeyEvent("up"))
         self.assertEqual(screen.selected_index, len(screen.rows) - 1)
 
+    def test_navigating_after_arming_disarms(self) -> None:
+        # Arming is per-row, not session-wide: navigating to a different
+        # row after arming must not leave a stale arm that fires against
+        # whatever row the operator lands on next.
+        screen = _plain_screen()
+        screen.handle_event(KeyEvent("a"))
+        self.assertTrue(screen.armed)
+
+        screen.handle_event(KeyEvent("down"))
+
+        self.assertFalse(screen.armed)
+
+    def test_navigating_up_after_arming_also_disarms(self) -> None:
+        screen = _plain_screen()
+        screen.handle_event(KeyEvent("a"))
+        self.assertTrue(screen.armed)
+
+        screen.handle_event(KeyEvent("up"))
+
+        self.assertFalse(screen.armed)
+
     def test_q_pops(self) -> None:
         screen = _plain_screen()
         command = screen.handle_event(KeyEvent("q"))
