@@ -17,7 +17,7 @@ and reports if they don't, rather than silently redeploying anything.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from fortifylab.core.command import CommandResult, run_command
@@ -32,6 +32,7 @@ _ADMIN_SERVICE_ACCOUNT = "fortify-dashboard-admin"
 class DashboardAccessService:
     kubectl: str = "microk8s kubectl"
     runner: KubectlRunner | None = None
+    _namespace_cache: str | None = field(default=None, init=False, repr=False, compare=False)
 
     def _run(self, args: tuple[str, ...]) -> CommandResult:
         if self.runner is not None:
@@ -39,8 +40,15 @@ class DashboardAccessService:
         return run_command((*tuple(self.kubectl.split()), *args), timeout=20)
 
     def namespace(self) -> str:
-        result = self._run(("-n", "kubernetes-dashboard", "get", "service", "kubernetes-dashboard-kong-proxy"))
-        return "kubernetes-dashboard" if result.ok else "kube-system"
+        # The Dashboard's namespace can't change during a screen's lifetime,
+        # and this service is constructed once per screen -- so probing it
+        # via kubectl on every call (resources_ready() and _create_token()
+        # both call this on every keypress) is a redundant round-trip after
+        # the first. Memoize it for the life of this service instance.
+        if self._namespace_cache is None:
+            result = self._run(("-n", "kubernetes-dashboard", "get", "service", "kubernetes-dashboard-kong-proxy"))
+            self._namespace_cache = "kubernetes-dashboard" if result.ok else "kube-system"
+        return self._namespace_cache
 
     def resources_ready(self) -> bool:
         namespace = self.namespace()
