@@ -26,6 +26,7 @@ from .screens import (
     NavigationKind,
     RunbooksScreen,
     Screen,
+    UrlsCredentialsScreen,
 )
 from .theme import TerminalStyle
 
@@ -56,6 +57,7 @@ __all__ = [
     "StepState",
     "TerminalStyle",
     "TickEvent",
+    "UrlsCredentialsScreen",
     "build_demo_snapshot",
     "build_profile",
     "expand_components",

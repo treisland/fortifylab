@@ -9,12 +9,15 @@ from .dashboard_access_service import DashboardAccessService
 from .deploy_service import DeployService, adapter_step_ids
 from .flight_plan_service import EnvComparison, FlightPlanService
 from .logs_service import LogsService
+from .urls_credentials_service import CredentialCheck, UrlsCredentialsService
 
 __all__ = [
+    "CredentialCheck",
     "DashboardAccessService",
     "DeployService",
     "EnvComparison",
     "FlightPlanService",
     "LogsService",
+    "UrlsCredentialsService",
     "adapter_step_ids",
 ]

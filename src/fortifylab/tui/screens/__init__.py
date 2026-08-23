@@ -13,6 +13,7 @@ from .help import HelpScreen
 from .logs import LogsScreen
 from .main_menu import MainMenuScreen
 from .runbooks import RunbooksScreen
+from .urls_credentials import UrlsCredentialsScreen
 
 __all__ = [
     "NavigationCommand",
@@ -28,4 +29,5 @@ __all__ = [
     "LogsScreen",
     "MainMenuScreen",
     "RunbooksScreen",
+    "UrlsCredentialsScreen",
 ]

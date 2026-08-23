@@ -409,12 +409,46 @@ one generation, matching every other armed screen's one-shot posture;
 missing Dashboard resources show an error instead of crashing or
 silently redeploying. All met in this PR.
 
+### M10 — URLs & Credentials screen (fourth pick from the follow-up)
+
+The fourth slice of #446: `urls_creds()` in `scripts/wizard/operations.sh`.
+Entirely read-only, and the first screen in this migration whose whole
+purpose is credential-adjacent yet never touches an actual secret
+*value* -- only presence.
+
+- `src/fortifylab/services/urls_credentials_service.py` (new) —
+  `UrlsCredentialsService.secret_key_exists()` mirrors
+  `scripts/wizard/guided.sh`'s own `secret_key_exists()`: fetch a Secret
+  key via `kubectl get secret ... -o jsonpath=...`, check it's non-empty,
+  and return a boolean. It never decodes or returns the value itself --
+  there is no `base64 -d` anywhere in this service, by design and by test
+  (`test_never_requests_the_decoded_value`).
+- `src/fortifylab/tui/screens/urls_credentials.py` (new) —
+  `UrlsCredentialsScreen` shows service URLs (from the current `.env`,
+  through the same `display_value` redaction `ConfigurationScreen`
+  already uses), static login guidance and retrieval-command text ported
+  verbatim from Bash, and an opt-in (`c`) credential-availability check
+  that only ever renders "available"/"unavailable" per credential.
+- No existing `OPERATOR_MENU` item covered this, so a new one was added:
+  `MenuItem("urls-credentials", "URLs & Credentials", ...)`.
+- **Scope trim, deliberate**: revealing an actual credential value is not
+  wired. Bash's `credential_reveal_once` requires typing the literal word
+  `REVEAL` first -- the same typed-confirmation blocker as destroy, and
+  there is still no text-entry widget to gate that with the same care.
+
+**Done when:** `UrlsCredentialsScreen` is reachable from the main menu
+(`o` on URLs & Credentials); service URLs render from `.env` with the
+same redaction every other screen uses; login guidance and retrieval
+commands match the Bash text; the availability check never renders a
+credential's actual value, only presence. All met in this PR.
+
 ## What this PR actually delivers
 
-M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), and M9
-(Kubernetes Dashboard access) as the first three picks from the post-M6
-follow-up -- M6 delivered as an opt-in preview hook, not a default
-cutover, because the parity that cutover depends on doesn't exist yet.
+M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
+(Kubernetes Dashboard access), and M10 (URLs & Credentials) as the first
+four picks from the post-M6 follow-up -- M6 delivered as an opt-in
+preview hook, not a default cutover, because the parity that cutover
+depends on doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked
 here rather than claimed. This keeps the claim in this document honest:

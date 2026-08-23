@@ -21,6 +21,7 @@ from fortifylab.tui.screens.help import HelpScreen  # noqa: E402
 from fortifylab.tui.screens.logs import LogsScreen  # noqa: E402
 from fortifylab.tui.screens.main_menu import MainMenuScreen  # noqa: E402
 from fortifylab.tui.screens.runbooks import RunbooksScreen  # noqa: E402
+from fortifylab.tui.screens.urls_credentials import UrlsCredentialsScreen  # noqa: E402
 from fortifylab.tui.theme import TerminalStyle  # noqa: E402
 
 
@@ -71,6 +72,11 @@ class MainMenuOpensM4ScreensTests(unittest.TestCase):
         self.assertEqual(command.kind, NavigationKind.PUSH)
         self.assertIsInstance(command.screen, DashboardAccessScreen)
 
+    def test_o_on_urls_credentials_opens_urls_credentials_screen(self) -> None:
+        command = self._push_via_o("urls-credentials")
+        self.assertEqual(command.kind, NavigationKind.PUSH)
+        self.assertIsInstance(command.screen, UrlsCredentialsScreen)
+
     def test_preview_hints_at_opening_for_all_wired_items(self) -> None:
         menu = MainMenuScreen(style=TerminalStyle(color=False, symbols=False))
         for key in (
@@ -83,6 +89,7 @@ class MainMenuOpensM4ScreensTests(unittest.TestCase):
             "help",
             "tools",
             "kubernetes-dashboard",
+            "urls-credentials",
         ):
             index = next(i for i, item in enumerate(menu.items) if item.key == key)
             menu.selected_index = index

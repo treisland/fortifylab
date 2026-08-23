@@ -27,6 +27,7 @@ from .guided_deploy import GuidedDeployScreen
 from .help import HelpScreen
 from .logs import LogsScreen
 from .runbooks import RunbooksScreen
+from .urls_credentials import UrlsCredentialsScreen
 
 _UP_KEYS = {"up", "k"}
 _DOWN_KEYS = {"down", "j"}
@@ -44,6 +45,7 @@ _SCREEN_FACTORIES: dict[str, Callable[[], Screen]] = {
     "help": HelpScreen,
     "tools": FlightPlansScreen,
     "kubernetes-dashboard": DashboardAccessScreen,
+    "urls-credentials": UrlsCredentialsScreen,
 }
 
 
