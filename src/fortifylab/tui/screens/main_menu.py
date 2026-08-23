@@ -21,6 +21,7 @@ from .applications import ApplicationsScreen
 from .base import NavigationCommand, Screen
 from .configuration import ConfigurationScreen
 from .diagnostics import DiagnosticsScreen
+from .flight_plans import FlightPlansScreen
 from .guided_deploy import GuidedDeployScreen
 from .help import HelpScreen
 from .logs import LogsScreen
@@ -40,6 +41,7 @@ _SCREEN_FACTORIES: dict[str, Callable[[], Screen]] = {
     "diagnostics": DiagnosticsScreen,
     "runbooks": RunbooksScreen,
     "help": HelpScreen,
+    "tools": FlightPlansScreen,
 }
 
 

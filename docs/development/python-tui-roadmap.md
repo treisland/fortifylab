@@ -317,29 +317,54 @@ behavior is provably unchanged. Both met in this PR, verified by tests
 that exercise the actual hook (not just its presence) and by the
 pre-existing wizard contract tests continuing to pass unmodified.
 
+### M7 — Flight Plans screen (first pick from the post-M6 follow-up)
+
+The first screen picked off the remaining-menu-parity list (see Issue
+tracking below): a read-only Flight Plans screen (`versions_menu()`'s
+preview half in `scripts/wizard/menu.sh`), wired to the `tools` menu item
+(its description already says "fcli readiness, versions, registry checks,
+and operator utilities" -- this covers the "versions" part).
+
+- `src/fortifylab/tui/screens/flight_plans.py` — `FlightPlansScreen` lists
+  every Flight Plan in the catalog (via the existing, unmodified
+  `fortifylab.domain.flight_plans`/`fortifylab.services.flight_plan_service`
+  from M1), marks the default, and on `enter` shows a plan's components
+  plus a live comparison against the current `.env`
+  (`FlightPlanService.compare_env`, also unmodified).
+- Read-only, same rationale as `ConfigurationScreen` skipping free-text
+  edits in M4: promoting a candidate, applying a plan (which writes
+  `.env`), and Docker Hub discovery all stay
+  Bash/`scripts/tools/flight-plans.py`-only for now -- those are real
+  writes and this screen has no text-entry widget to gate them with the
+  care the Bash flow already takes.
+
+**Done when:** `FlightPlansScreen` is reachable from the main menu (`o` on
+Tools); every catalog plan renders; a plan's components compare correctly
+against `.env` (aligned/drifted/review-required); a missing or malformed
+catalog shows an error instead of crashing. All met in this PR.
+
 ## What this PR actually delivers
 
-M1 through M6, as scoped above -- M6 delivered as an opt-in preview hook,
-not a default cutover, because the parity that cutover depends on doesn't
-exist yet. Full menu parity, the fcli lifecycle, and the actual default
-flip are real, sizeable follow-on work, tracked here rather than claimed.
-This keeps the claim in this document honest: an 11,000-line Bash wizard
-does not get ported in one PR, and pretending otherwise would just move
-the risk from "still Bash" to "untested Python," or worse, "silently
-regressed Bash."
+M1 through M6, plus M7 (Flight Plans screen) as the first pick from the
+post-M6 follow-up -- M6 delivered as an opt-in preview hook, not a default
+cutover, because the parity that cutover depends on doesn't exist yet.
+Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
+and the actual default flip are real, sizeable follow-on work, tracked
+here rather than claimed. This keeps the claim in this document honest:
+an 11,000-line Bash wizard does not get ported in one PR, and pretending
+otherwise would just move the risk from "still Bash" to "untested
+Python," or worse, "silently regressed Bash."
 
 ## Issue tracking
 
-Each milestone above has a corresponding GitHub issue under parent tracking
-issue [#437](https://github.com/treisland/fortifylab/issues/437) on
-`treisland/fortifylab`, labeled `python-tui-migration`:
+M1-M6 were tracked under parent issue #437 (with children #438-443), all
+closed as completed. Follow-up work (including M7 above) is tracked under
+a new parent issue on `treisland/fortifylab`, labeled `python-tui-migration`:
 
-- [#438](https://github.com/treisland/fortifylab/issues/438) — M1: Domain extraction
-- [#439](https://github.com/treisland/fortifylab/issues/439) — M2: Interactive TUI framework + main menu screen
-- [#440](https://github.com/treisland/fortifylab/issues/440) — M3: Deploy service + live guided deployment
-- [#441](https://github.com/treisland/fortifylab/issues/441) — M4: Applications, configuration, logs screens
-- [#442](https://github.com/treisland/fortifylab/issues/442) — M5: Diagnostics, runbooks, help, fcli/trust lifecycle
-- [#443](https://github.com/treisland/fortifylab/issues/443) — M6: Cutover readiness
+- [#445](https://github.com/treisland/fortifylab/issues/445) — parent: post-M6 follow-up
+- [#446](https://github.com/treisland/fortifylab/issues/446) — Remaining menu parity (~15 unported actions + narrower-than-Bash gaps; M7 above is the Flight Plans slice of this)
+- [#447](https://github.com/treisland/fortifylab/issues/447) — fcli activation/trust-import lifecycle (blocked on Bash-side churn slowing down)
+- [#448](https://github.com/treisland/fortifylab/issues/448) — Default entrypoint cutover (blocked on #446 + manual test gates)
 
-The parent issue lists all six and is the place to check current status; this
+The parent issue lists all three and is the place to check current status; this
 document is the place to check *scope and acceptance criteria* for each one.
