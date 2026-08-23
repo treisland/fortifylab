@@ -20,20 +20,26 @@ from ..theme import TerminalStyle
 from .applications import ApplicationsScreen
 from .base import NavigationCommand, Screen
 from .configuration import ConfigurationScreen
+from .diagnostics import DiagnosticsScreen
 from .guided_deploy import GuidedDeployScreen
+from .help import HelpScreen
 from .logs import LogsScreen
+from .runbooks import RunbooksScreen
 
 _UP_KEYS = {"up", "k"}
 _DOWN_KEYS = {"down", "j"}
 _QUIT_KEYS = {"q", "Q"}
 
 # Menu item key -> factory for its real screen. An item not listed here is
-# still preview-only; add its factory here once its screen exists (M5+).
+# still preview-only; add its factory here once its screen exists (M6).
 _SCREEN_FACTORIES: dict[str, Callable[[], Screen]] = {
     "deploy": GuidedDeployScreen,
     "applications": ApplicationsScreen,
     "configuration": ConfigurationScreen,
     "logs": LogsScreen,
+    "diagnostics": DiagnosticsScreen,
+    "runbooks": RunbooksScreen,
+    "help": HelpScreen,
 }
 
 

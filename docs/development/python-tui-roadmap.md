@@ -206,12 +206,45 @@ wizard's skip-selection-when-one-match behavior. All met in this PR.
   `GuidedDeployScreen`, `ApplicationsScreen`, and `ConfigurationScreen` was
   factored into a shared `Armable` dataclass mixin (`tui/screens/base.py`).
 
-### M5 — Diagnostics, runbooks, help, fcli/trust lifecycle (tracked, not in this PR)
+### M5 — Diagnostics, runbooks, help screens
 
-Port `live_status`, `runbooks_menu`, `help_center`, and the fcli
-activation/trust-import lifecycle (`domain/fcli.py`) once the Bash fcli flow
-in `operations.sh` stabilizes (it's the most actively bug-fixed area on `dev`
-right now — deliberately last so the port isn't chasing a moving target).
+Ports `live_status`, `runbooks_menu`, and `help_center` -- each backed by an
+existing, already-safe module, so this milestone is mostly wiring rather
+than new logic:
+
+- `src/fortifylab/tui/screens/diagnostics.py` — `DiagnosticsScreen` runs
+  the existing `ClusterCollector` (already read-only and injectable,
+  unchanged) and can write a sanitized diagnostics bundle from the
+  collected results via the existing `diagnostics.write_bundle`
+  (sanitization was already built in; this milestone just feeds it real
+  collector output instead of the CLI's static placeholder text).
+- `src/fortifylab/tui/screens/runbooks.py` — `RunbooksScreen` lists the
+  three topics `OperationCatalog.runbook()` already knows
+  (`first-scan`, `backup`, `troubleshooting`) and previews them via the
+  existing safe `sed`-excerpt operation. Read-only, no arming concept at
+  all -- there's nothing to execute.
+- `src/fortifylab/domain/help_center.py` (new) + `src/fortifylab/tui/screens/help.py`
+  — `HelpScreen` ports the topic table from `scripts/lib/help.sh`'s
+  `HELP_TOPIC_ID`/`HELP_TOPIC_LABEL`/`HELP_TOPIC_FILE` arrays (only the 13
+  topics `help_center()`'s own interactive menu actually lists -- the
+  Bash script's `guided/*`/`troubleshooting/*` alias IDs are used by
+  *other* flows for contextual help, not this menu) and renders the same
+  committed, offline `docs/help/*.txt` files the Bash version reads. No
+  new help content was written; this is a loader for existing text.
+
+**Deliberately not in this milestone**: the fcli activation/trust-import
+lifecycle (`domain/fcli.py`). It remains the most actively bug-fixed area
+on `dev` (see the M5 rationale this replaces below) -- porting it now would
+mean chasing a moving target. Left for a dedicated follow-up once that
+Bash flow settles; not tracked under a numbered milestone here since it
+doesn't block M6 cutover readiness the way M1-M5 do.
+
+**Done when:** `DiagnosticsScreen`/`RunbooksScreen`/`HelpScreen` are
+reachable from the main menu (`o` on Diagnostics/Runbooks/Help);
+diagnostics collection and bundle writing use real collector output;
+runbook previews match `OperationCatalog.runbook()`'s existing three
+topics; every listed help topic loads its real, committed `docs/help/*.txt`
+content. All met in this PR.
 
 ### M6 — Cutover readiness (tracked, not in this PR)
 
@@ -221,12 +254,11 @@ runway branch to `dev`.
 
 ## What this PR actually delivers
 
-M1 through M4, fully implemented and tested. M5-M6 are filed as tracked
-GitHub issues (see below) for follow-on PRs against this runway branch —
-they are not implemented here. This keeps the claim in this document
-honest: an 11,000-line Bash wizard does not get ported in one PR, and
-pretending otherwise would just move the risk from "still Bash" to
-"untested Python."
+M1 through M5, fully implemented and tested. M6 is filed as a tracked
+GitHub issue (see below) for a follow-on PR against this runway branch —
+it is not implemented here. This keeps the claim in this document honest:
+an 11,000-line Bash wizard does not get ported in one PR, and pretending
+otherwise would just move the risk from "still Bash" to "untested Python."
 
 ## Issue tracking
 
