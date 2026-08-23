@@ -136,6 +136,12 @@ for now: both need a typed confirmation phrase or a key/value the TUI has
 no text-entry widget for yet. The fcli activation/trust-import lifecycle
 also stays Bash-wizard-only, deliberately not yet ported (see the roadmap).
 
+`./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`
+and it execs into the Python TUI above (after the same acknowledgement,
+env bootstrap, and fcli activation every run already does) instead of
+entering the Bash menu. It's a preview, not the default — leave the
+variable unset and `start_wizard.sh` behaves exactly as before.
+
 Install `requirements-python.txt` only if you're developing or previewing
 those CLI/TUI slices (kept separate from `requirements-docs.txt`, which is
 for building the documentation site):
