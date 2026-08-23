@@ -45,8 +45,11 @@ standalone script, with no behavior change to the running wizard.
 - `src/fortifylab/domain/flight_plans.py` — `Catalog`/`FlightPlan` dataclasses
   ported from `scripts/tools/flight-plans.py` (currently a flat script, not
   part of the package).
-- `src/fortifylab/services/flight_plan_service.py` — the Docker Hub/registry
-  query and version-comparison logic, separated from the catalog model.
+- `src/fortifylab/services/flight_plan_service.py` — read-only Flight Plan
+  queries a screen needs (listing plans, comparing the current `.env`
+  against a plan, natural-sort version comparison), separated from the
+  catalog model. Docker Hub/registry discovery itself stays in
+  `scripts/tools/flight-plans.py` for now — it isn't ported here.
 
 **Done when:** unit tests cover catalog loading, version comparison, and the
 scan-type protocol dispatch, with no changes to `scripts/wizard/*.sh` or
@@ -66,17 +69,22 @@ stack.
   `handle_event()`, `on_enter()` / `on_exit()`).
 - `src/fortifylab/tui/screens/main_menu.py` — first real screen, ported from
   `scripts/wizard/menu.sh`'s `main_menu()`, reachable via
-  `./bin/fortifylab tui` (interactive, not `--demo-screen`).
-- `src/fortifylab/app.py` — composition root: constructs `ConfigStore`,
-  `OperationRunner`, `ClusterCollector`, etc. once, wires them into services,
-  and starts the router on the main menu screen.
+  `./bin/fortifylab tui --interactive` (the plain `tui` subcommand still
+  renders the static preview; `--demo-screen` still renders the guided-step
+  prototype).
+- `src/fortifylab/app.py` — composition root for the TUI process only:
+  builds the `TerminalScreen` output adapter and starts the `Router` on
+  `MainMenuScreen`. It does not yet construct `ConfigStore`,
+  `OperationRunner`, `ClusterCollector`, or any other live service — that
+  wiring lands with M3+ as each screen needs it.
 
-**Done when:** `./bin/fortifylab tui` opens a real interactive main menu
-(arrow keys or number keys, quit, help) rendered through `TerminalScreen`,
-backed by live `ConfigStore`/dashboard data, with no destructive actions
-wired yet (navigation only — selecting a mutating action shows its
-`OperationSpec` preview, matching today's `deploy --plan` behavior, not a live
-run).
+**Done when:** `./bin/fortifylab tui --interactive` opens a real interactive
+main menu (arrow keys or number keys, quit, help) rendered through
+`TerminalScreen`, backed by the same static `OPERATOR_MENU` descriptions as
+today's preview (not live `ConfigStore`/dashboard data yet), with no
+destructive actions wired yet (navigation only — selecting an item shows its
+description as a preview, matching today's `deploy --plan` behavior, not a
+live run).
 
 ### M3 — Deploy service + live guided deployment (tracked, not in this PR)
 

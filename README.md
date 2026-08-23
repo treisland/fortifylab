@@ -111,6 +111,16 @@ preview commands run from a clone with the standard library only:
 ./bin/fortifylab --help
 ```
 
+A real interactive main menu (arrow keys or `j`/`k`, number keys, `enter` to
+preview, `q` to quit) is available from a terminal with:
+
+```bash
+./bin/fortifylab tui --interactive
+```
+
+It's navigation-only so far — selecting an item shows its description, the
+same as `deploy --plan` does today, not a live run.
+
 Install `requirements-python.txt` only if you're developing or previewing
 those CLI/TUI slices (kept separate from `requirements-docs.txt`, which is
 for building the documentation site):

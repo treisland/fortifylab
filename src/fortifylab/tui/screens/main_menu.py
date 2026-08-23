@@ -77,7 +77,10 @@ class MainMenuScreen(Screen):
         return NavigationCommand.stay()
 
     def _select_by_position(self, one_based: int) -> None:
-        index = one_based - 1
+        # Conventional terminal-menu digit mapping: 1-9 select items 1-9, and
+        # "0" selects the 10th item (there is no digit for one-based position
+        # 10 otherwise, so a bare "0" would silently fail to select anything).
+        index = 9 if one_based == 0 else one_based - 1
         if 0 <= index < len(self.items):
             self.selected_index = index
             self.show_detail = True
