@@ -122,7 +122,8 @@ Most items are still navigation-only — selecting one shows its description,
 the same as `deploy --plan` does today, not a live run. Eight items are live
 screens instead (press `o` to open): **Deploy / Resume** (a Guided
 deployment screen for the SSC-only profile), **Applications** (start/stop
-for ssc/lim/mysql/postgresql), **Configuration** (redacted `.env` view plus
+for ssc/lim/mysql/postgresql and the sample apps Juice Shop/WebGoat/DVWA),
+**Configuration** (redacted `.env` view plus
 backup/rollback), **Logs** (pick a component, then a pod, then tail it),
 **Diagnostics** (run the read-only collector and write a sanitized bundle),
 **Runbooks** (safe previews of the first-scan, backup, and troubleshooting
