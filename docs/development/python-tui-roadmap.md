@@ -426,21 +426,32 @@ purpose is credential-adjacent yet never touches an actual secret
 - `src/fortifylab/tui/screens/urls_credentials.py` (new) —
   `UrlsCredentialsScreen` shows service URLs (from the current `.env`,
   through the same `display_value` redaction `ConfigurationScreen`
-  already uses), static login guidance and retrieval-command text ported
-  verbatim from Bash, and an opt-in (`c`) credential-availability check
-  that only ever renders "available"/"unavailable" per credential.
+  already uses), the static four-line login-guidance block ported
+  verbatim from `urls_creds_summary()` in Bash, and an opt-in (`c`)
+  credential-availability check that only ever renders
+  "available"/"unavailable" per credential.
 - No existing `OPERATOR_MENU` item covered this, so a new one was added:
   `MenuItem("urls-credentials", "URLs & Credentials", ...)`.
 - **Scope trim, deliberate**: revealing an actual credential value is not
   wired. Bash's `credential_reveal_once` requires typing the literal word
   `REVEAL` first -- the same typed-confirmation blocker as destroy, and
   there is still no text-entry widget to gate that with the same care.
+  Two other `urls_creds()` submenu items also stay Bash-wizard-only:
+  `credential_retrieval_commands()`'s `kubectl`/`base64 -d` one-liners and
+  `ssc_login_guidance()`'s longer standalone screen (the short login-guidance
+  block that *is* ported comes from `urls_creds_summary()`, not from
+  `ssc_login_guidance()`) -- neither is read-only-simple enough to justify
+  its own screen yet, so they're left as follow-on scope rather than
+  silently ported partway.
 
 **Done when:** `UrlsCredentialsScreen` is reachable from the main menu
 (`o` on URLs & Credentials); service URLs render from `.env` with the
-same redaction every other screen uses; login guidance and retrieval
-commands match the Bash text; the availability check never renders a
-credential's actual value, only presence. All met in this PR.
+same redaction every other screen uses; the login-guidance block matches
+`urls_creds_summary()`'s Bash text; the availability check never renders a
+credential's actual value, only presence. All met in this PR. Credential
+retrieval commands and the standalone SSC login-guidance screen are not
+rendered anywhere in this screen -- that's still Bash-wizard-only, not a
+gap in this PR's own claims.
 
 ## What this PR actually delivers
 

@@ -1,16 +1,21 @@
 """URLs & Credentials screen -- the interactive replacement for
 ``urls_creds()`` in ``scripts/wizard/operations.sh``.
 
-Entirely read-only: service URLs and login guidance come from the current
-``.env`` (redacted the same way ``ConfigurationScreen`` already redacts
-every ``.env`` value), retrieval commands and SSC guidance are static
-text, and credential *availability* (present/unavailable, never the value
-itself) is an opt-in check via ``UrlsCredentialsService``.
+Entirely read-only: service URLs come from the current ``.env`` (redacted
+the same way ``ConfigurationScreen`` already redacts every ``.env``
+value), the four-line login-guidance block is static text ported verbatim
+from Bash's ``urls_creds_summary()``, and credential *availability*
+(present/unavailable, never the value itself) is an opt-in check via
+``UrlsCredentialsService``.
 
-Not wired: revealing an actual credential value. Bash's
-``credential_reveal_once`` requires typing the literal word ``REVEAL``
-first -- the same typed-confirmation blocker as destroy, and there is no
-text-entry widget in the TUI to gate that with the same care.
+Not wired: the other two read-only items on Bash's ``urls_creds()``
+submenu -- ``credential_retrieval_commands()`` (the ``kubectl``/``base64
+-d`` one-liners) and ``ssc_login_guidance()`` (a longer standalone screen,
+distinct from the short block this screen does render) -- and revealing
+an actual credential value. Bash's ``credential_reveal_once`` requires
+typing the literal word ``REVEAL`` first -- the same typed-confirmation
+blocker as destroy, and there is no text-entry widget in the TUI to gate
+that with the same care.
 """
 
 from __future__ import annotations

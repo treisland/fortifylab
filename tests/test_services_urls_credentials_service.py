@@ -29,6 +29,16 @@ class SecretKeyExistsTests(unittest.TestCase):
         service = UrlsCredentialsService(runner=lambda args: CommandResult(args, 0, "", "", 0.0))
         self.assertFalse(service.secret_key_exists("fortify-secrets", "some-other-key"))
 
+    def test_return_value_is_strictly_boolean(self) -> None:
+        # Guards the "safe boolean" boundary flagged in security review: a
+        # future refactor that returns the CommandResult (or its stdout)
+        # instead of a bool would silently start leaking secret material
+        # through this function's return value.
+        present = UrlsCredentialsService(runner=lambda args: CommandResult(args, 0, "c29tZS12YWx1ZQ==", "", 0.0))
+        absent = UrlsCredentialsService(runner=lambda args: CommandResult(args, 1, "", "not found", 0.0))
+        self.assertIs(present.secret_key_exists("lim-admin-credentials", "password"), True)
+        self.assertIs(absent.secret_key_exists("lim-admin-credentials", "password"), False)
+
     def test_never_requests_the_decoded_value(self) -> None:
         # This function must only ever ask for existence via jsonpath, never
         # pipe through base64 -d or otherwise request the decoded secret.
