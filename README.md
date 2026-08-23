@@ -119,22 +119,26 @@ preview, `q` to quit) is available from a terminal with:
 ```
 
 Most items are still navigation-only — selecting one shows its description,
-the same as `deploy --plan` does today, not a live run. Seven items are live
+the same as `deploy --plan` does today, not a live run. Eight items are live
 screens instead (press `o` to open): **Deploy / Resume** (a Guided
 deployment screen for the SSC-only profile), **Applications** (start/stop
 for ssc/lim/mysql/postgresql), **Configuration** (redacted `.env` view plus
 backup/rollback), **Logs** (pick a component, then a pod, then tail it),
 **Diagnostics** (run the read-only collector and write a sanitized bundle),
 **Runbooks** (safe previews of the first-scan, backup, and troubleshooting
-topics), and **Help** (the offline Help Center topics). The mutating
-screens (Deploy, Applications, Configuration) preview dry-run by default
-and require pressing `a` to arm real execution before `enter` runs
-anything against your cluster — the same posture as the Bash wizard;
-Diagnostics, Runbooks, and Help are read-only and have no arming step at
-all. Destroy actions and free-text `.env` editing stay Bash-wizard-only
-for now: both need a typed confirmation phrase or a key/value the TUI has
-no text-entry widget for yet. The fcli activation/trust-import lifecycle
-also stays Bash-wizard-only, deliberately not yet ported (see the roadmap).
+topics), **Tools** (Flight Plans: list the catalog and compare a plan's
+components against the current `.env`), and **Help** (the offline Help
+Center topics). The mutating screens (Deploy, Applications, Configuration)
+preview dry-run by default and require pressing `a` to arm real execution
+before `enter` runs anything against your cluster — the same posture as
+the Bash wizard; Diagnostics, Runbooks, Tools, and Help are read-only and
+have no arming step at all. Destroy actions and free-text `.env` editing
+stay Bash-wizard-only for now: both need a typed confirmation phrase or a
+key/value the TUI has no text-entry widget for yet. Promoting a Flight
+Plan candidate, applying one (writes `.env`), and Docker Hub discovery
+also stay Bash-wizard-only, same reason. The fcli activation/trust-import
+lifecycle also stays Bash-wizard-only, deliberately not yet ported (see
+the roadmap).
 
 `./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`
 and it execs into the Python TUI above (after the same acknowledgement,

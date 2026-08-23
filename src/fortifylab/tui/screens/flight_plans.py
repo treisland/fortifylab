@@ -37,7 +37,7 @@ class FlightPlansScreen(Screen):
             return
         try:
             self.service = FlightPlanService(merged_read_catalog(default_catalog_path()))
-        except (FileNotFoundError, tomllib.TOMLDecodeError) as exc:
+        except (OSError, tomllib.TOMLDecodeError) as exc:
             self.load_error = f"Could not load the Flight Plan catalog: {exc}"
             self.service = FlightPlanService(Catalog(path=default_catalog_path(), data={}))
 

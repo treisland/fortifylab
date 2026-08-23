@@ -133,6 +133,25 @@ class FlightPlansScreenTests(unittest.TestCase):
             self.assertIsNotNone(broken.load_error)
             self.assertIn("Could not load", broken.render())
 
+    def test_unreadable_catalog_path_shows_an_error_not_a_crash(self) -> None:
+        # A directory in place of the catalog file raises IsADirectoryError
+        # (an OSError, not a FileNotFoundError) when opened -- same family
+        # as a permission-denied catalog. This must surface as load_error,
+        # not escape __post_init__ and crash the screen.
+        import fortifylab.tui.screens.flight_plans as flight_plans_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            not_a_file = Path(directory) / "flight-plans.toml"
+            not_a_file.mkdir()
+            original = flight_plans_module.default_catalog_path
+            flight_plans_module.default_catalog_path = lambda: not_a_file
+            try:
+                broken = FlightPlansScreen(style=TerminalStyle(color=False, symbols=False))
+            finally:
+                flight_plans_module.default_catalog_path = original
+            self.assertIsNotNone(broken.load_error)
+            self.assertIn("Could not load", broken.render())
+
     def test_real_repo_catalog_loads_without_crashing(self) -> None:
         # Uses the actual default_catalog_path()/merged_read_catalog() path
         # (the default when no service is injected), against the real
