@@ -26,7 +26,17 @@ from typing import Protocol
 @dataclass(frozen=True)
 class ScanStep:
     """One stage of a scan-type's run, matching one ``scan_type_<verb>_<type>``
-    Bash function."""
+    Bash function.
+
+    ``command_template`` is an argv tuple with ``{placeholder}`` tokens
+    (e.g. ``("fcli", "ssc", "session", "login", "--url", "{ssc_url}")``).
+    Whichever module eventually executes these (M3+) must format and run
+    them as a list passed to a non-shell subprocess call (see
+    ``core.command.run_command``), the same way every other operation in
+    this codebase runs commands. Never ``" ".join(...)`` a template and
+    hand it to a shell -- ``ssc_url``/``app``/``release``/``session_name``
+    can come from catalog or user-supplied data.
+    """
 
     verb: str
     label: str

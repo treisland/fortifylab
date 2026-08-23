@@ -21,7 +21,7 @@ from fortifylab.domain.flight_plans import (  # noqa: E402
     merged_read_catalog,
     validate_catalog,
 )
-from fortifylab.services.flight_plan_service import FlightPlanService, version_sort_key  # noqa: E402
+from fortifylab.services.flight_plan_service import FlightPlanService, parse_env_file, version_sort_key  # noqa: E402
 
 
 class FlightPlanDomainTests(unittest.TestCase):
@@ -107,6 +107,35 @@ class FlightPlanDomainTests(unittest.TestCase):
             base_path.write_text("schema_version = 1\n\n[flight_plans]\n", encoding="utf-8")
             local = load_local_catalog(base_path)
             self.assertEqual(local.flight_plans, {})
+
+
+class ParseEnvFileSecurityTests(unittest.TestCase):
+    def test_never_returns_keys_outside_the_allowlist_even_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text(
+                textwrap.dedent(
+                    """
+                    FORTIFY_SSC_CHART_VERSION=26.2.0-1
+                    DEFAULT_PASS=super-secret
+                    FORTIFY_LICENSE_FILE=/secrets/input/fortify.license
+                    SSC_ADMIN_TOKEN=abc123
+                    """
+                ),
+                encoding="utf-8",
+            )
+            values = parse_env_file(env_path)
+            self.assertEqual(values, {"FORTIFY_SSC_CHART_VERSION": "26.2.0-1"})
+            self.assertNotIn("DEFAULT_PASS", values)
+            self.assertNotIn("FORTIFY_LICENSE_FILE", values)
+            self.assertNotIn("SSC_ADMIN_TOKEN", values)
+
+    def test_caller_must_opt_in_explicitly_to_read_other_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text("DOMAIN=fortifydemo.com\n", encoding="utf-8")
+            self.assertEqual(parse_env_file(env_path), {})
+            self.assertEqual(parse_env_file(env_path, allowed_keys=("DOMAIN",)), {"DOMAIN": "fortifydemo.com"})
 
 
 class VersionSortKeyTests(unittest.TestCase):

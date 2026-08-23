@@ -92,10 +92,36 @@ class TerminalInput:
         return KeyEvent(_normalize_key(first))
 
     def _read_byte(self, *, timeout: float | None) -> str | None:
+        """Read one *character* from the fd, blocking on ``select()`` for
+        the first byte only.
+
+        A multi-byte UTF-8 character (e.g. an accented letter typed on an
+        international keyboard) arrives as several bytes in the same
+        kernel read buffer. Decoding one raw byte at a time with
+        ``errors="replace"`` — as a naive port of this would — mangles
+        every such character into one U+FFFD per byte, since a lone
+        continuation byte is not valid UTF-8 on its own. Instead, use the
+        leading byte to determine how many continuation bytes to expect
+        and decode the whole sequence together.
+        """
         ready, _, _ = select.select([self._fd], [], [], timeout)
         if not ready:
             return None
-        return os.read(self._fd, 1).decode(errors="replace")
+        first = os.read(self._fd, 1)
+        lead = first[0]
+        if lead < 0x80:
+            length = 1
+        elif lead & 0xE0 == 0xC0:
+            length = 2
+        elif lead & 0xF0 == 0xE0:
+            length = 3
+        elif lead & 0xF8 == 0xF0:
+            length = 4
+        else:
+            # Not a valid UTF-8 lead byte (e.g. a stray continuation byte).
+            return first.decode(errors="replace")
+        remaining = os.read(self._fd, length - 1) if length > 1 else b""
+        return (first + remaining).decode(errors="replace")
 
     def _read_escape_tail(self) -> str:
         chunk = self._read_byte(timeout=0.05)

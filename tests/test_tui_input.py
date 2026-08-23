@@ -59,6 +59,11 @@ class TerminalInputReadEventTests(unittest.TestCase):
         event = self.input.read_event(timeout=1)
         self.assertEqual(event.key, "escape")
 
+    def test_multibyte_utf8_character_decodes_correctly(self) -> None:
+        self._send("é")
+        event = self.input.read_event(timeout=1)
+        self.assertEqual(event.key, "é")
+
     def test_timeout_with_no_input_returns_none(self) -> None:
         event = self.input.read_event(timeout=0.05)
         self.assertIsNone(event)

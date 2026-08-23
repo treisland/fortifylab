@@ -10,12 +10,19 @@ version tags, both pure and independent of that network path.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 import re
 from typing import Any
 
 from ..domain.flight_plans import Catalog, DATABASE_KEYS, FORTIFY_KEYS, FlightPlanRecord
+
+# The only keys this module ever needs out of a .env file: component/image
+# version tags. Never widen this default -- .env also holds passwords,
+# license paths, and registry tokens that must never round-trip through a
+# general-purpose parse function. See security review on PR for M1/M2.
+_DEFAULT_ALLOWED_KEYS = frozenset(FORTIFY_KEYS) | frozenset(DATABASE_KEYS)
 
 
 def version_sort_key(tag: str) -> tuple[Any, ...]:
@@ -26,7 +33,16 @@ def version_sort_key(tag: str) -> tuple[Any, ...]:
     return tuple(int(piece) if piece.isdigit() else piece for piece in pieces)
 
 
-def parse_env_file(path: Path) -> dict[str, str]:
+def parse_env_file(path: Path, *, allowed_keys: Iterable[str] = _DEFAULT_ALLOWED_KEYS) -> dict[str, str]:
+    """Read only ``allowed_keys`` out of a ``.env``-style file.
+
+    This is intentionally not a general-purpose ``.env`` parser: a `.env`
+    file also holds passwords, license paths, and registry tokens, and
+    nothing here may return those. Callers that need a different set of
+    keys must say so explicitly; there is no "give me everything" mode.
+    """
+
+    allowed = frozenset(allowed_keys)
     values: dict[str, str] = {}
     if not path.exists():
         return values
@@ -36,6 +52,8 @@ def parse_env_file(path: Path) -> dict[str, str]:
         if not match:
             continue
         key, raw = match.groups()
+        if key not in allowed:
+            continue
         raw = raw.strip()
         if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {'"', "'"}:
             raw = raw[1:-1]
