@@ -369,12 +369,52 @@ apps became three more rows on the existing `ApplicationsScreen`, labeled
 a test locking in the `apps/samples/<id>/` path shape so a future core-app
 addition doesn't silently reuse the wrong template. All met in this PR.
 
+### M9 — Kubernetes Dashboard access screen (third pick from the follow-up)
+
+The third slice of #446: the ephemeral-token half of
+`dashboard_access_menu()` in `scripts/wizard/operations.sh`. Unlike M7/M8,
+no existing `OPERATOR_MENU` item fit this -- `dashboard` covers lab health
+(`live_status`), `applications` covers app *lifecycle* including the
+Dashboard's own deploy/destroy, but none of the ten items covered
+*generating access tokens for it*. Added a new item,
+`MenuItem("kubernetes-dashboard", "Kubernetes Dashboard", ...)`.
+
+- `src/fortifylab/services/dashboard_access_service.py` (new) — namespace
+  resolution (`kubernetes-dashboard` vs `kube-system`, matching Bash's own
+  fallback), a resource-readiness check, and `kubectl create token` for
+  the viewer/admin service accounts.
+- `src/fortifylab/tui/screens/dashboard_access.py` (new) —
+  `DashboardAccessScreen`: `v` generates a 1-hour view-only token with no
+  confirmation (matching Bash, which doesn't confirm this option either);
+  `m` generates a 1-hour administrator token, gated by the same
+  `Armable` arm-then-execute pattern as `ApplicationsScreen`/
+  `GuidedDeployScreen` (Bash gates this with a plain y/N confirm, which
+  the arm pattern already expresses -- no typed phrase needed here, unlike
+  destroy). Caught and fixed before any review: pressing `v` while armed
+  (intending `m`) must disarm too, or a stale arm meant for the admin
+  token could silently carry over to a later `m` press.
+- **Scope trim, deliberate**: persistent (non-expiring) tokens are not
+  wired. Bash requires typing the literal word `PERSISTENT` to create a
+  persistent administrator token -- the same typed-confirmation blocker as
+  destroy, and there's still no text-entry widget to gate it with the same
+  care. Bash's auto-repair-by-redeploying-the-Dashboard fallback also
+  isn't ported: that's a deploy operation, out of scope for an
+  access-token screen. This service only reports whether Dashboard
+  resources exist; it never silently redeploys anything.
+
+**Done when:** `DashboardAccessScreen` is reachable from the main menu
+(`o` on Kubernetes Dashboard); a view-only token generates without
+confirmation; an admin token requires arming first and auto-disarms after
+one generation, matching every other armed screen's one-shot posture;
+missing Dashboard resources show an error instead of crashing or
+silently redeploying. All met in this PR.
+
 ## What this PR actually delivers
 
-M1 through M6, plus M7 (Flight Plans screen) and M8 (sample apps) as the
-first two picks from the post-M6 follow-up -- M6 delivered as an opt-in
-preview hook, not a default cutover, because the parity that cutover
-depends on doesn't exist yet.
+M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), and M9
+(Kubernetes Dashboard access) as the first three picks from the post-M6
+follow-up -- M6 delivered as an opt-in preview hook, not a default
+cutover, because the parity that cutover depends on doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked
 here rather than claimed. This keeps the claim in this document honest:

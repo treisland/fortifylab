@@ -14,6 +14,7 @@ from fortifylab.tui.events import KeyEvent  # noqa: E402
 from fortifylab.tui.screens.applications import ApplicationsScreen  # noqa: E402
 from fortifylab.tui.screens.base import NavigationKind  # noqa: E402
 from fortifylab.tui.screens.configuration import ConfigurationScreen  # noqa: E402
+from fortifylab.tui.screens.dashboard_access import DashboardAccessScreen  # noqa: E402
 from fortifylab.tui.screens.diagnostics import DiagnosticsScreen  # noqa: E402
 from fortifylab.tui.screens.flight_plans import FlightPlansScreen  # noqa: E402
 from fortifylab.tui.screens.help import HelpScreen  # noqa: E402
@@ -65,9 +66,24 @@ class MainMenuOpensM4ScreensTests(unittest.TestCase):
         self.assertEqual(command.kind, NavigationKind.PUSH)
         self.assertIsInstance(command.screen, FlightPlansScreen)
 
+    def test_o_on_kubernetes_dashboard_opens_dashboard_access_screen(self) -> None:
+        command = self._push_via_o("kubernetes-dashboard")
+        self.assertEqual(command.kind, NavigationKind.PUSH)
+        self.assertIsInstance(command.screen, DashboardAccessScreen)
+
     def test_preview_hints_at_opening_for_all_wired_items(self) -> None:
         menu = MainMenuScreen(style=TerminalStyle(color=False, symbols=False))
-        for key in ("deploy", "applications", "configuration", "logs", "diagnostics", "runbooks", "help", "tools"):
+        for key in (
+            "deploy",
+            "applications",
+            "configuration",
+            "logs",
+            "diagnostics",
+            "runbooks",
+            "help",
+            "tools",
+            "kubernetes-dashboard",
+        ):
             index = next(i for i, item in enumerate(menu.items) if item.key == key)
             menu.selected_index = index
             menu.show_detail = True

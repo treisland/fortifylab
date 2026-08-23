@@ -15,6 +15,7 @@ from .router import Router
 from .screens import (
     ApplicationsScreen,
     ConfigurationScreen,
+    DashboardAccessScreen,
     DiagnosticsScreen,
     FlightPlansScreen,
     GuidedDeployScreen,
@@ -32,6 +33,7 @@ __all__ = [
     "ApplicationsScreen",
     "ConfigurationScreen",
     "ControlMode",
+    "DashboardAccessScreen",
     "DeploymentProfile",
     "DiagnosticsScreen",
     "Event",

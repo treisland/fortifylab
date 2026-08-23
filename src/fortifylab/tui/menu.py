@@ -22,6 +22,7 @@ OPERATOR_MENU: tuple[MenuItem, ...] = (
     MenuItem("configuration", "Configuration", ".env sections, validation, backups, and derived URL repair"),
     MenuItem("runbooks", "Runbooks", "Interactive parameter forms and safe runbook execution previews"),
     MenuItem("logs", "Logs", "Deployment logs, pod logs, follow mode, and previous container logs"),
+    MenuItem("kubernetes-dashboard", "Kubernetes Dashboard", "Generate view-only or administrator access tokens"),
     MenuItem("diagnostics", "Diagnostics", "Symptom-driven checks and sanitized support bundles"),
     MenuItem("certificates", "Certificates & Trust", "mkcert root CA, lab TLS, Kubernetes secrets, and fcli trust"),
     MenuItem("tools", "Tools", "fcli readiness, versions, registry checks, and operator utilities"),

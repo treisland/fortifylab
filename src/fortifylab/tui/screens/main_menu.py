@@ -20,6 +20,7 @@ from ..theme import TerminalStyle
 from .applications import ApplicationsScreen
 from .base import NavigationCommand, Screen
 from .configuration import ConfigurationScreen
+from .dashboard_access import DashboardAccessScreen
 from .diagnostics import DiagnosticsScreen
 from .flight_plans import FlightPlansScreen
 from .guided_deploy import GuidedDeployScreen
@@ -42,6 +43,7 @@ _SCREEN_FACTORIES: dict[str, Callable[[], Screen]] = {
     "runbooks": RunbooksScreen,
     "help": HelpScreen,
     "tools": FlightPlansScreen,
+    "kubernetes-dashboard": DashboardAccessScreen,
 }
 
 
