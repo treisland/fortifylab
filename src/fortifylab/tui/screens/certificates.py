@@ -38,10 +38,12 @@ class CertificatesScreen(Screen):
     def render(self) -> str:
         values = self._env_values()
         domain = values.get("DOMAIN", "<unset>")
-        fortify_certs = values.get("FORTIFY_CERTS", "<unset>")
-        root_ca = values.get("ROOTCA_CERT") or (
-            f"{fortify_certs}/rootCA.pem" if fortify_certs != "<unset>" else "<unset>"
-        )
+        # Bash: ${ROOTCA_CERT:-$FORTIFY_CERTS/rootCA.pem} -- an unset
+        # FORTIFY_CERTS expands to the empty string there, not a
+        # placeholder, so mirror that with a plain "" default rather than
+        # comparing against the "<unset>" display sentinel.
+        fortify_certs = values.get("FORTIFY_CERTS", "")
+        root_ca = values.get("ROOTCA_CERT") or f"{fortify_certs}/rootCA.pem"
         namespace = values.get("NAMESPACE", "fortify")
 
         lines = [

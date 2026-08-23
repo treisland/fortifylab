@@ -51,6 +51,16 @@ class CertificatesScreenTests(unittest.TestCase):
             screen = _screen(env_dir=Path(directory))
             self.assertIn("<unset>", screen.render())
 
+    def test_root_ca_falls_back_to_bash_default_when_both_unset(self) -> None:
+        # Bash: ${ROOTCA_CERT:-$FORTIFY_CERTS/rootCA.pem} -- with neither
+        # variable set, $FORTIFY_CERTS expands to empty, yielding
+        # "/rootCA.pem", not a placeholder like "<unset>/rootCA.pem".
+        with tempfile.TemporaryDirectory() as directory:
+            screen = _screen(env_dir=Path(directory))
+            rendered = screen.render()
+            self.assertIn("\n  /rootCA.pem\n", rendered)
+            self.assertNotIn("<unset>/rootCA.pem", rendered)
+
     def test_renders_all_lab_hostnames(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             screen = _screen(env_text="DOMAIN=example.com\n", env_dir=Path(directory))

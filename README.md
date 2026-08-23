@@ -150,10 +150,11 @@ those. Promoting a Flight Plan candidate, applying one (writes `.env`),
 and Docker Hub discovery also stay Bash-wizard-only, same reason. Revealing
 an actual credential value from URLs & Credentials stays Bash-wizard-only
 too -- Bash requires typing the literal word `REVEAL` first. Generating or
-regenerating TLS artifacts, bringing your own certificate and key, and
-staging fcli trust configuration also stay Bash-wizard-only -- Certificates
-& Trust is display-only. The fcli activation/trust-import lifecycle also
-stays Bash-wizard-only, deliberately not yet ported (see the roadmap).
+regenerating TLS artifacts, bringing your own certificate and key, staging
+a root CA export, and staging fcli trust configuration also stay
+Bash-wizard-only -- Certificates & Trust is display-only. The fcli
+activation/trust-import lifecycle also stays Bash-wizard-only,
+deliberately not yet ported (see the roadmap).
 
 `./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`
 and it execs into the Python TUI above (after the same acknowledgement,
