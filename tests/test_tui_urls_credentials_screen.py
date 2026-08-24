@@ -70,6 +70,18 @@ class UrlsCredentialsScreenTests(unittest.TestCase):
         rendered = screen.render()
         self.assertNotIn("c29tZS12YWx1ZQ==", rendered)
 
+    def test_unavailable_credential_is_colored_warn_not_muted(self) -> None:
+        # Regression test: Bash's credential_present_label() colors a
+        # missing credential yellow ($YELLOW/warn), not dim -- it's a real
+        # "not there yet" signal, not inert text. Use a color-enabled
+        # style (the real runtime default) and check for the raw ANSI
+        # warn code (33), not the muted code (2).
+        service = UrlsCredentialsService(runner=lambda args: CommandResult(args, 1, "", "not found", 0.0))
+        screen = UrlsCredentialsScreen(style=TerminalStyle(color=True, symbols=True), service=service)
+        screen.handle_event(KeyEvent("c"))
+        rendered = screen.render()
+        self.assertIn("[33m", rendered)
+
     def test_q_pops(self) -> None:
         screen = _screen()
         command = screen.handle_event(KeyEvent("q"))

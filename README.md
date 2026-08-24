@@ -200,13 +200,13 @@ active profile or the whole lab), built by handing an ordered sequence of
 app operations to the same `DeployService`/`GuidedDeployScreen` Guided
 Deploy already uses -- so the color-coding, dry-run-cycling, and
 running-indicator behavior apply automatically, no separate
-implementation to keep in sync. Destroy and Scale workers stay out
-everywhere, same reason as everywhere else -- both need free-text input
-(a confirmation phrase, or a replica count) the TUI still doesn't have a
-widget for. SAST and DAST aren't in the Applications app list yet either
--- Bash treats each as one combined app with a two-script start/stop,
-which needs a small design decision (multi-script operations) rather
-than a quick add (see the roadmap).
+implementation to keep in sync. ScanCentral SAST and DAST are in the
+Applications app list too, each as one combined row over Bash's
+controller+sensor/core+scanner pair (DAST's start/stop chains its two
+scripts the same way Bash's `run_app_scripts()` does, aborting on the
+first failure). Destroy and Scale workers stay out everywhere, same
+reason as everywhere else -- both need free-text input (a confirmation
+phrase, or a replica count) the TUI still doesn't have a widget for.
 
 `./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`
 and it execs into the Python TUI above (after the same acknowledgement,

@@ -31,21 +31,26 @@ __all__ = ["active_profile_id", "apps_for_scope", "build_lifecycle_plan"]
 # to run, in start order (mysql/postgresql before the apps that need
 # them). Shutdown runs this reversed, matching Bash's own
 # lab_shutdown_deployments()/lab_start_deployments() (start: index order,
-# shutdown: reverse index order). SAST/DAST aren't in ApplicationsScreen's
-# catalog yet (tracked in the roadmap), so they aren't here either.
-_ALL_APPS: tuple[str, ...] = ("mysql", "postgresql", "ssc", "lim", "juice-shop", "webgoat", "dvwa")
+# shutdown: reverse index order).
+_ALL_APPS: tuple[str, ...] = ("mysql", "postgresql", "ssc", "lim", "sast", "dast", "juice-shop", "webgoat", "dvwa")
 
-# Applications-screen app_id -> tui.profiles step_id, so "selected
+# Applications-screen app_id -> tui.profiles step_id(s), so "selected
 # profile" scope can be computed with the same profile-expansion logic
-# Guided Deploy already uses instead of a second copy of it.
-_APP_STEP_IDS: dict[str, str] = {
-    "mysql": "mysql",
-    "postgresql": "postgresql",
-    "ssc": "ssc",
-    "lim": "lim",
-    "juice-shop": "sample_juice_shop",
-    "webgoat": "sample_webgoat",
-    "dvwa": "sample_dvwa",
+# Guided Deploy already uses instead of a second copy of it. SAST/DAST are
+# each a combined app over two granular profile step_ids (controller+sensor,
+# core+scanner) -- present if EITHER is in the expanded profile, matching
+# Bash's own lab_lifecycle_app_index_selected():
+#   sast) guided_component_selected sast_controller || guided_component_selected sast_sensor ;;
+_APP_STEP_IDS: dict[str, tuple[str, ...]] = {
+    "mysql": ("mysql",),
+    "postgresql": ("postgresql",),
+    "ssc": ("ssc",),
+    "lim": ("lim",),
+    "sast": ("sast_controller", "sast_sensor"),
+    "dast": ("dast_core", "dast_scanner"),
+    "juice-shop": ("sample_juice_shop",),
+    "webgoat": ("sample_webgoat",),
+    "dvwa": ("sample_dvwa",),
 }
 
 
@@ -68,7 +73,7 @@ def apps_for_scope(scope: str, *, env_file: Path) -> tuple[str, ...]:
 
     profile = build_profile(active_profile_id(env_file))
     step_ids = set(expand_components(profile.components))
-    return tuple(app_id for app_id in _ALL_APPS if _APP_STEP_IDS[app_id] in step_ids)
+    return tuple(app_id for app_id in _ALL_APPS if step_ids.intersection(_APP_STEP_IDS[app_id]))
 
 
 def build_lifecycle_plan(

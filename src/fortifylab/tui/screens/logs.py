@@ -46,6 +46,7 @@ class LogsScreen(Screen):
     output: str | None = None
     message: str | None = None
     initial_step_id: str | None = None
+    initial_prefix: str | None = None
 
     def __post_init__(self) -> None:
         # Bash reads $NAMESPACE dynamically everywhere (guided.sh,
@@ -69,6 +70,16 @@ class LogsScreen(Screen):
             if index is not None:
                 self.selected_scope_index = index
                 self._look_up_pods()
+        elif self.initial_prefix is not None:
+            # Applications' combined SAST/DAST app rows want BOTH sibling
+            # scopes' pods together (controller+sensor, core+scanner) --
+            # unlike initial_step_id, which jumps to one of the granular
+            # LOG_SCOPES entries and deliberately excludes sibling pods via
+            # matching_pods_for_scope(). A plain, unfiltered prefix match is
+            # the combined view Bash's own APP_PODS entry for those two
+            # apps gives (e.g. "scancentral-sast" covers both controller
+            # and sensor pods).
+            self._look_up_pods_for_prefix(self.initial_prefix)
 
     def render(self) -> str:
         if self.stage is _Stage.SCOPES:
@@ -151,6 +162,13 @@ class LogsScreen(Screen):
         stripped_prefix = prefix.rstrip("*")
         sibling_prefixes = tuple(other.rstrip("*") for _s, _l, other in self.scopes)
         matches = self.service.matching_pods_for_scope(stripped_prefix, sibling_prefixes)
+        self._apply_pod_matches(matches, prefix)
+
+    def _look_up_pods_for_prefix(self, prefix: str) -> None:
+        matches = self.service.matching_pods(prefix)
+        self._apply_pod_matches(matches, prefix)
+
+    def _apply_pod_matches(self, matches: tuple[str, ...], prefix: str) -> None:
         if not matches:
             self.message = self.style.fail(f"No pods found matching '{prefix}'.")
             return

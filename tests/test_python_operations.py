@@ -48,6 +48,31 @@ class PythonOperationsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             OperationCatalog().app("not-a-real-app", "start")
 
+    def test_sast_is_a_single_script_app(self) -> None:
+        self.assertEqual(OperationCatalog().app("sast", "start").command, ("bash", "./apps/scsast/start.sh"))
+
+    def test_dast_chains_core_then_scanner_scripts(self) -> None:
+        # Bash's APP_START/APP_STOP give DAST two scripts, run
+        # sequentially via run_app_scripts() with an abort on the first
+        # failure -- every other app has exactly one script.
+        spec = OperationCatalog().app("dast", "start")
+        self.assertEqual(
+            spec.command,
+            ("bash", "-c", "bash ./apps/scdast/core/start.sh && bash ./apps/scdast/scanner/start.sh"),
+        )
+
+    def test_dast_stop_chains_core_then_scanner_stop_scripts(self) -> None:
+        spec = OperationCatalog().app("dast", "stop")
+        self.assertEqual(
+            spec.command,
+            ("bash", "-c", "bash ./apps/scdast/core/stop.sh && bash ./apps/scdast/scanner/stop.sh"),
+        )
+
+    def test_dast_destroy_is_still_gated_by_a_confirmation_phrase(self) -> None:
+        spec = OperationCatalog().app("dast", "destroy")
+        self.assertEqual(spec.confirmation_phrase, "DESTROY dast")
+        self.assertEqual(spec.impact, OperationImpact.DESTRUCTIVE)
+
     def test_mutating_operations_are_dry_run_by_default(self) -> None:
         calls: list[tuple[str, ...]] = []
         runner = OperationRunner(lambda command: calls.append(command) or CommandResult(command, 0, "ok", "", 0.01))
@@ -123,13 +148,27 @@ class PythonOperationsTests(unittest.TestCase):
         specs = [
             catalog.certs(),
             catalog.secrets(),
-            *(catalog.app(app_id, action) for app_id in ("ssc", "lim", "mysql", "postgresql") for action in ("start", "stop")),
+            *(
+                catalog.app(app_id, action)
+                for app_id in ("ssc", "lim", "mysql", "postgresql", "sast", "dast")
+                for action in ("start", "stop")
+            ),
             *(catalog.app(app_id, "start") for app_id in ("juice-shop", "webgoat", "dvwa")),
         ]
         for spec in specs:
             self.assertEqual(spec.command[0], "bash", f"{spec.operation_id} must be invoked via bash")
-            script_path = spec.command[1].removeprefix("./")
-            self.assertTrue((REPO_ROOT / script_path).is_file(), f"{spec.operation_id}: {script_path} does not exist")
+            for script_path in self._script_paths_in(spec.command):
+                self.assertTrue((REPO_ROOT / script_path).is_file(), f"{spec.operation_id}: {script_path} does not exist")
+
+    @staticmethod
+    def _script_paths_in(command: tuple[str, ...]) -> list[str]:
+        # Single-script specs are ("bash", "<path>"); multi-script specs
+        # (DAST: core + scanner) are ("bash", "-c", "bash <p1> && bash <p2>").
+        if len(command) == 2:
+            return [command[1].removeprefix("./")]
+        assert command[1] == "-c"
+        first, _, second = command[2].partition(" && ")
+        return [first.removeprefix("bash ").removeprefix("./"), second.removeprefix("bash ").removeprefix("./")]
 
     def test_execute_flag_runs_mutating_operation_through_injected_runner(self) -> None:
         runner = OperationRunner(lambda command: CommandResult(command, 0, "created", "", 0.01))

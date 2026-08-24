@@ -38,7 +38,9 @@ class AppsForScopeTests(unittest.TestCase):
     def test_all_scope_returns_every_known_app(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             apps = apps_for_scope("all", env_file=Path(directory) / ".env")
-            self.assertEqual(set(apps), {"mysql", "postgresql", "ssc", "lim", "juice-shop", "webgoat", "dvwa"})
+            self.assertEqual(
+                set(apps), {"mysql", "postgresql", "ssc", "lim", "sast", "dast", "juice-shop", "webgoat", "dvwa"}
+            )
 
     def test_selected_scope_for_ssc_only_profile_excludes_lim_and_samples(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -56,6 +58,28 @@ class AppsForScopeTests(unittest.TestCase):
             env_file.write_text("FORTIFY_DEPLOYMENT_PROFILE=sample_apps\n", encoding="utf-8")
             apps = apps_for_scope("selected", env_file=env_file)
             self.assertEqual(set(apps), {"juice-shop", "webgoat", "dvwa"})
+
+    def test_selected_scope_for_full_lab_profile_includes_combined_sast_and_dast(self) -> None:
+        # full_lab's expanded components are the granular sast_controller/
+        # sast_sensor/dast_core/dast_scanner step_ids, not a single "sast"/
+        # "dast" -- apps_for_scope must still resolve the combined app_ids
+        # via an OR match against either sibling, matching Bash's
+        # lab_lifecycle_app_index_selected().
+        with tempfile.TemporaryDirectory() as directory:
+            apps = apps_for_scope("selected", env_file=Path(directory) / ".env")  # defaults to full_lab
+            self.assertIn("sast", apps)
+            self.assertIn("dast", apps)
+
+    def test_selected_scope_for_sast_standalone_profile_includes_sast_but_not_dast(self) -> None:
+        # sast_standalone's only expanded component is sast_controller
+        # (tui/profiles.py PROFILE_COMPONENTS) -- one half of the sast OR
+        # match is enough, and dast has neither sibling present.
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("FORTIFY_DEPLOYMENT_PROFILE=sast_standalone\n", encoding="utf-8")
+            apps = apps_for_scope("selected", env_file=env_file)
+            self.assertIn("sast", apps)
+            self.assertNotIn("dast", apps)
 
 
 class BuildLifecyclePlanTests(unittest.TestCase):

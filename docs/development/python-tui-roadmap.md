@@ -752,17 +752,6 @@ with no state.
   (`scale_workers()`, SAST/DAST only) reads a free-typed replica count.
   Neither is safe to approximate with a single keypress; both need the
   still-missing text-entry widget.
-- **SAST and DAST aren't in the app list yet.** Bash's `APP_PODS`
-  combines SAST controller+sensor and DAST core+scanner into one row
-  each (`scancentral-sast`, `sdast`) with a multi-script `APP_START`
-  entry (e.g. `"apps/scdast/core/start.sh apps/scdast/scanner/start.sh"`).
-  `OperationCatalog.app()`/`ApplicationsScreen`'s app list don't have
-  entries for them at all -- adding them means either a multi-script
-  `OperationSpec` or splitting them into the same four steps
-  `orchestration.adapters.DEFAULT_STEP_SCRIPTS` already has
-  (`sast_controller`/`sast_sensor`/`dast_core`/`dast_scanner`), a real
-  design decision rather than a quick add, so it's tracked here rather
-  than guessed at under time pressure.
 - **`lab_lifecycle_current_profile()`'s live-state refresh isn't
   ported.** Bash re-derives what's actually running before showing the
   lifecycle menu; `apps_for_scope("selected")` only reads
@@ -778,18 +767,63 @@ Lifecycle offers exactly the non-destructive quarter of
 `lab_lifecycle_menu()`; no new duplicated background-execution or
 kubectl-invocation code was added along the way. All met in this pass.
 
+## M14 — SAST and DAST in the app list
+
+The biggest scope trim flagged in M13: ScanCentral SAST and DAST weren't
+in `OperationCatalog.app()`/`ApplicationsScreen`'s app list at all, so
+they had no live status, no start/stop, no logs, and weren't part of Lab
+Lifecycle's bulk shutdown/start either -- a real gap in exactly the
+"deployment and individual component management" area M13 was about.
+
+- `OperationCatalog.app()` (`src/fortifylab/operations/catalog.py`) --
+  added `"sast"` (single script, `apps/scsast/{action}.sh`) and `"dast"`
+  (two scripts, `apps/scdast/core/{action}.sh` then
+  `apps/scdast/scanner/{action}.sh`, matching Bash's `APP_START`/
+  `APP_STOP` entries for it). DAST's two scripts run via
+  `bash -c "bash <core> && bash <scanner>"` -- `&&` reproduces
+  `run_app_scripts()`'s sequential abort-on-first-failure loop while
+  still fitting this codebase's one-`OperationSpec`-per-action execution
+  model, so no change was needed to `ApplicationsScreen`'s background-
+  execution machinery.
+- `ApplicationsScreen` (`src/fortifylab/tui/screens/applications.py`) --
+  added SAST (pod prefix `scancentral-sast`, URL key `SCSAST_CTRL_URL`)
+  and DAST (pod prefix `sdast`, URL key `SCDAST_URL`) rows, plus login
+  hints matching `show_app_creds()`'s cases for them.
+- `LogsScreen` (`src/fortifylab/tui/screens/logs.py`) gained a second
+  jump field, `initial_prefix`, alongside the existing `initial_step_id`.
+  SAST and DAST are each a *combined* app row over two granular
+  `tui.profiles.LOG_SCOPES` entries (`sast_controller`/`sast_sensor`,
+  `dast_core`/`dast_scanner`); `initial_step_id`'s
+  `matching_pods_for_scope()` deliberately *excludes* sibling pods for
+  those granular scopes, which is wrong for the combined view -- Bash's
+  own `APP_PODS` entry wants both siblings' pods together. `initial_prefix`
+  does a plain, unfiltered `matching_pods()` match instead.
+- `lab_lifecycle_service.py` -- added `"sast"`/`"dast"` to `_ALL_APPS`
+  (bulk shutdown/start now includes them), and `_APP_STEP_IDS` now maps
+  each to a *tuple* of granular step_ids, present if either sibling is in
+  the expanded profile -- matching Bash's own
+  `lab_lifecycle_app_index_selected()`:
+  `sast) guided_component_selected sast_controller || guided_component_selected sast_sensor ;;`.
+
+**Still out, same reason as before:** Destroy and Scale workers (both
+need the still-missing text-entry widget).
+
+**Done when:** SAST and DAST have the same live status, per-app menu, and
+Lab Lifecycle bulk-action coverage every other app already has. Met in
+this pass.
+
 ## What this PR actually delivers
 
 M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
 (Kubernetes Dashboard access), M10 (URLs & Credentials), M11
 (Certificates & Trust), M12 (Lab Status Dashboard), the Guided Deploy bug
-fixes, the feature-parity audit fixes, and M13 (deployment & individual
+fixes, the feature-parity audit fixes, M13 (deployment & individual
 component management: live per-app status, per-app menu, Lab Lifecycle
-bulk shutdown/start) above, as the first six milestone picks from the
-post-M6 follow-up plus a hardening pass and a deep parity pass on the one
-area specifically called out -- M6 delivered as an opt-in preview hook,
-not a default cutover, because the parity that cutover depends on
-doesn't exist yet.
+bulk shutdown/start), and M14 (SAST/DAST in the app list) above, as the
+first six milestone picks from the post-M6 follow-up plus a hardening
+pass and a deep parity pass on the one area specifically called out --
+M6 delivered as an opt-in preview hook, not a default cutover, because
+the parity that cutover depends on doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked
 here rather than claimed. This keeps the claim in this document honest:

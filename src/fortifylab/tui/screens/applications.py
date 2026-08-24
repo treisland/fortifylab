@@ -1,8 +1,9 @@
 """Applications screen -- the interactive replacement for ``apps_menu()``'s/
 ``sample_apps_menu()``'s shared ``app_action_menu()`` in
 ``scripts/wizard/operations.sh``, for the apps ``OperationCatalog`` already
-knows how to run (``ssc``, ``lim``, ``mysql``, ``postgresql``, and the
-sample apps ``juice-shop``, ``webgoat``, ``dvwa``).
+knows how to run (``ssc``, ``lim``, ``mysql``, ``postgresql``, ScanCentral
+``sast``/``dast``, and the sample apps ``juice-shop``, ``webgoat``,
+``dvwa``).
 
 Two levels, matching Bash's shape: a list of apps with live pod status
 (``app_status()`` -- "N/M running"/"N/M ready"/"not deployed", the same
@@ -10,14 +11,15 @@ three states and colors), then a per-app menu (Start/Upgrade, Stop, Logs,
 Show URL & credentials) once one is selected. Bash keeps core apps and
 sample apps on separate menu numbers, but the underlying shape is
 identical, so this one screen covers both -- sample apps are just labeled
-"(sample)".
+"(sample)". SAST and DAST are each a single combined row over two Bash
+sub-components (controller+sensor, core+scanner), matching Bash's own
+``APP_PODS``/``APP_START``/``APP_STOP`` entries for them.
 
 Not wired here, same reason in both cases -- no text-entry widget yet:
 - **Destroy**: requires typing an exact confirmation phrase
   (``OperationSpec.confirmation_phrase``, e.g. ``"DESTROY ssc"``).
-- **Scale workers** (SAST/DAST only, and SAST/DAST themselves aren't in
-  this screen's app list yet -- see the roadmap): Bash's ``scale_workers``
-  reads a free-typed replica count.
+- **Scale workers** (SAST/DAST only): Bash's ``scale_workers`` reads a
+  free-typed replica count.
 
 A real (``execute=True``) start/stop runs on a background thread, the
 same mechanism ``GuidedDeployScreen``/``DeployService`` use: without it, a
@@ -44,22 +46,41 @@ from .base import Armable, NavigationCommand, Screen
 from .logs import LogsScreen
 
 # app_id, label, pod prefix (app_status()), log-scope step_id
-# (tui.profiles.LOG_SCOPES), .env URL key (empty if Bash shows none).
-_APPS: tuple[tuple[str, str, str, str, str], ...] = (
-    ("ssc", "Software Security Center", "ssc-webapp", "ssc", "SSC_URL"),
-    ("lim", "License and Infrastructure Manager", "lim", "lim", "LIM_URL"),
-    ("mysql", "MySQL", "mysql", "mysql", ""),
-    ("postgresql", "PostgreSQL", "postgresql", "postgresql", ""),
-    ("juice-shop", "Juice Shop (sample)", "sample-juice-shop", "sample_juice_shop", "JUICE_SHOP_URL"),
-    ("webgoat", "WebGoat (sample)", "sample-webgoat", "sample_webgoat", "WEBGOAT_URL"),
-    ("dvwa", "DVWA (sample)", "sample-dvwa", "sample_dvwa", "DVWA_URL"),
+# (tui.profiles.LOG_SCOPES, "" if this app instead needs an unfiltered
+# initial_prefix jump), unfiltered log pod-prefix (only set for SAST/DAST --
+# see below), .env URL key (empty if Bash shows none).
+#
+# SAST and DAST are each combined app rows over two Bash sub-components
+# (controller+sensor, core+scanner) -- app_status()'s pod-count prefix and
+# the per-app "Logs" action both want BOTH sibling pods together, unlike
+# tui.profiles.LOG_SCOPES's granular, sibling-excluding entries
+# (sast_controller/sast_sensor/dast_core/dast_scanner). So these two use
+# LogsScreen's initial_prefix (an unfiltered match) instead of
+# initial_step_id.
+_APPS: tuple[tuple[str, str, str, str, str, str], ...] = (
+    ("ssc", "Software Security Center", "ssc-webapp", "ssc", "", "SSC_URL"),
+    ("lim", "License and Infrastructure Manager", "lim", "lim", "", "LIM_URL"),
+    ("mysql", "MySQL", "mysql", "mysql", "", ""),
+    ("postgresql", "PostgreSQL", "postgresql", "postgresql", "", ""),
+    ("sast", "ScanCentral SAST", "scancentral-sast", "", "scancentral-sast", "SCSAST_CTRL_URL"),
+    ("dast", "ScanCentral DAST", "sdast", "", "sdast", "SCDAST_URL"),
+    ("juice-shop", "Juice Shop (sample)", "sample-juice-shop", "sample_juice_shop", "", "JUICE_SHOP_URL"),
+    ("webgoat", "WebGoat (sample)", "sample-webgoat", "sample_webgoat", "", "WEBGOAT_URL"),
+    ("dvwa", "DVWA (sample)", "sample-dvwa", "sample_dvwa", "", "DVWA_URL"),
 )
 
 # Matches show_app_creds()'s per-app cases in scripts/wizard/operations.sh;
 # apps with no case there (mysql/postgresql/sample apps) show URL only.
+# SAST/DAST's own cases there print the URL under a slightly different
+# label ("Controller URL"/"API URL") plus a generic "use URLs & credentials"
+# tokens/credentials hint rather than an inline username/password -- since
+# this screen already shows the URL separately above, that hint is the only
+# part worth reproducing here.
 _LOGIN_HINTS: dict[str, tuple[str, ...]] = {
     "ssc": ("Login username: admin", "Password: refer to the SSC documentation for the default password."),
     "lim": ("Login username: lim_admin", "Password: stored in Kubernetes Secret lim-admin-credentials"),
+    "sast": ("Tokens: use URLs & credentials to retrieve the ScanCentral SAST controller token.",),
+    "dast": ("Credentials: use URLs & credentials to retrieve ScanCentral DAST access.",),
 }
 
 _APP_ACTIONS: tuple[tuple[str, str], ...] = (
@@ -82,7 +103,7 @@ class ApplicationsScreen(Armable, Screen):
     runner: OperationRunner = field(default_factory=OperationRunner)
     status_service: AppStatusService = field(default_factory=AppStatusService)
     env_file: Path = field(default_factory=lambda: Path(".env"))
-    apps: tuple[tuple[str, str, str, str, str], ...] = _APPS
+    apps: tuple[tuple[str, str, str, str, str, str], ...] = _APPS
     stage: _Stage = _Stage.LIST
     selected_app_index: int = 0
     selected_action_index: int = 0
@@ -107,7 +128,7 @@ class ApplicationsScreen(Armable, Screen):
             return self._running_thread is not None
 
     def _refresh_statuses(self) -> None:
-        prefixes = {app_id: prefix for app_id, _label, prefix, _step, _url in self.apps}
+        prefixes = {app_id: prefix for app_id, _label, prefix, _step, _log_prefix, _url in self.apps}
         self.statuses = self.status_service.statuses(prefixes)
 
     def _status_text(self, app_id: str) -> tuple[str, str]:
@@ -144,7 +165,7 @@ class ApplicationsScreen(Armable, Screen):
         return "\n".join(lines) + "\n"
 
     def _render_app_menu(self) -> str:
-        app_id, label, _prefix, _step_id, url_key = self.apps[self.selected_app_index]
+        app_id, label, _prefix, _step_id, _log_prefix, url_key = self.apps[self.selected_app_index]
         status_text, color_name = self._status_text(app_id)
         colorize = getattr(self.style, color_name)
         lines = [self.style.heading(label), "", f"  Status: {colorize(status_text)}"]
@@ -250,7 +271,9 @@ class ApplicationsScreen(Armable, Screen):
     def _select_action(self) -> NavigationCommand | None:
         action_id, _label = _APP_ACTIONS[self.selected_action_index]
         if action_id == "logs":
-            _app_id, _label, _prefix, step_id, _url = self.apps[self.selected_app_index]
+            _app_id, _label, _prefix, step_id, log_prefix, _url = self.apps[self.selected_app_index]
+            if log_prefix:
+                return NavigationCommand.push(LogsScreen(initial_prefix=log_prefix))
             return NavigationCommand.push(LogsScreen(initial_step_id=step_id))
         if action_id == "credentials":
             self.show_credentials = not self.show_credentials
@@ -261,7 +284,7 @@ class ApplicationsScreen(Armable, Screen):
     def _run_selected(self, action: str) -> None:
         if self.is_executing:
             return
-        app_id, _label, _prefix, _step_id, _url = self.apps[self.selected_app_index]
+        app_id, _label, _prefix, _step_id, _log_prefix, _url = self.apps[self.selected_app_index]
         executing = self.consume_arm()
         spec = self.catalog.app(app_id, action)
         if not executing:

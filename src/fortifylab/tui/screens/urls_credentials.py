@@ -73,7 +73,12 @@ class UrlsCredentialsScreen(Screen):
             lines.append(self.style.muted("  press c to check (read-only; never shows the value)"))
         else:
             for check, present in self.availability:
-                marker = self.style.ok("available") if present else self.style.muted("unavailable")
+                # Bash's credential_present_label() colors a missing
+                # credential yellow ($YELLOW), not dim -- "not there yet"
+                # is a real signal worth a warning color, not inert/muted
+                # text (the same color-coding bug class already fixed
+                # elsewhere: see the Lab Status Dashboard fix).
+                marker = self.style.ok("available") if present else self.style.warn("unavailable")
                 lines.append(f"  {check.label:<36} {marker}")
 
         lines.extend(("", self.style.muted("c: check credential availability, q: back")))

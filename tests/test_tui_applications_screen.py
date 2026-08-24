@@ -111,6 +111,12 @@ class ApplicationsListStageTests(unittest.TestCase):
         screen = _plain_screen()
         self.assertIn("destroy is not available here", screen.render())
 
+    def test_includes_sast_and_dast_alongside_core_apps(self) -> None:
+        screen = _plain_screen()
+        rendered = screen.render()
+        self.assertIn("ScanCentral SAST", rendered)
+        self.assertIn("ScanCentral DAST", rendered)
+
 
 class ApplicationsAppMenuTests(unittest.TestCase):
     def test_shows_status_and_url(self) -> None:
@@ -168,6 +174,52 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         self.assertEqual(command.kind, NavigationKind.PUSH)
         self.assertIsInstance(command.screen, LogsScreen)
         self.assertEqual(command.screen.initial_step_id, "ssc")
+
+    def test_logs_action_for_sast_pushes_a_logs_screen_pinned_by_unfiltered_prefix(self) -> None:
+        # SAST is a combined app row over Bash's separate controller/sensor
+        # scopes -- its "Logs" action must jump via the unfiltered
+        # initial_prefix, not initial_step_id (there is no single "sast"
+        # entry in tui.profiles.LOG_SCOPES).
+        screen = _plain_screen()
+        _enter_app_menu(screen, "sast")
+        _select_action(screen, "logs")
+        command = screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(command.kind, NavigationKind.PUSH)
+        self.assertIsInstance(command.screen, LogsScreen)
+        self.assertIsNone(command.screen.initial_step_id)
+        self.assertEqual(command.screen.initial_prefix, "scancentral-sast")
+
+    def test_logs_action_for_dast_pushes_a_logs_screen_pinned_by_unfiltered_prefix(self) -> None:
+        screen = _plain_screen()
+        _enter_app_menu(screen, "dast")
+        _select_action(screen, "logs")
+        command = screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(command.screen.initial_prefix, "sdast")
+
+    def test_sast_start_uses_the_real_start_script_via_bash(self) -> None:
+        screen = _plain_screen(catalog=OperationCatalog(), runner=OperationRunner(lambda c: CommandResult(c, 0, "ok", "", 0.0)))
+        _enter_app_menu(screen, "sast")
+        _select_action(screen, "start")
+        screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(screen.last_execution.command, ("bash", "./apps/scsast/start.sh"))
+
+    def test_dast_start_chains_core_then_scanner_scripts(self) -> None:
+        screen = _plain_screen(catalog=OperationCatalog(), runner=OperationRunner(lambda c: CommandResult(c, 0, "ok", "", 0.0)))
+        _enter_app_menu(screen, "dast")
+        _select_action(screen, "start")
+        screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(
+            screen.last_execution.command,
+            ("bash", "-c", "bash ./apps/scdast/core/start.sh && bash ./apps/scdast/scanner/start.sh"),
+        )
+
+    def test_credentials_toggle_shows_login_hint_for_sast(self) -> None:
+        screen = _plain_screen()
+        _enter_app_menu(screen, "sast")
+        _select_action(screen, "credentials")
+        screen.handle_event(KeyEvent("enter"))
+        rendered = screen.render()
+        self.assertIn("Tokens", rendered)
 
     def test_enter_when_armed_on_start_executes_in_background_and_shows_running(self) -> None:
         release = threading.Event()

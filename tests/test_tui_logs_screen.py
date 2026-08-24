@@ -136,6 +136,33 @@ class LogsScreenTests(unittest.TestCase):
         self.assertEqual(screen.stage, _Stage.OUTPUT)
         self.assertEqual(screen.pods, ("scancentral-sast-controller-0",))
 
+    def test_initial_prefix_jumps_straight_past_the_scope_list_unfiltered(self) -> None:
+        # Applications' combined SAST/DAST app rows want BOTH sibling
+        # scopes' pods together -- unlike initial_step_id, this must NOT
+        # exclude the controller pod the way matching_pods_for_scope()
+        # does for the granular sast_sensor scope.
+        service = LogsService(
+            pod_lister=lambda: ("scancentral-sast-controller-0", "scancentral-sast-sensor-0"),
+            runner=_runner_returning("log output\n"),
+        )
+        screen = LogsScreen(
+            style=TerminalStyle(color=False, symbols=False), service=service, initial_prefix="scancentral-sast"
+        )
+        self.assertEqual(screen.stage, _Stage.PODS)
+        self.assertEqual(screen.pods, ("scancentral-sast-controller-0", "scancentral-sast-sensor-0"))
+
+    def test_initial_prefix_auto_selects_a_single_match(self) -> None:
+        service = LogsService(pod_lister=lambda: ("sdast-core-0",), runner=_runner_returning("log output\n"))
+        screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), service=service, initial_prefix="sdast")
+        self.assertEqual(screen.stage, _Stage.OUTPUT)
+        self.assertIn("log output", screen.render())
+
+    def test_initial_prefix_with_no_matches_shows_a_message_and_stays_on_scopes(self) -> None:
+        service = LogsService(pod_lister=lambda: ())
+        screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), service=service, initial_prefix="sdast")
+        self.assertEqual(screen.stage, _Stage.SCOPES)
+        self.assertIsNotNone(screen.message)
+
     def test_no_matching_pods_shows_a_message_and_stays_on_scopes(self) -> None:
         service = LogsService(pod_lister=lambda: ())
         screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), service=service)

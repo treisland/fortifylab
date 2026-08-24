@@ -64,6 +64,8 @@ class LabLifecycleScreenTests(unittest.TestCase):
             step_ids = {step.step_id for step in command.screen.service.plan.steps}
             self.assertIn("ssc", step_ids)
             self.assertIn("juice-shop", step_ids)
+            self.assertIn("sast", step_ids)
+            self.assertIn("dast", step_ids)
 
     def test_on_enter_caches_scope_previews_instead_of_recomputing_on_every_render(self) -> None:
         # Regression test (code review finding): render() runs on every
