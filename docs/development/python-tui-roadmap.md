@@ -484,13 +484,76 @@ key path is never rendered anywhere in this screen. All met in this PR.
 Generating, regenerating, or bringing your own TLS material stays
 Bash-wizard-only, not a gap in this PR's own claims.
 
+### M12 — Lab Status Dashboard screen (sixth pick from the follow-up)
+
+The sixth slice of #446: `setup_readiness_items()` / `setup_readiness_score()`
+/ `setup_status_line()` in `scripts/wizard/setup.sh` -- the ready/warn
+readiness board shown before and during Guided setup. This is also the
+`"dashboard"` `OPERATOR_MENU` item, present since the very first
+milestone but never wired to a screen until now (distinct from
+`"kubernetes-dashboard"`/M9, which is the Kubernetes Dashboard *access*
+screen).
+
+- `src/fortifylab/services/lab_status_service.py` (new) —
+  `LabStatusService` ports all 11 of Bash's readiness checks: `.env`
+  exists, hosts/URLs valid (reuses `config.repair.validate_hosts_and_urls`,
+  already used elsewhere), deployment profile selected, Flight Plan
+  selected and present in the catalog (reuses
+  `domain.flight_plans.merged_read_catalog`), license file readable,
+  Docker registry auth usable, `regcred` Secret exists, TLS artifacts
+  exist, root CA exported, fcli truststore available, and cluster
+  reachable. `readiness()` returns all 11 as `(label, ready, detail)`;
+  `score()` reduces that to `(ready_count, total)`.
+- `src/fortifylab/tui/screens/dashboard.py` (new) — `DashboardScreen`
+  runs every check on open (matching Bash's board, which redraws fresh
+  each time) and lets `r` re-run them; renders the score, each
+  ready/warn line, and a "Recommended next action" line for the first
+  `warn` item, ported from Bash's own guidance text per check. Entirely
+  read-only, no arming -- same posture as Diagnostics/Runbooks/Help.
+- Wired to the existing `MenuItem("dashboard", "Dashboard", ...)`,
+  `_SCREEN_FACTORIES["dashboard"]`. **This is the last unwired
+  `OPERATOR_MENU` item** -- as of this milestone, every item on the main
+  menu opens a real screen with `o`; there is no longer a menu entry
+  that is preview-only because no screen exists for it yet (some screens
+  still cover only part of their Bash counterpart's actions, tracked
+  under #446, but the menu itself has no more "nothing built yet" gaps).
+- **Scope trim, deliberate**: Bash's `certs_ready()` (the TLS-artifacts
+  check) goes further than this port does -- it runs `openssl rsa -check`
+  and `keytool -list` against the private key and JVM keystore, passing
+  the keystore password on the command line to validate the material
+  cryptographically. `LabStatusService.tls_artifacts_exist()` only checks
+  that the four files exist and are non-empty; it does not invoke
+  `openssl`/`keytool` or handle `DEFAULT_PASS` at all, both to avoid a
+  password appearing in subprocess argv (visible via `ps`/`/proc`) and
+  because "the files are present" is a materially smaller, honestly
+  narrower claim than "the material is cryptographically valid." No
+  repair action is offered from this screen either -- same as Bash,
+  where fixing a `warn` item happens elsewhere in the wizard.
+- **Fixed along the way**: `fortifylab.core.command.run_command()` let
+  `FileNotFoundError` (the target binary isn't on `PATH`, e.g.
+  `microk8s` not installed yet) propagate as an unhandled exception
+  instead of returning a normal failed `CommandResult` -- every
+  kubectl-backed service in this migration (`DashboardAccessService`,
+  `UrlsCredentialsService`, and now `LabStatusService`) was exposed to
+  this, it just hadn't been hit yet because their kubectl calls are all
+  opt-in (keypress-triggered), while `LabStatusService`'s checks run
+  eagerly on screen open. Now caught and represented as return code 127,
+  with a regression test in `tests/test_python_command_adapter.py`.
+
+**Done when:** `DashboardScreen` is reachable from the main menu (`o` on
+Dashboard); all 11 readiness checks run and render with the same
+ready/warn semantics and guidance text as Bash's board; the TLS-artifacts
+check never invokes `openssl`/`keytool` or handles a keystore password.
+All met in this PR. Every `OPERATOR_MENU` item now opens a real screen.
+
 ## What this PR actually delivers
 
 M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
-(Kubernetes Dashboard access), M10 (URLs & Credentials), and M11
-(Certificates & Trust) as the first five picks from the post-M6
-follow-up -- M6 delivered as an opt-in preview hook, not a default
-cutover, because the parity that cutover depends on doesn't exist yet.
+(Kubernetes Dashboard access), M10 (URLs & Credentials), M11
+(Certificates & Trust), and M12 (Lab Status Dashboard) as the first six
+picks from the post-M6 follow-up -- M6 delivered as an opt-in preview
+hook, not a default cutover, because the parity that cutover depends on
+doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked
 here rather than claimed. This keeps the claim in this document honest:

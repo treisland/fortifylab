@@ -6,6 +6,7 @@ from .applications import ApplicationsScreen
 from .base import NavigationCommand, NavigationKind, Screen
 from .certificates import CertificatesScreen
 from .configuration import ConfigurationScreen
+from .dashboard import DashboardScreen
 from .dashboard_access import DashboardAccessScreen
 from .diagnostics import DiagnosticsScreen
 from .flight_plans import FlightPlansScreen
@@ -23,6 +24,7 @@ __all__ = [
     "ApplicationsScreen",
     "CertificatesScreen",
     "ConfigurationScreen",
+    "DashboardScreen",
     "DashboardAccessScreen",
     "DiagnosticsScreen",
     "FlightPlansScreen",

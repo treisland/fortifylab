@@ -108,14 +108,16 @@ class MainMenuOpensGuidedDeployTests(unittest.TestCase):
         self.assertEqual(command.kind, NavigationKind.PUSH)
         self.assertIsInstance(command.screen, GuidedDeployScreen)
 
-    def test_o_on_an_item_without_a_real_screen_does_nothing(self) -> None:
+    def test_o_on_every_menu_item_now_pushes_a_real_screen(self) -> None:
+        # As of M12 (#446 slice 6, the Dashboard screen), every OPERATOR_MENU
+        # item has a real screen wired -- there is no longer an item where
+        # "o" is a no-op. This replaces the old "unwired item" regression
+        # test, whose premise ("dashboard" had no screen) is no longer true.
         menu = MainMenuScreen(style=TerminalStyle(color=False, symbols=False))
-        dashboard_index = next(i for i, item in enumerate(menu.items) if item.key == "dashboard")
-        menu.selected_index = dashboard_index
-
-        command = menu.handle_event(KeyEvent("o"))
-
-        self.assertEqual(command.kind, NavigationKind.STAY)
+        for index, item in enumerate(menu.items):
+            menu.selected_index = index
+            command = menu.handle_event(KeyEvent("o"))
+            self.assertEqual(command.kind, NavigationKind.PUSH, f"expected a real screen for '{item.key}'")
 
     def test_deploy_item_preview_hints_at_opening(self) -> None:
         menu = MainMenuScreen(style=TerminalStyle(color=False, symbols=False))

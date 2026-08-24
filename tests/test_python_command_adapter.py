@@ -38,6 +38,15 @@ class PythonCommandAdapterTests(unittest.TestCase):
         self.assertEqual(result.returncode, 124)
         self.assertIn("timed out", result.stderr)
 
+    def test_missing_executable_returns_failed_result_instead_of_raising(self) -> None:
+        # A caller like a kubectl-backed service must get a normal failed
+        # CommandResult when the binary isn't installed yet (e.g. microk8s
+        # not set up), not an unhandled FileNotFoundError.
+        result = run_command(["fortifylab-definitely-not-a-real-binary"])
+        self.assertFalse(result.ok)
+        self.assertEqual(result.returncode, 127)
+        self.assertFalse(result.timed_out)
+
     def test_redacts_secret_like_output(self) -> None:
         text = "password=hunter2 token=abc secret=sauce api_key=key123\nAuthorization: Bearer abc123"
         redacted = redact_text(text)

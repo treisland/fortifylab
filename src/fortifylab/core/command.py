@@ -72,6 +72,15 @@ def run_command(args: Sequence[str], *, timeout: float | None = None, cwd: str |
         if isinstance(stderr, bytes):
             stderr = stderr.decode(errors="replace")
         stderr = (stderr + "\n" if stderr else "") + f"Command timed out after {timeout} seconds."
+    except FileNotFoundError as exc:
+        # The executable itself isn't on PATH (e.g. microk8s not installed
+        # yet) -- represent this as a failed result like any other command
+        # error, rather than letting an OS-level exception escape into
+        # every caller of this shared helper.
+        timed_out = False
+        returncode = 127
+        stdout = ""
+        stderr = str(exc)
     duration = time.monotonic() - started
     return CommandResult(
         args=command,

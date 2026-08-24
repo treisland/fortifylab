@@ -118,12 +118,14 @@ preview, `q` to quit) is available from a terminal with:
 ./bin/fortifylab tui --interactive
 ```
 
-Most items are still navigation-only — selecting one shows its description,
-the same as `deploy --plan` does today, not a live run. Eleven items are
-live screens instead (press `o` to open): **Deploy / Resume** (a Guided
-deployment screen for the SSC-only profile), **Applications** (start/stop
-for ssc/lim/mysql/postgresql and the sample apps Juice Shop/WebGoat/DVWA),
-**Configuration** (redacted `.env` view plus
+Every item on the main menu now opens a real screen (press `o` to open) —
+none is preview-only anymore, though some still cover only part of their
+Bash counterpart's actions (noted below): **Dashboard** (a lab-wide
+readiness board — 11 ready/warn checks ported from Bash's own setup
+readiness board, plus a recommended next action), **Deploy / Resume** (a
+Guided deployment screen for the SSC-only profile), **Applications**
+(start/stop for ssc/lim/mysql/postgresql and the sample apps Juice
+Shop/WebGoat/DVWA), **Configuration** (redacted `.env` view plus
 backup/rollback), **Logs** (pick a component, then a pod, then tail it),
 **Kubernetes Dashboard** (generate a 1-hour view-only or administrator
 access token), **URLs & Credentials** (service URLs, short login guidance,
@@ -152,7 +154,12 @@ an actual credential value from URLs & Credentials stays Bash-wizard-only
 too -- Bash requires typing the literal word `REVEAL` first. Generating or
 regenerating TLS artifacts, bringing your own certificate and key, staging
 a root CA export, and staging fcli trust configuration also stay
-Bash-wizard-only -- Certificates & Trust is display-only. The fcli
+Bash-wizard-only -- Certificates & Trust is display-only. The Dashboard's
+TLS-artifacts check only confirms the files exist and are non-empty; it
+does not cryptographically validate them the way Bash's `certs_ready()`
+does (that runs `openssl`/`keytool` against the private key and keystore
+password), and it offers no repair action -- same as Bash, fixing a
+`warn` item happens elsewhere in the wizard. The fcli
 activation/trust-import lifecycle also stays Bash-wizard-only,
 deliberately not yet ported (see the roadmap).
 

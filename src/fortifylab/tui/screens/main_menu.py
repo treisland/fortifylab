@@ -21,6 +21,7 @@ from .applications import ApplicationsScreen
 from .base import NavigationCommand, Screen
 from .certificates import CertificatesScreen
 from .configuration import ConfigurationScreen
+from .dashboard import DashboardScreen
 from .dashboard_access import DashboardAccessScreen
 from .diagnostics import DiagnosticsScreen
 from .flight_plans import FlightPlansScreen
@@ -37,6 +38,7 @@ _QUIT_KEYS = {"q", "Q"}
 # Menu item key -> factory for its real screen. An item not listed here is
 # still preview-only; add its factory here once its screen exists (M6).
 _SCREEN_FACTORIES: dict[str, Callable[[], Screen]] = {
+    "dashboard": DashboardScreen,
     "deploy": GuidedDeployScreen,
     "applications": ApplicationsScreen,
     "certificates": CertificatesScreen,

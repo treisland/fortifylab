@@ -15,6 +15,7 @@ from fortifylab.tui.screens.applications import ApplicationsScreen  # noqa: E402
 from fortifylab.tui.screens.base import NavigationKind  # noqa: E402
 from fortifylab.tui.screens.certificates import CertificatesScreen  # noqa: E402
 from fortifylab.tui.screens.configuration import ConfigurationScreen  # noqa: E402
+from fortifylab.tui.screens.dashboard import DashboardScreen  # noqa: E402
 from fortifylab.tui.screens.dashboard_access import DashboardAccessScreen  # noqa: E402
 from fortifylab.tui.screens.diagnostics import DiagnosticsScreen  # noqa: E402
 from fortifylab.tui.screens.flight_plans import FlightPlansScreen  # noqa: E402
@@ -83,9 +84,15 @@ class MainMenuOpensM4ScreensTests(unittest.TestCase):
         self.assertEqual(command.kind, NavigationKind.PUSH)
         self.assertIsInstance(command.screen, CertificatesScreen)
 
+    def test_o_on_dashboard_opens_dashboard_screen(self) -> None:
+        command = self._push_via_o("dashboard")
+        self.assertEqual(command.kind, NavigationKind.PUSH)
+        self.assertIsInstance(command.screen, DashboardScreen)
+
     def test_preview_hints_at_opening_for_all_wired_items(self) -> None:
         menu = MainMenuScreen(style=TerminalStyle(color=False, symbols=False))
         for key in (
+            "dashboard",
             "deploy",
             "applications",
             "configuration",
