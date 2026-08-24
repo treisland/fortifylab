@@ -39,8 +39,9 @@ class DashboardScreen(Screen):
         lines.append(f"Readiness: {ready_count}/{len(self.checks)}")
         lines.append("")
         for check in self.checks:
-            marker = self.style.ok("ready") if check.ready else self.style.fail("warn")
-            line = f"  {marker:<12} {check.label}"
+            marker_text = f"{'ready' if check.ready else 'warn':<12}"
+            marker = self.style.ok(marker_text) if check.ready else self.style.fail(marker_text)
+            line = f"  {marker} {check.label}"
             if not check.ready and check.detail:
                 line += f" -- {check.detail}"
             lines.append(line)

@@ -1,12 +1,12 @@
 """Main menu screen — the interactive replacement for ``main_menu()`` in
 ``scripts/wizard/menu.sh``.
 
-Most items are still navigation and preview only (M2 scope): selecting one
-shows its description, matching what ``./bin/fortifylab deploy --plan``
-already does for a mutating operation today — a readable preview, not a
-live run. An item gets a real screen (opened with "o") only once one has
-actually been built for it -- see ``_SCREEN_FACTORIES`` below; "deploy" is
-the first (M3).
+Selecting an item still shows its description first, matching what
+``./bin/fortifylab deploy --plan`` does for a mutating operation today — a
+readable preview, not a live run. Pressing "o" opens that item's real
+screen; as of M12 (#446 slice 6), every ``OPERATOR_MENU`` item has one --
+see ``_SCREEN_FACTORIES`` below; "deploy" was the first (M3), "dashboard"
+the last (M12).
 """
 
 from __future__ import annotations
