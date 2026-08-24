@@ -1,52 +1,78 @@
-"""Applications screen -- the interactive replacement for ``apps_menu()``'s
-and ``sample_apps_menu()``'s start/stop actions in ``scripts/wizard/menu.sh``,
-for the apps ``OperationCatalog`` already knows how to run (``ssc``,
-``lim``, ``mysql``, ``postgresql``, and the sample apps ``juice-shop``,
-``webgoat``, ``dvwa``).
+"""Applications screen -- the interactive replacement for ``apps_menu()``'s/
+``sample_apps_menu()``'s shared ``app_action_menu()`` in
+``scripts/wizard/operations.sh``, for the apps ``OperationCatalog`` already
+knows how to run (``ssc``, ``lim``, ``mysql``, ``postgresql``, and the
+sample apps ``juice-shop``, ``webgoat``, ``dvwa``).
 
-Bash keeps core apps and sample apps on separate menu numbers, but the
-underlying operation shape is identical (start/stop via a script,
-`OperationCatalog.app()` already treats them the same way), so this one
-screen covers both rather than duplicating the same list/arm/run logic in
-a second near-identical screen -- sample apps are just labeled "(sample)".
+Two levels, matching Bash's shape: a list of apps with live pod status
+(``app_status()`` -- "N/M running"/"N/M ready"/"not deployed", the same
+three states and colors), then a per-app menu (Start/Upgrade, Stop, Logs,
+Show URL & credentials) once one is selected. Bash keeps core apps and
+sample apps on separate menu numbers, but the underlying shape is
+identical, so this one screen covers both -- sample apps are just labeled
+"(sample)".
 
-Destroy is intentionally not wired here: every destroy operation requires
-typing an exact confirmation phrase (``OperationSpec.confirmation_phrase``,
-e.g. ``"DESTROY ssc"``), and there is no text-entry widget in the TUI yet.
-Mapping a single keypress to "yes, destroy it" to work around that would be
-exactly the kind of unsafe shortcut this codebase's confirmation-phrase
-design exists to prevent, so destroy stays a Bash-wizard-only action until
-the TUI has real text input (tracked in the roadmap, not invented here).
+Not wired here, same reason in both cases -- no text-entry widget yet:
+- **Destroy**: requires typing an exact confirmation phrase
+  (``OperationSpec.confirmation_phrase``, e.g. ``"DESTROY ssc"``).
+- **Scale workers** (SAST/DAST only, and SAST/DAST themselves aren't in
+  this screen's app list yet -- see the roadmap): Bash's ``scale_workers``
+  reads a free-typed replica count.
 
-A real (``execute=True``) start/stop runs on a background thread, the same
-mechanism ``GuidedDeployScreen``/``DeployService`` use: without it, a
+A real (``execute=True``) start/stop runs on a background thread, the
+same mechanism ``GuidedDeployScreen``/``DeployService`` use: without it, a
 Helm-backed start that takes minutes would freeze the whole TUI with no
-visual feedback (bug report parity audit -- this screen never got that
-fix when Guided Deploy did). Dry-run previews stay synchronous.
+visual feedback. Dry-run previews stay synchronous.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 import threading
 
+from fortifylab.config.envfile import display_value
+from fortifylab.config.store import ConfigStore
 from fortifylab.operations import OperationCatalog, OperationExecution, OperationRunner
 from fortifylab.operations.catalog import OperationSpec
+from fortifylab.services.app_status_service import AppStatus, AppStatusService
 
 from ..events import Event, KeyEvent, TickEvent
 from ..theme import TerminalStyle
 from .base import Armable, NavigationCommand, Screen
+from .logs import LogsScreen
 
-_APPS: tuple[tuple[str, str], ...] = (
-    ("ssc", "Software Security Center"),
-    ("lim", "License and Infrastructure Manager"),
-    ("mysql", "MySQL"),
-    ("postgresql", "PostgreSQL"),
-    ("juice-shop", "Juice Shop (sample)"),
-    ("webgoat", "WebGoat (sample)"),
-    ("dvwa", "DVWA (sample)"),
+# app_id, label, pod prefix (app_status()), log-scope step_id
+# (tui.profiles.LOG_SCOPES), .env URL key (empty if Bash shows none).
+_APPS: tuple[tuple[str, str, str, str, str], ...] = (
+    ("ssc", "Software Security Center", "ssc-webapp", "ssc", "SSC_URL"),
+    ("lim", "License and Infrastructure Manager", "lim", "lim", "LIM_URL"),
+    ("mysql", "MySQL", "mysql", "mysql", ""),
+    ("postgresql", "PostgreSQL", "postgresql", "postgresql", ""),
+    ("juice-shop", "Juice Shop (sample)", "sample-juice-shop", "sample_juice_shop", "JUICE_SHOP_URL"),
+    ("webgoat", "WebGoat (sample)", "sample-webgoat", "sample_webgoat", "WEBGOAT_URL"),
+    ("dvwa", "DVWA (sample)", "sample-dvwa", "sample_dvwa", "DVWA_URL"),
 )
-_ACTIONS: tuple[str, ...] = ("start", "stop")
+
+# Matches show_app_creds()'s per-app cases in scripts/wizard/operations.sh;
+# apps with no case there (mysql/postgresql/sample apps) show URL only.
+_LOGIN_HINTS: dict[str, tuple[str, ...]] = {
+    "ssc": ("Login username: admin", "Password: refer to the SSC documentation for the default password."),
+    "lim": ("Login username: lim_admin", "Password: stored in Kubernetes Secret lim-admin-credentials"),
+}
+
+_APP_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("start", "Start / Upgrade"),
+    ("stop", "Stop"),
+    ("logs", "Logs"),
+    ("credentials", "Show URL & credentials"),
+)
+
+
+class _Stage(str, Enum):
+    LIST = "list"
+    APP_MENU = "app_menu"
 
 
 @dataclass
@@ -54,30 +80,92 @@ class ApplicationsScreen(Armable, Screen):
     style: TerminalStyle = field(default_factory=TerminalStyle.from_environment)
     catalog: OperationCatalog = field(default_factory=OperationCatalog)
     runner: OperationRunner = field(default_factory=OperationRunner)
-    rows: tuple[tuple[str, str, str], ...] = field(
-        default_factory=lambda: tuple((app_id, label, action) for app_id, label in _APPS for action in _ACTIONS)
-    )
-    selected_index: int = 0
+    status_service: AppStatusService = field(default_factory=AppStatusService)
+    env_file: Path = field(default_factory=lambda: Path(".env"))
+    apps: tuple[tuple[str, str, str, str, str], ...] = _APPS
+    stage: _Stage = _Stage.LIST
+    selected_app_index: int = 0
+    selected_action_index: int = 0
+    statuses: dict[str, AppStatus] = field(default_factory=dict)
+    show_credentials: bool = False
     last_execution: OperationExecution | None = None
-    running_row_index: int | None = None
+    running: bool = False
     _execution_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
     _running_thread: threading.Thread | None = field(default=None, init=False, repr=False, compare=False)
     _pending_execution: OperationExecution | None = field(default=None, init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.env_file.exists():
+            namespace = ConfigStore(self.env_file).load().values().get("NAMESPACE")
+            if namespace:
+                self.status_service.namespace = namespace
+        self._refresh_statuses()
 
     @property
     def is_executing(self) -> bool:
         with self._execution_lock:
             return self._running_thread is not None
 
+    def _refresh_statuses(self) -> None:
+        prefixes = {app_id: prefix for app_id, _label, prefix, _step, _url in self.apps}
+        self.statuses = self.status_service.statuses(prefixes)
+
+    def _status_text(self, app_id: str) -> tuple[str, str]:
+        """Return (text, color_name), matching app_status()'s three states
+        and colors: green "N/N running", yellow "N/M ready", dim "not deployed"."""
+
+        status = self.statuses.get(app_id, AppStatus())
+        if not status.deployed:
+            return "not deployed", "muted"
+        if status.fully_ready:
+            return f"{status.ready}/{status.total} running", "ok"
+        return f"{status.ready}/{status.total} ready", "warn"
+
     def render(self) -> str:
-        lines = [self.style.heading("Applications"), ""]
-        for index, (_app_id, label, action) in enumerate(self.rows):
-            marker = self.style.paint(">", "1;36") if index == self.selected_index else " "
-            plain_row = f" {marker} {label:<32} {action}"
-            if index == self.running_row_index:
-                lines.append(self.style.warn(f"{plain_row}  (running...)"))
+        if self.stage is _Stage.APP_MENU:
+            return self._render_app_menu()
+        return self._render_list()
+
+    def _render_list(self) -> str:
+        lines = [self.style.heading("Applications"), "", f"  {'':3}{'Name':<36}{'Status'}"]
+        for index, (app_id, label, *_rest) in enumerate(self.apps):
+            marker = self.style.paint(">", "1;36") if index == self.selected_app_index else " "
+            text, color_name = self._status_text(app_id)
+            colorize = getattr(self.style, color_name)
+            status = colorize(text)
+            lines.append(f" {marker} {label:<36}{status}")
+        lines.extend(
+            (
+                "",
+                self.style.muted("up/down to move, enter to manage, r: refresh status, q: back"),
+                self.style.muted("(destroy is not available here -- use the Bash wizard's expert menu)"),
+            )
+        )
+        return "\n".join(lines) + "\n"
+
+    def _render_app_menu(self) -> str:
+        app_id, label, _prefix, _step_id, url_key = self.apps[self.selected_app_index]
+        status_text, color_name = self._status_text(app_id)
+        colorize = getattr(self.style, color_name)
+        lines = [self.style.heading(label), "", f"  Status: {colorize(status_text)}"]
+        url = self._current_url(url_key)
+        if url:
+            lines.append(f"  URL:    {url}")
+        lines.append("")
+        for index, (_action_id, action_label) in enumerate(_APP_ACTIONS):
+            marker = self.style.paint(">", "1;36") if index == self.selected_action_index else " "
+            suffix = "  (running...)" if self.running and index == self.selected_action_index else ""
+            row = f" {marker} {action_label}{suffix}"
+            lines.append(self.style.warn(row) if suffix else row)
+        if self.show_credentials:
+            lines.extend(("", "Login guidance"))
+            hints = _LOGIN_HINTS.get(app_id)
+            if hints:
+                lines.extend(f"  {hint}" for hint in hints)
+            elif url:
+                lines.append("  No separate login guidance -- see the URL above.")
             else:
-                lines.append(plain_row)
+                lines.append("  No URL or login guidance available for this app yet.")
         lines.append("")
         lines.append(f"Mode: {self.mode_label()}")
         if self.last_execution is not None:
@@ -87,49 +175,93 @@ class ApplicationsScreen(Armable, Screen):
         lines.extend(
             (
                 "",
-                self.style.muted("up/down to move, enter to run, a: toggle execute/dry-run, q: back"),
-                self.style.muted("(destroy is not available here -- use the Bash wizard's expert menu)"),
+                self.style.muted("up/down to move, enter to select, a: toggle execute/dry-run, r: back, q: back"),
             )
         )
         return "\n".join(lines) + "\n"
+
+    def _current_url(self, url_key: str) -> str:
+        if not url_key or not self.env_file.exists():
+            return ""
+        values = ConfigStore(self.env_file).load().values()
+        value = values.get(url_key, "")
+        return display_value(url_key, value) if value else ""
 
     def handle_event(self, event: Event) -> NavigationCommand:
         if isinstance(event, TickEvent):
             result = self._poll_execution()
             if result is not None:
                 self.last_execution = result
+                self._refresh_statuses()
             return NavigationCommand.stay()
         if not isinstance(event, KeyEvent):
             return NavigationCommand.stay()
+        if self.stage is _Stage.LIST:
+            return self._handle_list(event)
+        return self._handle_app_menu(event)
+
+    def _handle_list(self, event: KeyEvent) -> NavigationCommand:
         if event.key in ("q", "Q", "escape"):
             return NavigationCommand.pop()
         if event.key in ("up", "k"):
-            self.selected_index = (self.selected_index - 1) % len(self.rows)
-            # Arming is a decision about *this* row's action, not a
-            # session-wide toggle. Unlike GuidedDeployScreen (one linear
-            # "next step" target), this screen has many independently
-            # selectable rows, so without disarming on navigation an
-            # operator could arm intending to run one action, arrow to a
-            # different row by mistake, and press enter to silently
-            # execute the *wrong* app/action for real.
+            self.selected_app_index = (self.selected_app_index - 1) % len(self.apps)
+            return NavigationCommand.stay()
+        if event.key in ("down", "j"):
+            self.selected_app_index = (self.selected_app_index + 1) % len(self.apps)
+            return NavigationCommand.stay()
+        if event.key in ("r", "R"):
+            self._refresh_statuses()
+            return NavigationCommand.stay()
+        if event.key == "enter":
+            self.stage = _Stage.APP_MENU
+            self.selected_action_index = 0
+            self.show_credentials = False
+            self.armed = False
+            return NavigationCommand.stay()
+        return NavigationCommand.stay()
+
+    def _handle_app_menu(self, event: KeyEvent) -> NavigationCommand:
+        if event.key in ("q", "Q"):
+            return NavigationCommand.pop()
+        if event.key == "escape":
+            self.stage = _Stage.LIST
+            return NavigationCommand.stay()
+        if event.key in ("r", "R") and not self.is_executing:
+            self.stage = _Stage.LIST
+            return NavigationCommand.stay()
+        if event.key in ("up", "k"):
+            self.selected_action_index = (self.selected_action_index - 1) % len(_APP_ACTIONS)
+            # Same reasoning as Bash's own single-choice-per-screen shape:
+            # arming is a decision about *this* action, not session-wide.
             self.armed = False
             return NavigationCommand.stay()
         if event.key in ("down", "j"):
-            self.selected_index = (self.selected_index + 1) % len(self.rows)
+            self.selected_action_index = (self.selected_action_index + 1) % len(_APP_ACTIONS)
             self.armed = False
             return NavigationCommand.stay()
         if event.key in ("a", "A"):
             self.toggle_armed()
             return NavigationCommand.stay()
         if event.key == "enter":
-            self._run_selected()
-            return NavigationCommand.stay()
+            command = self._select_action()
+            return command if command is not None else NavigationCommand.stay()
         return NavigationCommand.stay()
 
-    def _run_selected(self) -> None:
+    def _select_action(self) -> NavigationCommand | None:
+        action_id, _label = _APP_ACTIONS[self.selected_action_index]
+        if action_id == "logs":
+            _app_id, _label, _prefix, step_id, _url = self.apps[self.selected_app_index]
+            return NavigationCommand.push(LogsScreen(initial_step_id=step_id))
+        if action_id == "credentials":
+            self.show_credentials = not self.show_credentials
+            return None
+        self._run_selected(action_id)
+        return None
+
+    def _run_selected(self, action: str) -> None:
         if self.is_executing:
             return
-        app_id, _label, action = self.rows[self.selected_index]
+        app_id, _label, _prefix, _step_id, _url = self.apps[self.selected_app_index]
         executing = self.consume_arm()
         spec = self.catalog.app(app_id, action)
         if not executing:
@@ -141,9 +273,8 @@ class ApplicationsScreen(Armable, Screen):
         # DeployService.start_execute()/poll_execute() for the same
         # pattern. The result arrives via a TickEvent and
         # _poll_execution() above.
-        row_index = self.selected_index
         with self._execution_lock:
-            self.running_row_index = row_index
+            self.running = True
             thread = threading.Thread(target=self._execute_in_background, args=(spec,), daemon=True)
             self._running_thread = thread
         thread.start()
@@ -160,5 +291,5 @@ class ApplicationsScreen(Armable, Screen):
             result = self._pending_execution
             self._pending_execution = None
             self._running_thread = None
-            self.running_row_index = None
+            self.running = False
         return result

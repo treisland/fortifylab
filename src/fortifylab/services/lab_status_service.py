@@ -27,14 +27,14 @@ import os
 from pathlib import Path
 import shutil
 import tomllib
-from typing import Callable
 
 from fortifylab.config.repair import validate_hosts_and_urls
 from fortifylab.config.store import ConfigStore
-from fortifylab.core.command import CommandResult, run_command
 from fortifylab.domain.flight_plans import default_catalog_path, merged_read_catalog
 
-KubectlRunner = Callable[[tuple[str, ...]], CommandResult]
+from .kubectl_base import KubectlBackedService, KubectlRunner
+
+__all__ = ["KubectlRunner", "LabStatusService", "ReadinessCheck"]
 
 
 @dataclass(frozen=True)
@@ -52,19 +52,12 @@ def _nonempty_file(path_str: str) -> bool:
 
 
 @dataclass
-class LabStatusService:
+class LabStatusService(KubectlBackedService):
     env_file: Path = field(default_factory=lambda: Path(".env"))
     catalog_path: Path = field(default_factory=default_catalog_path)
     repo_root: Path = field(default_factory=lambda: Path("."))
     namespace: str = "fortify"
-    kubectl: str = "microk8s kubectl"
-    runner: KubectlRunner | None = None
     docker_config_path: Path = field(default_factory=lambda: Path.home() / ".docker" / "config.json")
-
-    def _run(self, args: tuple[str, ...]) -> CommandResult:
-        if self.runner is not None:
-            return self.runner(args)
-        return run_command((*tuple(self.kubectl.split()), *args), timeout=20)
 
     def _env_values(self) -> dict[str, str]:
         if not self.env_file.exists():

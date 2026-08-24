@@ -18,26 +18,20 @@ and reports if they don't, rather than silently redeploying anything.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
 
-from fortifylab.core.command import CommandResult, run_command
+from fortifylab.core.command import CommandResult
 
-KubectlRunner = Callable[[tuple[str, ...]], CommandResult]
+from .kubectl_base import KubectlBackedService, KubectlRunner
+
+__all__ = ["DashboardAccessService", "KubectlRunner"]
 
 _VIEWER_SERVICE_ACCOUNT = "fortify-dashboard-viewer"
 _ADMIN_SERVICE_ACCOUNT = "fortify-dashboard-admin"
 
 
 @dataclass
-class DashboardAccessService:
-    kubectl: str = "microk8s kubectl"
-    runner: KubectlRunner | None = None
+class DashboardAccessService(KubectlBackedService):
     _namespace_cache: str | None = field(default=None, init=False, repr=False, compare=False)
-
-    def _run(self, args: tuple[str, ...]) -> CommandResult:
-        if self.runner is not None:
-            return self.runner(args)
-        return run_command((*tuple(self.kubectl.split()), *args), timeout=20)
 
     def namespace(self) -> str:
         # The Dashboard's namespace can't change during a screen's lifetime,

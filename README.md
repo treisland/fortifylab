@@ -124,8 +124,12 @@ Bash counterpart's actions (noted below): **Dashboard** (a lab-wide
 readiness board — 11 ready/warn checks ported from Bash's own setup
 readiness board, plus a recommended next action), **Deploy / Resume** (a
 Guided deployment screen for the SSC-only profile), **Applications**
-(start/stop for ssc/lim/mysql/postgresql and the sample apps Juice
-Shop/WebGoat/DVWA), **Configuration** (redacted `.env` view plus
+(live per-app status -- "N/N running"/"N/M ready"/"not deployed",
+color-coded like Bash's own `app_status()` -- then Start/Upgrade, Stop,
+Logs, and Show URL & credentials for ssc/lim/mysql/postgresql and the
+sample apps Juice Shop/WebGoat/DVWA), **Lab Lifecycle** (bulk
+shutdown/start scoped to the active deployment profile or the whole lab),
+**Configuration** (redacted `.env` view plus
 backup/rollback), **Logs** (pick a component, then a pod, then tail it),
 **Kubernetes Dashboard** (generate a 1-hour view-only or administrator
 access token), **URLs & Credentials** (service URLs, short login guidance,
@@ -183,6 +187,26 @@ customized MySQL/PostgreSQL version as plan "drift" -- Bash never counts
 those, and now neither does this screen. The Lab Status Dashboard's root
 CA and fcli truststore checks were reading the wrong `.env` keys and are
 now aligned with Bash's actual fallback logic.
+
+Applications and Lab Lifecycle then got a deeper pass specifically on
+deployment/individual-component management. Applications is now two
+levels, matching Bash's `apps_menu()`/`app_action_menu()` shape: pick an
+app from the live-status list, then Start/Upgrade, Stop, Logs (jumps
+straight into the Logs screen pre-filtered to that app), or Show URL &
+credentials (inline, not a duplicate of the URLs & Credentials screen --
+just its per-app subset). Lab Lifecycle is new: the non-destructive
+quarter of Bash's `lab_lifecycle_menu()` (shutdown/start, scoped to the
+active profile or the whole lab), built by handing an ordered sequence of
+app operations to the same `DeployService`/`GuidedDeployScreen` Guided
+Deploy already uses -- so the color-coding, dry-run-cycling, and
+running-indicator behavior apply automatically, no separate
+implementation to keep in sync. Destroy and Scale workers stay out
+everywhere, same reason as everywhere else -- both need free-text input
+(a confirmation phrase, or a replica count) the TUI still doesn't have a
+widget for. SAST and DAST aren't in the Applications app list yet either
+-- Bash treats each as one combined app with a two-script start/stop,
+which needs a small design decision (multi-script operations) rather
+than a quick add (see the roadmap).
 
 `./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`
 and it execs into the Python TUI above (after the same acknowledgement,

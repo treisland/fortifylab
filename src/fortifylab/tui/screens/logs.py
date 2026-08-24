@@ -45,6 +45,7 @@ class LogsScreen(Screen):
     selected_pod_index: int = 0
     output: str | None = None
     message: str | None = None
+    initial_step_id: str | None = None
 
     def __post_init__(self) -> None:
         # Bash reads $NAMESPACE dynamically everywhere (guided.sh,
@@ -59,6 +60,15 @@ class LogsScreen(Screen):
             namespace = ConfigStore(self.env_file).load().values().get("NAMESPACE")
             if namespace:
                 self.service.namespace = namespace
+        # A caller that already knows which component's logs the operator
+        # wants (e.g. Applications' per-app menu) can skip the scope-list
+        # step entirely instead of forcing "Logs -> pick the component
+        # again" when it was already just picked.
+        if self.initial_step_id is not None:
+            index = next((i for i, (step_id, _l, _p) in enumerate(self.scopes) if step_id == self.initial_step_id), None)
+            if index is not None:
+                self.selected_scope_index = index
+                self._look_up_pods()
 
     def render(self) -> str:
         if self.stage is _Stage.SCOPES:

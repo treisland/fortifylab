@@ -13,11 +13,10 @@ destroy; there is no text-entry widget in the TUI to gate that safely).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
 
-from fortifylab.core.command import CommandResult, run_command
+from .kubectl_base import KubectlBackedService, KubectlRunner
 
-KubectlRunner = Callable[[tuple[str, ...]], CommandResult]
+__all__ = ["CREDENTIAL_CHECKS", "CredentialCheck", "KubectlRunner", "UrlsCredentialsService"]
 
 
 @dataclass(frozen=True)
@@ -39,15 +38,8 @@ CREDENTIAL_CHECKS: tuple[CredentialCheck, ...] = (
 
 
 @dataclass
-class UrlsCredentialsService:
+class UrlsCredentialsService(KubectlBackedService):
     namespace: str = "fortify"
-    kubectl: str = "microk8s kubectl"
-    runner: KubectlRunner | None = None
-
-    def _run(self, args: tuple[str, ...]) -> CommandResult:
-        if self.runner is not None:
-            return self.runner(args)
-        return run_command((*tuple(self.kubectl.split()), *args), timeout=20)
 
     def secret_key_exists(self, secret: str, key: str) -> bool:
         result = self._run(("-n", self.namespace, "get", "secret", secret, "-o", f"jsonpath={{.data.{key}}}"))

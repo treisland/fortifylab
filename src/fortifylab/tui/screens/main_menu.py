@@ -27,6 +27,7 @@ from .diagnostics import DiagnosticsScreen
 from .flight_plans import FlightPlansScreen
 from .guided_deploy import GuidedDeployScreen
 from .help import HelpScreen
+from .lab_lifecycle import LabLifecycleScreen
 from .logs import LogsScreen
 from .runbooks import RunbooksScreen
 from .urls_credentials import UrlsCredentialsScreen
@@ -41,6 +42,7 @@ _SCREEN_FACTORIES: dict[str, Callable[[], Screen]] = {
     "dashboard": DashboardScreen,
     "deploy": GuidedDeployScreen,
     "applications": ApplicationsScreen,
+    "lab-lifecycle": LabLifecycleScreen,
     "certificates": CertificatesScreen,
     "configuration": ConfigurationScreen,
     "logs": LogsScreen,

@@ -65,7 +65,31 @@ class DeployService:
         profile = build_profile(profile_id)
         adapter = BashOperationAdapter(repo_root)
         step_ids = tuple(step.step_id for step in profile.steps if step.step_id in adapter_step_ids())
-        self.plan: DeploymentPlan = adapter.build_plan(profile.label, step_ids)
+        plan = adapter.build_plan(profile.label, step_ids)
+        self._init_from_plan(plan, session_id=f"deploy-{profile_id}", controller=controller)
+
+    @classmethod
+    def for_plan(cls, plan: DeploymentPlan, *, session_id: str, controller: OperationController | None = None) -> "DeployService":
+        """Build a service around an already-constructed plan instead of
+        deriving one from a guided-deployment profile.
+
+        Every piece of this class beyond plan construction -- live
+        per-step state, the background-thread execute/poll mechanism, the
+        dry-run preview cursor -- is exactly what a bulk lab-lifecycle
+        action (start/shutdown a set of apps in order) also needs. Rather
+        than a third copy of that machinery (the first was
+        ``ApplicationsScreen`` before it was pointed at this same class),
+        ``LabLifecycleService`` just builds a plan and hands it here; see
+        ``tui.screens.lab_lifecycle``.
+        """
+
+        service = cls.__new__(cls)
+        service.profile_id = ""
+        service._init_from_plan(plan, session_id=session_id, controller=controller)
+        return service
+
+    def _init_from_plan(self, plan: DeploymentPlan, *, session_id: str, controller: OperationController | None) -> None:
+        self.plan = plan
         self.controller = controller or OperationController()
         self.states: dict[str, OperationState] = {
             step_id: OperationState(step_id) for step_id in self.plan.step_ids()
@@ -75,8 +99,8 @@ class DeployService:
         self._running_thread: threading.Thread | None = None
         self._pending_result: OperationResult | None = None
         self.session = GuidedSession(
-            session_id=f"deploy-{profile_id}",
-            profile_id=profile_id,
+            session_id=session_id,
+            profile_id=self.profile_id,
             current_step=self.plan.steps[0].step_id if self.plan.steps else "",
         )
 

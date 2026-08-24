@@ -12,6 +12,7 @@ from .diagnostics import DiagnosticsScreen
 from .flight_plans import FlightPlansScreen
 from .guided_deploy import GuidedDeployScreen
 from .help import HelpScreen
+from .lab_lifecycle import LabLifecycleScreen
 from .logs import LogsScreen
 from .main_menu import MainMenuScreen
 from .runbooks import RunbooksScreen
@@ -30,6 +31,7 @@ __all__ = [
     "FlightPlansScreen",
     "GuidedDeployScreen",
     "HelpScreen",
+    "LabLifecycleScreen",
     "LogsScreen",
     "MainMenuScreen",
     "RunbooksScreen",

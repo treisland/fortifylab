@@ -55,6 +55,20 @@ class LogsScreenTests(unittest.TestCase):
             )
         self.assertEqual(screen.service.namespace, "fortify")
 
+    def test_initial_step_id_jumps_straight_past_the_scope_list(self) -> None:
+        # Applications' per-app "Logs" action already knows which
+        # component the operator wants -- this must skip straight to
+        # looking up that component's pods instead of showing the scope
+        # list a second time.
+        service = LogsService(pod_lister=lambda: ("ssc-webapp-0",), runner=_runner_returning("log output\n"))
+        screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), service=service, initial_step_id="ssc")
+        self.assertEqual(screen.stage, _Stage.OUTPUT)
+        self.assertIn("log output", screen.render())
+
+    def test_unknown_initial_step_id_falls_back_to_the_scope_list(self) -> None:
+        screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), initial_step_id="not-a-real-scope")
+        self.assertEqual(screen.stage, _Stage.SCOPES)
+
     def test_single_matching_pod_skips_straight_to_output(self) -> None:
         service = LogsService(pod_lister=lambda: ("ssc-webapp-0",), runner=_runner_returning("log output\n"))
         screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), service=service)

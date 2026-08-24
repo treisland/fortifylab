@@ -688,14 +688,107 @@ catalog (it's a 3-file docs viewer); Diagnostics' "sanitized bundle"
 overstates what's actually collected. Dashboard access, Certificates &
 Trust, and Help were all audited and found accurate with no bugs.
 
+## M13 — Deployment & individual component management (deep parity pass)
+
+The user asked to focus specifically on deployment and individual
+Kubernetes pod/component management -- "users like how this works in
+bash" -- and convert it properly, not just patch the bugs already found.
+Digging into Bash's actual `apps_menu()`/`app_action_menu()`/
+`lab_lifecycle_menu()` (`scripts/wizard/operations.sh`) surfaced the real
+gap: Python had **no live per-component status at all**. Bash's
+`app_status()` shows "N/N running" (green), "N/M ready" (yellow), or "not
+deployed" (dim) per app, from a single `kubectl get pods` call; the
+Applications screen showed nothing but a flat list of start/stop rows
+with no state.
+
+- `src/fortifylab/services/kubectl_base.py` (new) — `KubectlBackedService`,
+  a shared base for the identical `_run()` (injectable runner, else a
+  real `run_command` call with a 20s timeout) that had been copy-pasted
+  across `DashboardAccessService`, `UrlsCredentialsService`, and
+  `LabStatusService` (flagged in the M11/M12 code reviews as duplication
+  worth collapsing). All three now inherit it instead of each carrying
+  their own copy.
+- `src/fortifylab/services/app_status_service.py` (new) —
+  `AppStatusService`, a structural port of `app_status()`: same three
+  states/colors, same `kubectl get pods --no-headers` source, parsed in
+  Python instead of piped through `awk`. `statuses()` fetches every app's
+  status from **one** kubectl call (a per-app-row `status()` call each
+  would mean N round-trips for the same pod list -- Applications has 7
+  rows).
+- `src/fortifylab/tui/screens/applications.py` (rewritten) — now two
+  levels, matching Bash's shape: a list of apps with live status, `enter`
+  opens a per-app menu (Start/Upgrade, Stop, Logs, Show URL &
+  credentials). "Logs" pushes straight into `LogsScreen` pre-filtered to
+  that app (`LogsScreen` gained an `initial_step_id` field for this,
+  skipping the "pick a component" step since it was already just
+  picked). "Show URL & credentials" renders inline (URL from `.env` via
+  the same `display_value()` redaction every other screen uses, plus a
+  short login hint for SSC/LIM matching `show_app_creds()`'s cases) —
+  not a second copy of `UrlsCredentialsScreen`'s content, just its
+  narrower per-app subset.
+- `src/fortifylab/tui/screens/lab_lifecycle.py` +
+  `src/fortifylab/services/lab_lifecycle_service.py` (new) — the
+  non-destructive quarter of `lab_lifecycle_menu()` (options 1/2/4/5:
+  shutdown/start, scoped to the active profile or the whole lab).
+  Structurally, a bulk lifecycle action is just an ordered sequence of
+  app start/stop operations -- exactly what Guided Deploy already
+  drives. Rather than a third copy of the background-thread execute/
+  dry-run-preview machinery (the first copy was `ApplicationsScreen`
+  before this rewrite pointed it at `DeployService` too),
+  `DeployService` gained a `for_plan()` classmethod that builds a
+  service around an arbitrary `DeploymentPlan` instead of always
+  deriving one from a guided-deployment profile; `LabLifecycleScreen` is
+  just a 4-option chooser that builds a plan and pushes a
+  `GuidedDeployScreen` at it. The color-coding, dry-run-cycling, and
+  running-indicator fixes already made for Guided Deploy apply here
+  automatically, for free.
+- New `OPERATOR_MENU` item: `MenuItem("lab-lifecycle", "Lab Lifecycle", ...)`.
+
+**Scope trims, deliberate:**
+- **Destroy and Scale workers stay out**, same reason as everywhere else
+  in this migration: destroy needs an exact typed confirmation phrase
+  (`"DESTROY ssc"`, or `"DESTROY FORTIFY LAB"`/`"DESTROY SELECTED
+  PROFILE"` for lifecycle-level teardown), and Scale workers
+  (`scale_workers()`, SAST/DAST only) reads a free-typed replica count.
+  Neither is safe to approximate with a single keypress; both need the
+  still-missing text-entry widget.
+- **SAST and DAST aren't in the app list yet.** Bash's `APP_PODS`
+  combines SAST controller+sensor and DAST core+scanner into one row
+  each (`scancentral-sast`, `sdast`) with a multi-script `APP_START`
+  entry (e.g. `"apps/scdast/core/start.sh apps/scdast/scanner/start.sh"`).
+  `OperationCatalog.app()`/`ApplicationsScreen`'s app list don't have
+  entries for them at all -- adding them means either a multi-script
+  `OperationSpec` or splitting them into the same four steps
+  `orchestration.adapters.DEFAULT_STEP_SCRIPTS` already has
+  (`sast_controller`/`sast_sensor`/`dast_core`/`dast_scanner`), a real
+  design decision rather than a quick add, so it's tracked here rather
+  than guessed at under time pressure.
+- **`lab_lifecycle_current_profile()`'s live-state refresh isn't
+  ported.** Bash re-derives what's actually running before showing the
+  lifecycle menu; `apps_for_scope("selected")` only reads
+  `FORTIFY_DEPLOYMENT_PROFILE` from `.env` and expands it the same way
+  Guided Deploy does -- correct for "what profile is configured," not
+  "what's actually live post-manual-changes," which needs the same
+  live-state detection already flagged as future work for Guided Deploy.
+
+**Done when:** Applications shows live, colored, correct per-app status
+matching Bash's three states; the per-app menu offers exactly the
+non-text-entry-gated actions Bash's `app_action_menu()` does; Lab
+Lifecycle offers exactly the non-destructive quarter of
+`lab_lifecycle_menu()`; no new duplicated background-execution or
+kubectl-invocation code was added along the way. All met in this pass.
+
 ## What this PR actually delivers
 
 M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
 (Kubernetes Dashboard access), M10 (URLs & Credentials), M11
-(Certificates & Trust), M12 (Lab Status Dashboard), and the Guided Deploy
-bug fixes above, as the first six milestone picks from the post-M6
-follow-up plus a hardening pass -- M6 delivered as an opt-in preview
-hook, not a default cutover, because the parity that cutover depends on
+(Certificates & Trust), M12 (Lab Status Dashboard), the Guided Deploy bug
+fixes, the feature-parity audit fixes, and M13 (deployment & individual
+component management: live per-app status, per-app menu, Lab Lifecycle
+bulk shutdown/start) above, as the first six milestone picks from the
+post-M6 follow-up plus a hardening pass and a deep parity pass on the one
+area specifically called out -- M6 delivered as an opt-in preview hook,
+not a default cutover, because the parity that cutover depends on
 doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked

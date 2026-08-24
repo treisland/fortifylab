@@ -19,6 +19,7 @@ OPERATOR_MENU: tuple[MenuItem, ...] = (
     MenuItem("dashboard", "Dashboard", "Lab health, current profile, warnings, and next actions"),
     MenuItem("deploy", "Deploy / Resume", "Guided deployment, resume, repair, and deployment plan"),
     MenuItem("applications", "Applications", "SSC, LIM, ScanCentral, dashboard, and sample app lifecycle"),
+    MenuItem("lab-lifecycle", "Lab Lifecycle", "Bulk shutdown/start scoped to the active profile or the whole lab"),
     MenuItem("configuration", "Configuration", ".env sections, validation, backups, and derived URL repair"),
     MenuItem("runbooks", "Runbooks", "Interactive parameter forms and safe runbook execution previews"),
     MenuItem("logs", "Logs", "Deployment logs, pod logs, follow mode, and previous container logs"),

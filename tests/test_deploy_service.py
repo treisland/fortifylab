@@ -210,6 +210,26 @@ class DeployServiceTests(unittest.TestCase):
                 raise AssertionError("background step did not finish within the test timeout")
             time.sleep(0.01)
 
+    def test_for_plan_builds_a_service_around_an_arbitrary_plan(self) -> None:
+        # LabLifecycleService reuses this instead of a third copy of the
+        # background-execute/dry-run-preview machinery -- confirm a
+        # service built this way behaves identically to one built from a
+        # profile.
+        from fortifylab.orchestration import DeploymentPlan, DeploymentStep
+
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        plan = DeploymentPlan(
+            name="Lab lifecycle -- shutdown (all)",
+            steps=(DeploymentStep(step_id="ssc", label="Stop ssc", command=("true",)),),
+        )
+        service = DeployService.for_plan(plan, session_id="lifecycle-shutdown-all", controller=controller)
+
+        self.assertEqual(service.plan.name, "Lab lifecycle -- shutdown (all)")
+        self.assertEqual(list(service.runnable_steps()), list(plan.steps))
+        result = service.run_next(execute=True)
+        self.assertEqual(result.status, StepStatus.COMPLETE)
+        self.assertTrue(service.is_complete)
+
     def test_adapter_step_ids_matches_the_bash_adapter_script_table(self) -> None:
         ids = adapter_step_ids()
         self.assertIn("ssc", ids)
