@@ -68,6 +68,17 @@ class FieldComparison:
     current: str
     aligned: bool
     review_required: bool = False
+    # DATABASE_KEYS: Bash's own compare_env() (scripts/tools/flight-plans.py)
+    # always prints these with state "database-separate" and never counts
+    # them toward mismatch -- MySQL/PostgreSQL versions are independent of
+    # the Fortify Flight Plan by design, so a customized DB version must
+    # never be flagged as drift the way a genuine Flight Plan component
+    # mismatch is.
+    separate: bool = False
+
+    @property
+    def excluded_from_drift(self) -> bool:
+        return self.review_required or self.separate
 
 
 @dataclass(frozen=True)
@@ -77,7 +88,7 @@ class EnvComparison:
 
     @property
     def mismatched(self) -> tuple[FieldComparison, ...]:
-        return tuple(field for field in self.fields if not field.aligned and not field.review_required)
+        return tuple(field for field in self.fields if not field.aligned and not field.excluded_from_drift)
 
     @property
     def drifted(self) -> bool:
@@ -124,6 +135,7 @@ class FlightPlanService:
                     expected=expected or "<unknown>",
                     current=current or "<unset>",
                     aligned=bool(expected) and current == expected,
+                    separate=True,
                 )
             )
         return EnvComparison(plan_id=plan_id, fields=tuple(fields))

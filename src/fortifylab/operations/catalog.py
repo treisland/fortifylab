@@ -87,8 +87,8 @@ class OperationCatalog:
             confirmation_phrase=phrase,
         )
 
-    def logs(self, pod: str, *, follow: bool) -> OperationSpec:
-        command = ("microk8s", "kubectl", "-n", "fortify", "logs", pod)
+    def logs(self, pod: str, *, follow: bool, namespace: str = "fortify") -> OperationSpec:
+        command = ("microk8s", "kubectl", "-n", namespace, "logs", pod)
         if follow:
             command = (*command, "-f")
         return OperationSpec(f"logs.{pod}", f"View logs for {pod}", OperationKind.LOGS, command, impact=OperationImpact.READ_ONLY)
@@ -109,5 +109,12 @@ class OperationCatalog:
         return OperationSpec("runbook.safe-preview", f"Preview runbook {topic}", OperationKind.RUNBOOK, ("sed", "-n", "1,160p", path), impact=OperationImpact.READ_ONLY)
 
     def _script(self, relative: str) -> tuple[str, ...]:
+        # Invoke via bash explicitly rather than executing the path
+        # directly: these scripts are intentionally not marked executable
+        # in git (the Bash wizard's own convention is to always invoke
+        # them as `bash "$path"`, e.g. run_app_scripts() in
+        # scripts/wizard/operations.sh). Executing one directly hits
+        # PermissionError on a real clone -- the same bug already fixed
+        # for orchestration.adapters.DEFAULT_STEP_SCRIPTS.
         prefix = f"{self.repo_root}/" if self.repo_root != "." else "./"
-        return (f"{prefix}{relative}",)
+        return ("bash", f"{prefix}{relative}")

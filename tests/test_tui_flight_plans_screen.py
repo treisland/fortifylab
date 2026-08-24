@@ -92,6 +92,24 @@ class FlightPlansScreenTests(unittest.TestCase):
             self.assertIn("expected=1.0.0", rendered)
             self.assertIn("current=2.0.0", rendered)
 
+    def test_database_keys_never_render_as_drifted(self) -> None:
+        # Regression test: database chart/image versions used to be
+        # compared exactly like Flight Plan components, so a lab with a
+        # legitimately customized MySQL/PostgreSQL version (independent of
+        # the Fortify Flight Plan by design) rendered as red "drifted" --
+        # a false alarm Bash's own compare-env never raises (it always
+        # prints these as "database-separate").
+        with tempfile.TemporaryDirectory() as directory:
+            screen = _screen_with_catalog(
+                Path(directory),
+                env_text="FORTIFY_MYSQL_IMAGE_TAG=9.9.9-custom\nFORTIFY_POSTGRES_CHART_VERSION=99.0.0-custom\n",
+            )
+            screen.handle_event(KeyEvent("enter"))
+            rendered = screen.render()
+            self.assertIn("FORTIFY_MYSQL_IMAGE_TAG", rendered)
+            self.assertIn("database-separate", rendered)
+            self.assertNotIn("FORTIFY_MYSQL_IMAGE_TAG", "".join(line for line in rendered.splitlines() if "drifted" in line))
+
     def test_candidate_plan_shows_review_required_for_empty_components(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             screen = _screen_with_catalog(Path(directory))

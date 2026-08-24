@@ -618,6 +618,76 @@ port than a bug fix, and one that needs a real cluster to verify against,
 which this sandbox doesn't have. Tracked as a future #446 slice
 ("guided-deploy live state detection") rather than attempted here.
 
+## Feature-parity audit and fixes (post-Guided Deploy fixes)
+
+After the Guided Deploy bug fixes above, the user asked for a broader
+feature-parity review across the rest of the TUI against Bash, since
+similar bug categories seemed likely elsewhere. Two parallel audits
+(Deploy/Applications/Configuration/Logs, and
+Dashboard/Certificates/URLs/Diagnostics/Runbooks/Flight-Plans/Help) found
+several real bugs, all now fixed with regression tests:
+
+- **Applications: same missing-`bash`-prefix bug as Guided Deploy, never
+  fixed here.** `OperationCatalog._script()` executed every certs/secrets/
+  app script path directly. `apps/{mysql,postgresql,ssc,lim}/start.sh`
+  aren't executable in git (their `stop.sh` siblings are) -- pressing
+  enter to start SSC/LIM/MySQL/PostgreSQL from the Applications screen
+  failed every time with a `PermissionError` that read as an app problem,
+  not a tooling bug. Fixed the same way: invoke via `bash` explicitly.
+- **Applications: same "no running indicator" bug as Guided Deploy, never
+  fixed here.** A real start/stop ran synchronously inside
+  `handle_event()`, freezing the whole TUI for however long a Helm
+  upgrade takes, with no feedback. Fixed with the same background-thread
+  + `TickEvent`-poll mechanism `DeployService` already has (a real
+  execution now shows `(running...)` immediately; a stray extra "enter"
+  while one is in flight is a no-op).
+- **Logs: hardcoded `"fortify"` namespace, twice over.** `LogsService`'s
+  own default matches Bash's `NAMESPACE="${NAMESPACE:-fortify}"` fallback
+  (fine on its own), but `OperationCatalog.logs()` hardcoded
+  `"-n", "fortify"` directly into the kubectl command, ignoring
+  `LogsService.namespace` entirely -- so even a correctly-namespaced
+  `list_pods()` (which does read `self.namespace`) would still try to
+  *tail* a found pod's logs from the wrong namespace. Fixed by
+  parameterizing `OperationCatalog.logs(..., namespace=...)` and having
+  `LogsScreen` read `.env`'s `NAMESPACE` (mirroring how every other
+  screen reads a fixed set of `.env` keys) instead of leaving the
+  service on its static default.
+- **Lab Status Dashboard: two readiness checks reading the wrong
+  source.** `root_ca_exported()` checked `.env`'s `ROOTCA_CERT`, but
+  Bash's `setup_root_ca_exported()` always checks a fixed path
+  (`$FORTIFY_HOME_K8S/certs/rootCA.pem`) regardless of `ROOTCA_CERT` --
+  a custom or unset `ROOTCA_CERT` produced a false "warn" (or could mask
+  a real one). `fcli_truststore_available()` only checked `.env`'s
+  `TRUSTSTORE`, missing two of Bash's three straightforward fallbacks
+  (the live `FCLI_TRUSTSTORE` env var, and the same fixed
+  `certs/truststore` path). Fixed both to match Bash's actual fallback
+  chain (skipping only the `fcli_trust_configured_current` cross-check,
+  which needs sourcing a shell profile -- a deliberate, documented scope
+  trim, not a bug).
+- **Flight Plans: database keys falsely flagged as plan drift.**
+  `FlightPlanService.compare_env()` treated `DATABASE_KEYS` (MySQL/
+  PostgreSQL chart/image versions) exactly like Flight Plan components,
+  so a lab with a legitimately customized database version rendered as
+  red "drifted." Bash's own `compare_env()`
+  (`scripts/tools/flight-plans.py`) always reports these as
+  `database-separate` and never counts them toward drift -- MySQL/
+  PostgreSQL versions are independent of the Fortify Flight Plan by
+  design. Fixed with a new `FieldComparison.separate` flag, excluded from
+  `EnvComparison.mismatched`/`.drifted` the same way `review_required`
+  already was, and rendered as `database-separate` rather than
+  `aligned`/`drifted`.
+
+**Findings noted but not fixed in this pass** (lower severity, or genuine
+new feature work rather than a bug): URLs & Credentials render
+"unavailable" as dim/muted instead of yellow/warn (a smaller instance of
+the same color-coding bug class); Logs is missing "follow" and "previous
+container logs" entirely, which are real Bash menu options with no
+Python equivalent yet (not a bug in what's wired, an unwired feature);
+Runbooks' module docstring overclaims parity with Bash's dynamic runbook
+catalog (it's a 3-file docs viewer); Diagnostics' "sanitized bundle"
+overstates what's actually collected. Dashboard access, Certificates &
+Trust, and Help were all audited and found accurate with no bugs.
+
 ## What this PR actually delivers
 
 M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9

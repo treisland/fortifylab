@@ -80,4 +80,4 @@ class LogsService:
         `execute` flag -- there is nothing destructive to arm.
         """
 
-        return self.runner.run(self.catalog.logs(pod, follow=follow))
+        return self.runner.run(self.catalog.logs(pod, follow=follow, namespace=self.namespace))

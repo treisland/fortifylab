@@ -75,7 +75,9 @@ class FlightPlansScreen(Screen):
         lines.extend(("", "Compared against the current .env"))
         comparison = self.service.compare_env(plan.plan_id, self.env_file)
         for field_ in comparison.fields:
-            if field_.review_required:
+            if field_.separate:
+                label, paint = "database-separate", self.style.muted
+            elif field_.review_required:
                 label, paint = "review required", self.style.muted
             elif field_.aligned:
                 label, paint = "aligned", self.style.ok

@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
+from fortifylab.config.store import ConfigStore
 from fortifylab.services.logs_service import LogsService
 from fortifylab.tui.profiles import LOG_SCOPES, STEP_LABELS
 
@@ -35,6 +37,7 @@ class _Stage(str, Enum):
 class LogsScreen(Screen):
     style: TerminalStyle = field(default_factory=TerminalStyle.from_environment)
     service: LogsService = field(default_factory=LogsService)
+    env_file: Path = field(default_factory=lambda: Path(".env"))
     scopes: tuple[tuple[str, str, str], ...] = _SCOPES
     stage: _Stage = _Stage.SCOPES
     selected_scope_index: int = 0
@@ -42,6 +45,20 @@ class LogsScreen(Screen):
     selected_pod_index: int = 0
     output: str | None = None
     message: str | None = None
+
+    def __post_init__(self) -> None:
+        # Bash reads $NAMESPACE dynamically everywhere (guided.sh,
+        # operations.sh); LogsService/OperationCatalog default to the same
+        # "fortify" Bash itself falls back to, but a lab with a
+        # non-default NAMESPACE in .env would otherwise silently query
+        # the wrong namespace for both pod listing and log tailing. Apply
+        # it here so every other screen's construction pattern (read a
+        # fixed set of keys from .env) stays the one place namespace
+        # comes from.
+        if self.env_file.exists():
+            namespace = ConfigStore(self.env_file).load().values().get("NAMESPACE")
+            if namespace:
+                self.service.namespace = namespace
 
     def render(self) -> str:
         if self.stage is _Stage.SCOPES:

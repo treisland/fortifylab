@@ -23,6 +23,7 @@ exist and are not empty." This service only checks the latter.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 import shutil
 import tomllib
@@ -54,6 +55,7 @@ def _nonempty_file(path_str: str) -> bool:
 class LabStatusService:
     env_file: Path = field(default_factory=lambda: Path(".env"))
     catalog_path: Path = field(default_factory=default_catalog_path)
+    repo_root: Path = field(default_factory=lambda: Path("."))
     namespace: str = "fortify"
     kubectl: str = "microk8s kubectl"
     runner: KubectlRunner | None = None
@@ -111,10 +113,28 @@ class LabStatusService:
         return all(_nonempty_file(values.get(key, "")) for key in ("SERVER_CERT", "SERVER_KEY", "JVM_KEYSTORE", "TRUSTSTORE"))
 
     def root_ca_exported(self) -> bool:
-        return _nonempty_file(self._env_values().get("ROOTCA_CERT", ""))
+        # Bash's setup_root_ca_exported() checks a fixed path,
+        # $FORTIFY_HOME_K8S/certs/rootCA.pem -- not $ROOTCA_CERT, which
+        # can point elsewhere (or be unset) without affecting what Bash
+        # actually checks. Match that fixed path rather than reading
+        # ROOTCA_CERT from .env, which was checking the wrong source.
+        return _nonempty_file(str(self.repo_root / "certs" / "rootCA.pem"))
 
     def fcli_truststore_available(self) -> bool:
-        return _nonempty_file(self._env_values().get("TRUSTSTORE", ""))
+        # Bash's setup_fcli_trust_ready() checks, in order: the live
+        # FCLI_TRUSTSTORE env var (set by a shell that has sourced fcli
+        # trust config), then .env's TRUSTSTORE, then a fixed fallback
+        # path. The FCLI_TRUSTSTORE-vs-fcli_trust_configured_current
+        # cross-check (comparing it against TYPE/PWD too) needs sourcing
+        # a shell profile, which doesn't translate to a single Python
+        # process -- that part stays a deliberate scope trim -- but the
+        # two straightforward fallbacks were missing entirely.
+        live_truststore = os.environ.get("FCLI_TRUSTSTORE", "")
+        if _nonempty_file(live_truststore):
+            return True
+        if _nonempty_file(self._env_values().get("TRUSTSTORE", "")):
+            return True
+        return _nonempty_file(str(self.repo_root / "certs" / "truststore"))
 
     def cluster_reachable(self) -> bool:
         return self._run(("cluster-info",)).ok

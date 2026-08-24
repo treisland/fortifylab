@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -93,14 +95,20 @@ class EnvBackedChecksTests(unittest.TestCase):
                 path.write_text("x", encoding="utf-8")
             self.assertTrue(service.tls_artifacts_exist())
 
-    def test_root_ca_exported_requires_nonempty_rootca_cert(self) -> None:
+    def test_root_ca_exported_checks_the_fixed_repo_path_not_env_rootca_cert(self) -> None:
+        # Regression test: this used to read .env's ROOTCA_CERT, but
+        # Bash's setup_root_ca_exported() always checks a fixed path
+        # ($FORTIFY_HOME_K8S/certs/rootCA.pem) regardless of ROOTCA_CERT.
+        # A custom/unset ROOTCA_CERT must not affect this check at all.
         with tempfile.TemporaryDirectory() as directory:
-            root_ca = Path(directory) / "rootCA.pem"
-            env_file = Path(directory) / ".env"
-            _write(env_file, f"ROOTCA_CERT={root_ca}\n")
-            service = LabStatusService(env_file=env_file)
+            repo_root = Path(directory)
+            env_file = repo_root / ".env"
+            _write(env_file, "ROOTCA_CERT=/somewhere/else/not-checked.pem\n")
+            service = LabStatusService(env_file=env_file, repo_root=repo_root)
             self.assertFalse(service.root_ca_exported())
-            root_ca.write_text("cert-body", encoding="utf-8")
+
+            (repo_root / "certs").mkdir()
+            (repo_root / "certs" / "rootCA.pem").write_text("cert-body", encoding="utf-8")
             self.assertTrue(service.root_ca_exported())
 
     def test_docker_auth_ready_requires_nonempty_docker_config(self) -> None:
@@ -123,9 +131,32 @@ class EnvBackedChecksTests(unittest.TestCase):
             truststore = Path(directory) / "truststore"
             env_file = Path(directory) / ".env"
             _write(env_file, f"TRUSTSTORE={truststore}\n")
-            service = LabStatusService(env_file=env_file)
+            service = LabStatusService(env_file=env_file, repo_root=Path(directory))
             self.assertFalse(service.fcli_truststore_available())
             truststore.write_text("x", encoding="utf-8")
+            self.assertTrue(service.fcli_truststore_available())
+
+    def test_fcli_truststore_available_checks_the_live_fcli_truststore_env_var_first(self) -> None:
+        # Regression test: Bash's setup_fcli_trust_ready() checks the live
+        # FCLI_TRUSTSTORE env var before .env's TRUSTSTORE -- this fallback
+        # was missing entirely.
+        with tempfile.TemporaryDirectory() as directory:
+            live_truststore = Path(directory) / "live-truststore"
+            live_truststore.write_text("x", encoding="utf-8")
+            service = LabStatusService(env_file=Path(directory) / ".env", repo_root=Path(directory))
+            with unittest.mock.patch.dict(os.environ, {"FCLI_TRUSTSTORE": str(live_truststore)}):
+                self.assertTrue(service.fcli_truststore_available())
+
+    def test_fcli_truststore_available_falls_back_to_the_fixed_repo_path(self) -> None:
+        # Regression test: Bash's last fallback is a fixed path,
+        # $FORTIFY_HOME_K8S/certs/truststore -- also missing entirely.
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            service = LabStatusService(env_file=repo_root / ".env", repo_root=repo_root)
+            self.assertFalse(service.fcli_truststore_available())
+
+            (repo_root / "certs").mkdir()
+            (repo_root / "certs" / "truststore").write_text("x", encoding="utf-8")
             self.assertTrue(service.fcli_truststore_available())
 
 

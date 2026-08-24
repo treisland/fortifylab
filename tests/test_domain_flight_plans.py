@@ -195,6 +195,17 @@ class FlightPlanServiceTests(unittest.TestCase):
             self.assertNotIn("FORTIFY_SCSAST_CHART_VERSION", drifted_keys)
             # An empty expected value means "review required", not "drifted".
             self.assertNotIn("FORTIFY_SSC_IMAGE_TAG", drifted_keys)
+            # Regression test: DATABASE_KEYS (none set in this .env, so
+            # current != database_defaults for all four) must never count
+            # toward drift -- matching scripts/tools/flight-plans.py's own
+            # compare_env(), which always reports these as
+            # "database-separate", never "drifted".
+            self.assertNotIn("FORTIFY_MYSQL_CHART_VERSION", drifted_keys)
+            self.assertNotIn("FORTIFY_MYSQL_IMAGE_TAG", drifted_keys)
+            self.assertNotIn("FORTIFY_POSTGRES_CHART_VERSION", drifted_keys)
+            self.assertNotIn("FORTIFY_POSTGRES_IMAGE_TAG", drifted_keys)
+            database_fields = [field for field in comparison.fields if field.key.startswith(("FORTIFY_MYSQL", "FORTIFY_POSTGRES"))]
+            self.assertTrue(all(field.separate for field in database_fields))
             self.assertTrue(comparison.drifted)
 
 

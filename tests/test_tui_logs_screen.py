@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -31,6 +32,28 @@ class LogsScreenTests(unittest.TestCase):
         screen = LogsScreen(style=TerminalStyle(color=False, symbols=False))
         self.assertEqual(screen.stage, _Stage.SCOPES)
         self.assertIn("Choose a component", screen.render())
+
+    def test_reads_namespace_from_env_file_instead_of_the_fortify_default(self) -> None:
+        # Regression test: this screen used to always leave LogsService on
+        # its static "fortify" default, ignoring .env's NAMESPACE -- so a
+        # lab with a customized namespace silently queried the wrong one
+        # for both pod listing and log tailing.
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("NAMESPACE=custom-ns\n", encoding="utf-8")
+            service = LogsService()
+            screen = LogsScreen(style=TerminalStyle(color=False, symbols=False), service=service, env_file=env_file)
+        self.assertEqual(screen.service.namespace, "custom-ns")
+
+    def test_missing_env_file_keeps_the_services_own_namespace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            service = LogsService()
+            screen = LogsScreen(
+                style=TerminalStyle(color=False, symbols=False),
+                service=service,
+                env_file=Path(directory) / ".env",
+            )
+        self.assertEqual(screen.service.namespace, "fortify")
 
     def test_single_matching_pod_skips_straight_to_output(self) -> None:
         service = LogsService(pod_lister=lambda: ("ssc-webapp-0",), runner=_runner_returning("log output\n"))

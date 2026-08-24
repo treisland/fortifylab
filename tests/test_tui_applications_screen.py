@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -11,7 +12,7 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from fortifylab.operations import OperationCatalog, OperationRunner  # noqa: E402
-from fortifylab.tui.events import KeyEvent  # noqa: E402
+from fortifylab.tui.events import KeyEvent, TickEvent  # noqa: E402
 from fortifylab.tui.screens.applications import ApplicationsScreen  # noqa: E402
 from fortifylab.tui.screens.base import NavigationKind  # noqa: E402
 from fortifylab.tui.theme import TerminalStyle  # noqa: E402
@@ -19,6 +20,20 @@ from fortifylab.tui.theme import TerminalStyle  # noqa: E402
 
 def _plain_screen() -> ApplicationsScreen:
     return ApplicationsScreen(style=TerminalStyle(color=False, symbols=False))
+
+
+def _wait_for_execution(screen: ApplicationsScreen, *, timeout: float = 2.0) -> None:
+    """Drive TickEvents until a background execution started by "enter"
+    while armed (see ApplicationsScreen._run_selected()) finishes -- real
+    execution now runs off-thread so the screen can show "running"
+    immediately instead of freezing (the bug this mechanism fixes)."""
+
+    deadline = time.monotonic() + timeout
+    while screen.is_executing:
+        if time.monotonic() > deadline:
+            raise AssertionError("background execution did not finish within the test timeout")
+        screen.handle_event(TickEvent(0.0))
+        time.sleep(0.01)
 
 
 class ApplicationsScreenTests(unittest.TestCase):
@@ -79,11 +94,77 @@ class ApplicationsScreenTests(unittest.TestCase):
             armed=True,
         )
         screen.handle_event(KeyEvent("enter"))
+        self.assertFalse(screen.armed)
+        _wait_for_execution(screen)
 
         self.assertTrue(calls)
         self.assertTrue(screen.last_execution.executed)
         self.assertTrue(screen.last_execution.ok)
-        self.assertFalse(screen.armed)
+
+    def test_enter_when_armed_shows_running_before_finishing(self) -> None:
+        # Core fix for the parity-audit finding: this screen used to call
+        # a real start/stop synchronously, freezing the whole TUI with no
+        # feedback -- exactly the bug already fixed once in
+        # GuidedDeployScreen. A real execution must show as "running" on
+        # the very next render, before the (possibly slow) command
+        # finishes.
+        import threading
+
+        release = threading.Event()
+
+        def slow_runner(command):
+            from fortifylab.core.command import CommandResult
+
+            release.wait(timeout=2.0)
+            return CommandResult(args=command, returncode=0, stdout="started", stderr="", duration_seconds=0.0)
+
+        screen = ApplicationsScreen(
+            style=TerminalStyle(color=False, symbols=False),
+            catalog=OperationCatalog(),
+            runner=OperationRunner(slow_runner),
+            armed=True,
+        )
+
+        screen.handle_event(KeyEvent("enter"))
+
+        self.assertTrue(screen.is_executing)
+        self.assertEqual(screen.running_row_index, 0)
+        self.assertIn("running", screen.render())
+        release.set()
+        _wait_for_execution(screen)
+        self.assertIsNone(screen.running_row_index)
+        self.assertTrue(screen.last_execution.ok)
+
+    def test_enter_while_already_executing_does_not_start_a_second_run(self) -> None:
+        import threading
+
+        release = threading.Event()
+        calls: list[tuple[str, ...]] = []
+
+        def slow_runner(command):
+            from fortifylab.core.command import CommandResult
+
+            calls.append(command)
+            release.wait(timeout=2.0)
+            return CommandResult(args=command, returncode=0, stdout="started", stderr="", duration_seconds=0.0)
+
+        screen = ApplicationsScreen(
+            style=TerminalStyle(color=False, symbols=False),
+            catalog=OperationCatalog(),
+            runner=OperationRunner(slow_runner),
+            armed=True,
+        )
+        screen.handle_event(KeyEvent("enter"))
+        self.assertTrue(screen.is_executing)
+
+        # A stray extra "enter" while a step is still running must be a
+        # no-op, not start a second background thread.
+        screen.toggle_armed()
+        screen.handle_event(KeyEvent("enter"))
+
+        release.set()
+        _wait_for_execution(screen)
+        self.assertEqual(len(calls), 1)
 
     def test_navigation_wraps(self) -> None:
         screen = _plain_screen()

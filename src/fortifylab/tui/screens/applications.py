@@ -17,15 +17,23 @@ Mapping a single keypress to "yes, destroy it" to work around that would be
 exactly the kind of unsafe shortcut this codebase's confirmation-phrase
 design exists to prevent, so destroy stays a Bash-wizard-only action until
 the TUI has real text input (tracked in the roadmap, not invented here).
+
+A real (``execute=True``) start/stop runs on a background thread, the same
+mechanism ``GuidedDeployScreen``/``DeployService`` use: without it, a
+Helm-backed start that takes minutes would freeze the whole TUI with no
+visual feedback (bug report parity audit -- this screen never got that
+fix when Guided Deploy did). Dry-run previews stay synchronous.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import threading
 
 from fortifylab.operations import OperationCatalog, OperationExecution, OperationRunner
+from fortifylab.operations.catalog import OperationSpec
 
-from ..events import Event, KeyEvent
+from ..events import Event, KeyEvent, TickEvent
 from ..theme import TerminalStyle
 from .base import Armable, NavigationCommand, Screen
 
@@ -51,12 +59,25 @@ class ApplicationsScreen(Armable, Screen):
     )
     selected_index: int = 0
     last_execution: OperationExecution | None = None
+    running_row_index: int | None = None
+    _execution_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
+    _running_thread: threading.Thread | None = field(default=None, init=False, repr=False, compare=False)
+    _pending_execution: OperationExecution | None = field(default=None, init=False, repr=False, compare=False)
+
+    @property
+    def is_executing(self) -> bool:
+        with self._execution_lock:
+            return self._running_thread is not None
 
     def render(self) -> str:
         lines = [self.style.heading("Applications"), ""]
         for index, (_app_id, label, action) in enumerate(self.rows):
             marker = self.style.paint(">", "1;36") if index == self.selected_index else " "
-            lines.append(f" {marker} {label:<32} {action}")
+            plain_row = f" {marker} {label:<32} {action}"
+            if index == self.running_row_index:
+                lines.append(self.style.warn(f"{plain_row}  (running...)"))
+            else:
+                lines.append(plain_row)
         lines.append("")
         lines.append(f"Mode: {self.mode_label()}")
         if self.last_execution is not None:
@@ -73,6 +94,11 @@ class ApplicationsScreen(Armable, Screen):
         return "\n".join(lines) + "\n"
 
     def handle_event(self, event: Event) -> NavigationCommand:
+        if isinstance(event, TickEvent):
+            result = self._poll_execution()
+            if result is not None:
+                self.last_execution = result
+            return NavigationCommand.stay()
         if not isinstance(event, KeyEvent):
             return NavigationCommand.stay()
         if event.key in ("q", "Q", "escape"):
@@ -101,7 +127,38 @@ class ApplicationsScreen(Armable, Screen):
         return NavigationCommand.stay()
 
     def _run_selected(self) -> None:
+        if self.is_executing:
+            return
         app_id, _label, action = self.rows[self.selected_index]
         executing = self.consume_arm()
         spec = self.catalog.app(app_id, action)
-        self.last_execution = self.runner.run(spec, execute=executing)
+        if not executing:
+            self.last_execution = self.runner.run(spec, execute=False)
+            return
+        # Real execution runs on a background thread so this screen can
+        # show "running" immediately instead of freezing until a
+        # Helm-backed start/stop (which can take minutes) returns -- see
+        # DeployService.start_execute()/poll_execute() for the same
+        # pattern. The result arrives via a TickEvent and
+        # _poll_execution() above.
+        row_index = self.selected_index
+        with self._execution_lock:
+            self.running_row_index = row_index
+            thread = threading.Thread(target=self._execute_in_background, args=(spec,), daemon=True)
+            self._running_thread = thread
+        thread.start()
+
+    def _execute_in_background(self, spec: OperationSpec) -> None:
+        result = self.runner.run(spec, execute=True)
+        with self._execution_lock:
+            self._pending_execution = result
+
+    def _poll_execution(self) -> OperationExecution | None:
+        with self._execution_lock:
+            if self._pending_execution is None:
+                return None
+            result = self._pending_execution
+            self._pending_execution = None
+            self._running_thread = None
+            self.running_row_index = None
+        return result

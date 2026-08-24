@@ -173,6 +173,16 @@ prior session, or the Bash wizard); every step starts `pending` until
 Deploy / Resume itself runs it. Bash's equivalent
 live-state detection (`certs_ready`, `ssc_ready`, etc.) does several
 kubectl probes per step and isn't ported yet (see the roadmap).
+Applications got the same two fixes: starting SSC/LIM/MySQL/PostgreSQL
+used to fail every time with a permission error (scripts invoked
+directly instead of via `bash`), and a real start/stop now shows
+`(running...)` instead of freezing the screen. Logs now reads the
+namespace from `.env`'s `NAMESPACE` instead of a hardcoded `fortify` for
+both listing pods and tailing them. Flight Plans no longer flags a
+customized MySQL/PostgreSQL version as plan "drift" -- Bash never counts
+those, and now neither does this screen. The Lab Status Dashboard's root
+CA and fcli truststore checks were reading the wrong `.env` keys and are
+now aligned with Bash's actual fallback logic.
 
 `./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`
 and it execs into the Python TUI above (after the same acknowledgement,

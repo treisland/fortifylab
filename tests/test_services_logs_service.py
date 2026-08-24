@@ -75,6 +75,24 @@ class LogsServiceTests(unittest.TestCase):
         self.assertTrue(execution.ok)
         self.assertIn("log line 1", execution.detail)
 
+    def test_tail_queries_the_services_own_namespace_not_a_hardcoded_default(self) -> None:
+        # Regression test: OperationCatalog.logs() used to hardcode
+        # "-n fortify" regardless of what namespace this service was
+        # actually configured for, so a lab with a custom NAMESPACE could
+        # correctly list pods (list_pods() already used self.namespace)
+        # but then fail to tail them (wrong namespace on the actual
+        # kubectl logs command).
+        seen: list[tuple[str, ...]] = []
+
+        def fake_runner(command: tuple[str, ...]) -> CommandResult:
+            seen.append(command)
+            return _fake_result("log line\n")
+
+        service = LogsService(namespace="custom-ns", runner=OperationRunner(fake_runner))
+        service.tail("ssc-webapp-0")
+        self.assertIn("custom-ns", seen[0])
+        self.assertNotIn("fortify", seen[0])
+
 
 if __name__ == "__main__":
     unittest.main()
