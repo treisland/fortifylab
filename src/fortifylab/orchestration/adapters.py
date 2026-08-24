@@ -8,7 +8,7 @@ from .model import DeploymentPlan, DeploymentStep
 
 
 DEFAULT_STEP_SCRIPTS: dict[str, tuple[str, ...]] = {
-    "certs": ("./scripts/setup-certs.sh",),
+    "certs": ("./scripts/create-certs.sh",),
     "dashboard": ("./apps/kubernetes-dashboard/deploy.sh",),
     "secrets": ("./scripts/create-secrets.sh",),
     "mysql": ("./apps/mysql/start.sh",),

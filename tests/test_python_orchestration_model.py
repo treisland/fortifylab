@@ -15,6 +15,9 @@ from fortifylab.orchestration import (
     RetryPolicy,
     StepStatus,
 )
+from fortifylab.orchestration.adapters import DEFAULT_STEP_SCRIPTS
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeploymentOrchestrationModelTests(unittest.TestCase):
@@ -90,6 +93,22 @@ class DeploymentOrchestrationModelTests(unittest.TestCase):
         self.assertEqual(plan.validate(), ())
         self.assertEqual(plan.steps[3].command, ("/repo/apps/ssc/start.sh",))
         self.assertEqual(plan.steps[3].dependencies, ("mysql",))
+
+    def test_every_default_step_script_exists_in_the_repo(self) -> None:
+        # Regression test: the "certs" step once pointed at
+        # ./scripts/setup-certs.sh, a script that has never existed --
+        # the real script is ./scripts/create-certs.sh. Guided Deploy's
+        # dry-run mode doesn't check the file exists, so this went
+        # unnoticed until a live run hit ENOENT. Pin every mapped script
+        # path to an existing file so a typo like that fails a fast unit
+        # test instead of a live deployment step.
+        missing = [
+            (step_id, script)
+            for step_id, scripts in DEFAULT_STEP_SCRIPTS.items()
+            for script in scripts
+            if not (REPO_ROOT / script.removeprefix("./")).is_file()
+        ]
+        self.assertEqual(missing, [])
 
 
 if __name__ == "__main__":
