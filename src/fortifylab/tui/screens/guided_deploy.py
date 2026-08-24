@@ -19,11 +19,28 @@ from ..events import Event, KeyEvent, TickEvent
 from ..theme import TerminalStyle
 from .base import Armable, NavigationCommand, Screen
 
+# Symbol + color per status, matching scripts/wizard/guided.sh's own
+# guided_status_render() convention (complete=green, in_progress=yellow,
+# failed=red, pending=yellow, manual/skipped=dim). STEP_STATUS.READY only
+# exists on the Python side (a dry-run preview marker, not a real Bash
+# status) and is styled as muted rather than borrowing any of those.
 _STATUS_SYMBOLS = {
     StepStatus.COMPLETE: "ok",
     StepStatus.FAILED: "fail",
     StepStatus.CANCELLED: "fail",
     StepStatus.RUNNING: "running",
+    StepStatus.PENDING: "next",
+    StepStatus.READY: "next",
+    StepStatus.SKIPPED: "next",
+}
+_STATUS_COLORS = {
+    StepStatus.COMPLETE: "ok",
+    StepStatus.FAILED: "fail",
+    StepStatus.CANCELLED: "fail",
+    StepStatus.RUNNING: "warn",
+    StepStatus.PENDING: "warn",
+    StepStatus.READY: "muted",
+    StepStatus.SKIPPED: "muted",
 }
 
 
@@ -38,8 +55,14 @@ class GuidedDeployScreen(Armable, Screen):
         lines = [self.style.heading(f"Guided deployment -- {self.service.plan.name}"), ""]
         for step in self.service.plan.steps:
             status = self.service.states[step.step_id].status
-            marker = self.style.symbol(_STATUS_SYMBOLS.get(status, "next" if status is StepStatus.PENDING else "-"))
-            lines.append(f"  {marker} {step.label:<32} {status.value}")
+            marker = self.style.symbol(_STATUS_SYMBOLS.get(status, "-"))
+            colorize = getattr(self.style, _STATUS_COLORS.get(status, "muted"))
+            # Pad the plain text to width first, then colorize the whole
+            # row -- coloring first and padding after would count the ANSI
+            # escape sequence's own characters toward the field width and
+            # break column alignment (see the M12 Dashboard fix).
+            plain_row = f"{marker} {step.label:<32} {status.value}"
+            lines.append(f"  {colorize(plain_row)}")
         lines.append("")
         lines.append(f"Mode: {self.mode_label()}")
         if self.last_result is not None:

@@ -45,12 +45,49 @@ class DeployServiceTests(unittest.TestCase):
         self.assertEqual(result.step_id, "certs")
         self.assertEqual(result.status, StepStatus.READY)
         self.assertIn("not executed", result.detail)
-        # Still PENDING and still the only runnable step -- preview is repeatable.
+        # Still PENDING and still the only runnable step -- dry-run never
+        # commits a status, so the real DAG can't desync from this preview.
         self.assertEqual(service.states["certs"].status, StepStatus.PENDING)
         self.assertEqual([step.step_id for step in service.runnable_steps()], ["certs"])
 
-        second_preview = service.run_next(execute=False)
-        self.assertEqual(second_preview.step_id, "certs")
+    def test_dry_run_preview_walks_through_every_pending_step_in_turn(self) -> None:
+        # Regression test: repeatedly dry-run-previewing used to always
+        # re-preview the very first pending step, which read as "dry-run
+        # does nothing" -- see the bug report. Each call must now advance
+        # a preview cursor through the remaining pending steps in plan
+        # order (never touching real state), then wrap back to the start.
+        service = DeployService("ssc_only")
+        plan_order = [step.step_id for step in service.plan.steps]
+        self.assertEqual(plan_order, ["certs", "dashboard", "secrets", "mysql", "ssc"])
+
+        previewed = [service.run_next(execute=False).step_id for _ in plan_order]
+        self.assertEqual(previewed, plan_order)
+
+        # Every step is still PENDING -- only a preview cursor moved.
+        for step_id in plan_order:
+            self.assertEqual(service.states[step_id].status, StepStatus.PENDING)
+        self.assertEqual([step.step_id for step in service.runnable_steps()], ["certs"])
+
+        # Wraps back to the start once every pending step has been shown.
+        wrapped = service.run_next(execute=False)
+        self.assertEqual(wrapped.step_id, "certs")
+
+    def test_dry_run_preview_detail_names_the_step_being_previewed(self) -> None:
+        service = DeployService("ssc_only")
+        result = service.run_next(execute=False)
+        self.assertIn(service.plan.steps[0].label, result.detail)
+
+    def test_dry_run_preview_only_walks_still_pending_steps(self) -> None:
+        # Once a step is genuinely complete (via execute=True), the dry-run
+        # preview cursor must skip it rather than re-previewing something
+        # that's already done.
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("true",))
+        service.run_next(execute=True)  # completes "certs" for real
+
+        preview = service.run_next(execute=False)
+        self.assertEqual(preview.step_id, "dashboard")
 
     def test_execute_advances_the_plan_and_unlocks_dependents(self) -> None:
         controller = OperationController(RetryPolicy(max_attempts=1))

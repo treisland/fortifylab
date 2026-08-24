@@ -50,6 +50,28 @@ class GuidedDeployScreenTests(unittest.TestCase):
         self.assertEqual(screen.service.states["certs"].status, StepStatus.PENDING)
         self.assertIn("not executed", screen.render())
 
+    def test_completed_and_failed_steps_are_color_coded(self) -> None:
+        # Bug report: every step's status rendered in plain, uncolored
+        # text, matching neither Bash's guided_status_render() (which
+        # colors complete=green, in_progress/pending=yellow, failed=red)
+        # nor giving any visual cue for what's already done vs. still to
+        # do. Use a color-enabled style (the real runtime default) and
+        # check for the raw ANSI codes.
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("true",))
+        object.__setattr__(service.plan.steps[1], "command", ("false",))
+        screen = GuidedDeployScreen(style=TerminalStyle(color=True, symbols=True), service=service)
+
+        screen.toggle_armed()
+        screen.handle_event(KeyEvent("enter"))  # certs: complete
+        screen.toggle_armed()
+        screen.handle_event(KeyEvent("enter"))  # dashboard: fails
+
+        rendered = screen.render()
+        self.assertIn("[32m", rendered)  # green, complete
+        self.assertIn("[31m", rendered)  # red, failed
+
     def test_enter_when_armed_executes_and_advances(self) -> None:
         controller = OperationController(RetryPolicy(max_attempts=1))
         service = DeployService("ssc_only", controller=controller)

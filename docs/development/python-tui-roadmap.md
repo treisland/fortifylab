@@ -546,12 +546,64 @@ ready/warn semantics and guidance text as Bash's board; the TLS-artifacts
 check never invokes `openssl`/`keytool` or handles a keystore password.
 All met in this PR. Every `OPERATOR_MENU` item now opens a real screen.
 
+## Guided Deploy bug fixes (post-M12)
+
+Live user testing of Guided Deploy surfaced three real bugs, fixed on this
+branch (all with regression tests):
+
+- **Wrong `certs` script path.** `BashOperationAdapter.DEFAULT_STEP_SCRIPTS`
+  pointed the `certs` step at `./scripts/setup-certs.sh`, a file that has
+  never existed -- the real script is `./scripts/create-certs.sh`. Dry-run
+  never caught this (dry-run doesn't check the file exists); a real armed
+  run hit `ENOENT` immediately.
+- **Every real script invocation crashed the TUI.** Every entry in
+  `DEFAULT_STEP_SCRIPTS` executed its script path directly, relying on the
+  executable bit. These scripts are intentionally *not* marked executable
+  in git -- the Bash wizard's own convention is to always invoke them as
+  `bash "$path"` (`run_app_scripts()` in `scripts/wizard/operations.sh`).
+  A real armed run hit `PermissionError` on every step and crashed the
+  whole TUI with an unhandled traceback. Fixed by invoking every script
+  via `bash` explicitly, and hardened `run_command()` to catch
+  `PermissionError` (returncode 126) the same way an earlier fix (M12)
+  caught `FileNotFoundError` -- defense in depth so a future
+  non-executable script fails that one step instead of crashing the app.
+- **No status color coding, and dry-run looked frozen.**
+  `GuidedDeployScreen` rendered every step's status in plain, uncolored
+  text (`_STATUS_SYMBOLS` only had a symbol per status, `style.symbol()`
+  itself never colorizes) -- no visual cue for complete vs. pending vs.
+  failed, unlike every Bash status board (`guided_status_render()`:
+  complete=green, in\_progress/pending=yellow, failed=red). Separately,
+  `DeployService.run_next(execute=False)` always dry-run-previewed the
+  *same* first pending step, forever -- repeatable by design (a preview
+  must never commit a non-terminal status, or a step that hasn't actually
+  completed could become unreachable), but from the user's seat it read
+  as "dry-run does nothing." Fixed both: step rows are now colored to
+  match Bash's convention (padding the plain text before colorizing, not
+  after -- see the M12 marker-alignment bug for why order matters), and
+  `run_next(execute=False)` now walks a preview cursor through every
+  still-`PENDING` step in plan order (wrapping back to the start), never
+  touching `self.states`, so the real DAG can't desync from what's being
+  previewed.
+
+**Deliberately not fixed here, scope trim:** the board still can't tell you
+a step is already deployed from a prior session or from outside the TUI
+entirely -- every step starts `PENDING` until this screen itself runs it.
+Bash's equivalent (`guided_step_live_state()` in `scripts/wizard/guided.sh`)
+derives real state per step via `certs_ready`/`dashboard_ready`/
+`secrets_ready`/`mysql_ready`/`ssc_ready`/etc., each of which does multiple
+kubectl probes (StatefulSet, Service, Ingress, HTTP, and for
+MySQL/PostgreSQL an actual `kubectl exec` query) -- a substantially larger
+port than a bug fix, and one that needs a real cluster to verify against,
+which this sandbox doesn't have. Tracked as a future #446 slice
+("guided-deploy live state detection") rather than attempted here.
+
 ## What this PR actually delivers
 
 M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
 (Kubernetes Dashboard access), M10 (URLs & Credentials), M11
-(Certificates & Trust), and M12 (Lab Status Dashboard) as the first six
-picks from the post-M6 follow-up -- M6 delivered as an opt-in preview
+(Certificates & Trust), M12 (Lab Status Dashboard), and the Guided Deploy
+bug fixes above, as the first six milestone picks from the post-M6
+follow-up plus a hardening pass -- M6 delivered as an opt-in preview
 hook, not a default cutover, because the parity that cutover depends on
 doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,

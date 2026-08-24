@@ -64,6 +64,7 @@ class DeployService:
         self.states: dict[str, OperationState] = {
             step_id: OperationState(step_id) for step_id in self.plan.step_ids()
         }
+        self._preview_cursor = 0
         self.session = GuidedSession(
             session_id=f"deploy-{profile_id}",
             profile_id=profile_id,
@@ -72,6 +73,9 @@ class DeployService:
 
     def runnable_steps(self) -> tuple[DeploymentStep, ...]:
         return self.plan.runnable_steps(self.states)
+
+    def _pending_steps_in_plan_order(self) -> tuple[DeploymentStep, ...]:
+        return tuple(step for step in self.plan.steps if self.states[step.step_id].status is StepStatus.PENDING)
 
     @property
     def is_complete(self) -> bool:
@@ -84,22 +88,48 @@ class DeployService:
         return any(state.status is StepStatus.FAILED for state in self.states.values())
 
     def run_next(self, *, execute: bool) -> OperationResult | None:
-        """Run (or dry-run preview) the next runnable step.
+        """Run the next runnable step for real, or preview one step of a
+        dry-run walkthrough.
 
         Only an ``execute=True`` run commits a new step status: a dry-run
-        preview must stay repeatable and must never advance the DAG, so a
-        step that hasn't actually completed can't accidentally become
-        unreachable (``DeploymentPlan.runnable_steps`` only ever offers
-        ``PENDING`` steps -- committing a non-terminal status from a
-        preview would strand it).
+        preview must never advance the DAG, so a step that hasn't actually
+        completed can't accidentally become unreachable
+        (``DeploymentPlan.runnable_steps`` only ever offers ``PENDING``
+        steps -- committing a non-terminal status from a preview would
+        strand it).
+
+        A dry-run still needs to feel like it's doing something, though:
+        rather than re-previewing the same first pending step forever (the
+        original behavior here, which read as "dry-run does nothing" --
+        see the bug report), each dry-run call walks one step further
+        through the still-pending steps in plan order, wrapping back to the
+        start once every pending step has been shown. This is purely a
+        preview cursor -- it never touches ``self.states``, so it can't
+        desync from what execute mode would actually do next.
         """
 
-        runnable = self.runnable_steps()
-        if not runnable:
-            return None
-        step = runnable[0]
-        result = self.controller.run(step, dry_run=not execute)
         if execute:
+            runnable = self.runnable_steps()
+            if not runnable:
+                return None
+            step = runnable[0]
+            result = self.controller.run(step, dry_run=False)
             self.states[step.step_id] = OperationState(step.step_id, result.status, result.attempts, result.detail)
             self.session = self.session.mark(step.step_id, result.status, result.detail)
-        return result
+            return result
+
+        pending = self._pending_steps_in_plan_order()
+        if not pending:
+            return None
+        if self._preview_cursor >= len(pending):
+            self._preview_cursor = 0
+        step = pending[self._preview_cursor]
+        self._preview_cursor += 1
+        result = self.controller.run(step, dry_run=True)
+        return OperationResult(
+            step_id=step.step_id,
+            status=result.status,
+            attempts=result.attempts,
+            detail=f"Preview of '{step.label}': {result.detail}",
+            command=result.command,
+        )

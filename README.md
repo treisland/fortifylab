@@ -161,7 +161,14 @@ does (that runs `openssl`/`keytool` against the private key and keystore
 password), and it offers no repair action -- same as Bash, fixing a
 `warn` item happens elsewhere in the wizard. The fcli
 activation/trust-import lifecycle also stays Bash-wizard-only,
-deliberately not yet ported (see the roadmap).
+deliberately not yet ported (see the roadmap). Deploy / Resume's step
+statuses are color-coded (green/yellow/red, matching Bash's own status
+board) and dry-run now visibly walks through each pending step's preview
+in turn -- but it still can't detect a step that's already deployed from
+outside this screen (a prior session, or the Bash wizard); every step
+starts `pending` until Deploy / Resume itself runs it. Bash's equivalent
+live-state detection (`certs_ready`, `ssc_ready`, etc.) does several
+kubectl probes per step and isn't ported yet (see the roadmap).
 
 `./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`
 and it execs into the Python TUI above (after the same acknowledgement,
