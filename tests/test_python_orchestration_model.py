@@ -91,7 +91,7 @@ class DeploymentOrchestrationModelTests(unittest.TestCase):
         plan = adapter.build_plan("ssc-only", ("certs", "secrets", "mysql", "ssc"))
 
         self.assertEqual(plan.validate(), ())
-        self.assertEqual(plan.steps[3].command, ("/repo/apps/ssc/start.sh",))
+        self.assertEqual(plan.steps[3].command, ("bash", "/repo/apps/ssc/start.sh"))
         self.assertEqual(plan.steps[3].dependencies, ("mysql",))
 
     def test_every_default_step_script_exists_in_the_repo(self) -> None:
@@ -106,9 +106,19 @@ class DeploymentOrchestrationModelTests(unittest.TestCase):
             (step_id, script)
             for step_id, scripts in DEFAULT_STEP_SCRIPTS.items()
             for script in scripts
-            if not (REPO_ROOT / script.removeprefix("./")).is_file()
+            if script.startswith("./") and not (REPO_ROOT / script.removeprefix("./")).is_file()
         ]
         self.assertEqual(missing, [])
+
+    def test_every_default_step_script_is_invoked_via_bash(self) -> None:
+        # Regression test: these scripts are intentionally NOT marked
+        # executable in git (matching the Bash wizard's own convention of
+        # always invoking them as `bash "$path"`, e.g. run_app_scripts()
+        # in scripts/wizard/operations.sh). Executing one directly hits
+        # PermissionError on a real clone. Every entry must run through
+        # bash explicitly rather than relying on the executable bit.
+        for step_id, scripts in DEFAULT_STEP_SCRIPTS.items():
+            self.assertEqual(scripts[0], "bash", f"{step_id} must be invoked via bash")
 
 
 if __name__ == "__main__":

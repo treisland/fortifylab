@@ -81,6 +81,16 @@ def run_command(args: Sequence[str], *, timeout: float | None = None, cwd: str |
         returncode = 127
         stdout = ""
         stderr = str(exc)
+    except PermissionError as exc:
+        # The target file exists but isn't executable (e.g. a script
+        # checked into git without the executable bit, which this repo's
+        # own Bash wizard sidesteps by always invoking scripts as
+        # `bash <path>` rather than executing them directly) -- same
+        # "represent as a failed result" treatment as FileNotFoundError.
+        timed_out = False
+        returncode = 126
+        stdout = ""
+        stderr = str(exc)
     duration = time.monotonic() - started
     return CommandResult(
         args=command,

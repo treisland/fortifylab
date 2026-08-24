@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -45,6 +46,20 @@ class PythonCommandAdapterTests(unittest.TestCase):
         result = run_command(["fortifylab-definitely-not-a-real-binary"])
         self.assertFalse(result.ok)
         self.assertEqual(result.returncode, 127)
+        self.assertFalse(result.timed_out)
+
+    def test_non_executable_script_returns_failed_result_instead_of_raising(self) -> None:
+        # A caller invoking a repo script that exists but lacks the
+        # executable bit (this repo's convention -- scripts are invoked
+        # as `bash <path>`, not executed directly) must get a normal
+        # failed CommandResult, not an unhandled PermissionError.
+        with tempfile.NamedTemporaryFile(suffix=".sh") as handle:
+            handle.write(b"#!/bin/sh\necho hi\n")
+            handle.flush()
+            os.chmod(handle.name, 0o600)
+            result = run_command([handle.name])
+        self.assertFalse(result.ok)
+        self.assertEqual(result.returncode, 126)
         self.assertFalse(result.timed_out)
 
     def test_redacts_secret_like_output(self) -> None:

@@ -8,17 +8,17 @@ from .model import DeploymentPlan, DeploymentStep
 
 
 DEFAULT_STEP_SCRIPTS: dict[str, tuple[str, ...]] = {
-    "certs": ("./scripts/create-certs.sh",),
-    "dashboard": ("./apps/kubernetes-dashboard/deploy.sh",),
-    "secrets": ("./scripts/create-secrets.sh",),
-    "mysql": ("./apps/mysql/start.sh",),
-    "postgresql": ("./apps/postgresql/start.sh",),
-    "ssc": ("./apps/ssc/start.sh",),
-    "lim": ("./apps/lim/start.sh",),
-    "sast_controller": ("./apps/scsast/start.sh",),
-    "sast_sensor": ("./apps/scsast/start.sh",),
-    "dast_core": ("./apps/scdast/core/start.sh",),
-    "dast_scanner": ("./apps/scdast/scanner/start.sh",),
+    "certs": ("bash", "./scripts/create-certs.sh"),
+    "dashboard": ("bash", "./apps/kubernetes-dashboard/deploy.sh"),
+    "secrets": ("bash", "./scripts/create-secrets.sh"),
+    "mysql": ("bash", "./apps/mysql/start.sh"),
+    "postgresql": ("bash", "./apps/postgresql/start.sh"),
+    "ssc": ("bash", "./apps/ssc/start.sh"),
+    "lim": ("bash", "./apps/lim/start.sh"),
+    "sast_controller": ("bash", "./apps/scsast/start.sh"),
+    "sast_sensor": ("bash", "./apps/scsast/start.sh"),
+    "dast_core": ("bash", "./apps/scdast/core/start.sh"),
+    "dast_scanner": ("bash", "./apps/scdast/scanner/start.sh"),
 }
 
 DEFAULT_DEPENDENCIES: dict[str, tuple[str, ...]] = {
