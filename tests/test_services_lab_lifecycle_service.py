@@ -13,6 +13,8 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from fortifylab.operations import OperationCatalog  # noqa: E402
+from fortifylab.orchestration import OperationController, RetryPolicy  # noqa: E402
+from fortifylab.services.deploy_service import DeployService  # noqa: E402
 from fortifylab.services.lab_lifecycle_service import (  # noqa: E402
     active_profile_id,
     apps_for_scope,
@@ -89,6 +91,39 @@ class BuildLifecyclePlanTests(unittest.TestCase):
             plan = build_lifecycle_plan("start", "all", catalog=OperationCatalog(), env_file=Path(directory) / ".env")
             self.assertIn("start", plan.name)
             self.assertIn("all apps", plan.name)
+
+    def test_each_step_depends_on_the_one_before_it(self) -> None:
+        # Regression test (code review finding): Bash's
+        # lab_shutdown_deployments()/lab_start_deployments() are a strict
+        # sequential loop that halts on the first failure -- the rest of
+        # the apps never run. Without a dependency chain,
+        # DeploymentPlan.runnable_steps() would treat every step as
+        # immediately runnable regardless of an earlier FAILED state, so
+        # a failed "start mysql" wouldn't stop "start ssc" from being
+        # offered next.
+        with tempfile.TemporaryDirectory() as directory:
+            plan = build_lifecycle_plan("start", "all", catalog=OperationCatalog(), env_file=Path(directory) / ".env")
+            for index, step in enumerate(plan.steps):
+                if index == 0:
+                    self.assertEqual(step.dependencies, ())
+                else:
+                    self.assertEqual(step.dependencies, (plan.steps[index - 1].step_id,))
+
+    def test_a_failed_step_halts_the_rest_of_the_sequence(self) -> None:
+        # End-to-end version of the dependency-chain regression test above:
+        # drive the plan through DeployService and confirm a failure
+        # actually blocks the next step from becoming runnable, matching
+        # Bash halting on the first non-zero exit.
+        with tempfile.TemporaryDirectory() as directory:
+            plan = build_lifecycle_plan("start", "all", catalog=OperationCatalog(), env_file=Path(directory) / ".env")
+            controller = OperationController(RetryPolicy(max_attempts=1))
+            service = DeployService.for_plan(plan, session_id="lifecycle-test", controller=controller)
+            object.__setattr__(service.plan.steps[0], "command", ("false",))  # first app fails
+
+            result = service.run_next(execute=True)
+
+            self.assertEqual(result.status.value, "failed")
+            self.assertEqual(service.runnable_steps(), ())  # nothing else becomes runnable
 
     def test_no_destroy_action_is_ever_produced(self) -> None:
         # Structural guard: this module only ever knows "start"/"shutdown"

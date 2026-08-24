@@ -85,13 +85,22 @@ def build_lifecycle_plan(
     apps = apps_for_scope(scope, env_file=env_file)
     script_action = "stop" if action == "shutdown" else "start"
     ordered = tuple(reversed(apps)) if action == "shutdown" else apps
+    # Bash's lab_shutdown_deployments()/lab_start_deployments() are a
+    # strict sequential loop that returns immediately on the first
+    # non-zero exit code -- the rest of the apps never run. DeployService
+    # only withholds a step via DeploymentStep.dependencies (runnable_steps()
+    # treats a step with no dependencies as immediately runnable regardless
+    # of any earlier FAILED state), so without this chain a failed "start
+    # mysql" wouldn't stop the operator from being offered "start ssc"
+    # next, unlike Bash.
     steps = tuple(
         DeploymentStep(
             step_id=app_id,
             label=f"{script_action.title()} {app_id}",
             command=catalog.app(app_id, script_action).command,
+            dependencies=(ordered[index - 1],) if index > 0 else (),
         )
-        for app_id in ordered
+        for index, app_id in enumerate(ordered)
     )
     scope_label = "all apps" if scope == "all" else "selected profile"
     return DeploymentPlan(name=f"Lab lifecycle -- {action} ({scope_label})", steps=steps)

@@ -45,13 +45,26 @@ class LabLifecycleScreen(Screen):
     catalog: OperationCatalog = field(default_factory=OperationCatalog)
     env_file: Path = field(default_factory=lambda: Path(".env"))
     selected_index: int = 0
+    _previews: dict[str, str] = field(default_factory=dict, init=False, repr=False, compare=False)
+
+    def on_enter(self) -> None:
+        # apps_for_scope("selected", ...) re-reads .env and rebuilds/expands
+        # the active guided profile; render() runs on every ~0.25s TickEvent
+        # (see app.py's main loop), not just on navigation, so computing
+        # this per-render would mean doing that file read + profile
+        # expansion up to ~16x/second while this screen just sits open.
+        # Compute it once per visit instead, matching ApplicationsScreen's
+        # own cached-until-refreshed status pattern.
+        self._previews = {
+            scope: ", ".join(apps_for_scope(scope, env_file=self.env_file)) or "no apps in scope"
+            for scope in {scope for _action, scope, _label in _OPTIONS}
+        }
 
     def render(self) -> str:
         lines = [self.style.heading("Lab Lifecycle"), ""]
         for index, (_action, scope, label) in enumerate(_OPTIONS):
             marker = self.style.paint(">", "1;36") if index == self.selected_index else " "
-            apps = apps_for_scope(scope, env_file=self.env_file)
-            preview = ", ".join(apps) if apps else "no apps in scope"
+            preview = self._previews.get(scope, "")
             lines.append(f" {marker} {label}")
             lines.append(self.style.muted(f"     {preview}"))
         lines.extend(
