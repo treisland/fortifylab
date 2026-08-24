@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -21,6 +22,20 @@ from fortifylab.tui.theme import TerminalStyle  # noqa: E402
 
 def _plain_screen() -> GuidedDeployScreen:
     return GuidedDeployScreen(style=TerminalStyle(color=False, symbols=False))
+
+
+def _wait_for_execution(screen: GuidedDeployScreen, *, timeout: float = 2.0) -> None:
+    """Drive TickEvents until the background step started by ``enter``
+    while armed (see DeployService.start_execute()) finishes -- real
+    execution now runs off-thread precisely so the screen can show
+    "running" instead of freezing (the bug this whole mechanism fixes)."""
+
+    deadline = time.monotonic() + timeout
+    while screen.service.is_executing:
+        if time.monotonic() > deadline:
+            raise AssertionError("background step did not finish within the test timeout")
+        screen.handle_event(TickEvent(0.0))
+        time.sleep(0.01)
 
 
 class GuidedDeployScreenTests(unittest.TestCase):
@@ -65,12 +80,32 @@ class GuidedDeployScreenTests(unittest.TestCase):
 
         screen.toggle_armed()
         screen.handle_event(KeyEvent("enter"))  # certs: complete
+        _wait_for_execution(screen)
         screen.toggle_armed()
         screen.handle_event(KeyEvent("enter"))  # dashboard: fails
+        _wait_for_execution(screen)
 
         rendered = screen.render()
         self.assertIn("[32m", rendered)  # green, complete
         self.assertIn("[31m", rendered)  # red, failed
+
+    def test_enter_when_armed_starts_running_immediately(self) -> None:
+        # The core fix for "no way to tell tasks are currently running":
+        # a real execution must show as RUNNING on the very next render,
+        # before the (possibly slow) command has finished -- not just
+        # freeze until it returns.
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("sleep", "0.2"))
+        screen = GuidedDeployScreen(style=TerminalStyle(color=False, symbols=False), service=service, armed=True)
+
+        screen.handle_event(KeyEvent("enter"))
+
+        self.assertEqual(service.states["certs"].status, StepStatus.RUNNING)
+        self.assertTrue(service.is_executing)
+        self.assertIn("running", screen.render())
+        _wait_for_execution(screen)
+        self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
 
     def test_enter_when_armed_executes_and_advances(self) -> None:
         controller = OperationController(RetryPolicy(max_attempts=1))
@@ -79,6 +114,7 @@ class GuidedDeployScreenTests(unittest.TestCase):
         screen = GuidedDeployScreen(style=TerminalStyle(color=False, symbols=False), service=service, armed=True)
 
         screen.handle_event(KeyEvent("enter"))
+        _wait_for_execution(screen)
 
         self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
         self.assertIn("Operation completed", screen.render())
@@ -94,11 +130,28 @@ class GuidedDeployScreenTests(unittest.TestCase):
 
         screen.handle_event(KeyEvent("enter"))
         self.assertFalse(screen.armed)
+        _wait_for_execution(screen)
         self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
 
         # A follow-up "enter" without re-arming must stay a dry-run preview.
         screen.handle_event(KeyEvent("enter"))
         self.assertEqual(service.states["secrets"].status, StepStatus.PENDING)
+
+    def test_enter_while_already_executing_does_not_start_a_second_step(self) -> None:
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("sleep", "0.2"))
+        screen = GuidedDeployScreen(style=TerminalStyle(color=False, symbols=False), service=service, armed=True)
+
+        screen.handle_event(KeyEvent("enter"))
+        self.assertTrue(service.is_executing)
+        # A stray extra "enter" (or arming again) while a step is still
+        # running must be a no-op, not start a second background thread.
+        screen.toggle_armed()
+        screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(service.states["dashboard"].status, StepStatus.PENDING)
+        _wait_for_execution(screen)
+        self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
 
     def test_disarming_without_executing_leaves_armed_state_unchanged(self) -> None:
         # Pressing "enter" while not armed is a dry-run preview and must not

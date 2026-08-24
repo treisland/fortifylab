@@ -84,6 +84,12 @@ class GuidedDeployScreen(Armable, Screen):
     def handle_event(self, event: Event) -> NavigationCommand:
         if isinstance(event, TickEvent):
             self.ticks += 1
+            # Pick up a background execution's result once it's ready --
+            # see DeployService.start_execute()/poll_execute(). A no-op
+            # (returns None immediately) whenever nothing is executing.
+            result = self.service.poll_execute()
+            if result is not None:
+                self.last_result = result
             return NavigationCommand.stay()
         if not isinstance(event, KeyEvent):
             return NavigationCommand.stay()
@@ -93,8 +99,17 @@ class GuidedDeployScreen(Armable, Screen):
             self.toggle_armed()
             return NavigationCommand.stay()
         if event.key == "enter":
-            executing = self.consume_arm()
-            result = self.service.run_next(execute=executing)
+            if self.service.is_executing:
+                return NavigationCommand.stay()
+            if self.consume_arm():
+                # Real execution runs on a background thread so this
+                # screen can show "running" on the very next render
+                # instead of freezing until the (possibly minutes-long)
+                # subprocess returns -- see the bug report. The result
+                # arrives via a TickEvent and poll_execute() above.
+                self.service.start_execute()
+                return NavigationCommand.stay()
+            result = self.service.run_next(execute=False)
             if result is not None:
                 self.last_result = result
             return NavigationCommand.stay()

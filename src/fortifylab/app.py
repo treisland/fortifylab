@@ -11,14 +11,22 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import sys
+import time
 from typing import TextIO
 
-from .tui.events import Event
+from .tui.events import Event, TickEvent
 from .tui.input import TerminalInput
 from .tui.router import Router
 from .tui.screen import TerminalScreen
 from .tui.screens.main_menu import MainMenuScreen
 from .tui.theme import TerminalStyle
+
+# How often to wake up and dispatch a TickEvent when no key is waiting.
+# This is what lets a screen with a real background operation (e.g.
+# GuidedDeployScreen running a deployment step) show a "running" status
+# and pick up the result once it's ready, instead of the whole TUI
+# freezing on a blocking read until the next keypress.
+_TICK_INTERVAL_SECONDS = 0.25
 
 
 def run_tui(
@@ -50,10 +58,11 @@ def run_tui(
         with TerminalInput(input_stream) as terminal_input:
             screen.render(router.render())
             running = True
+            started = time.monotonic()
             while running:
-                event = terminal_input.read_event(timeout=None)
+                event: Event | None = terminal_input.read_event(timeout=_TICK_INTERVAL_SECONDS)
                 if event is None:
-                    continue
+                    event = TickEvent(time.monotonic() - started)
                 running = router.dispatch(event)
                 if running:
                     screen.render(router.render())

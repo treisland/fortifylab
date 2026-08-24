@@ -163,10 +163,14 @@ password), and it offers no repair action -- same as Bash, fixing a
 activation/trust-import lifecycle also stays Bash-wizard-only,
 deliberately not yet ported (see the roadmap). Deploy / Resume's step
 statuses are color-coded (green/yellow/red, matching Bash's own status
-board) and dry-run now visibly walks through each pending step's preview
-in turn -- but it still can't detect a step that's already deployed from
-outside this screen (a prior session, or the Bash wizard); every step
-starts `pending` until Deploy / Resume itself runs it. Bash's equivalent
+board), dry-run now visibly walks through each pending step's preview
+in turn, and a real step shows `running` immediately instead of freezing
+the whole screen until it finishes (it runs on a background thread; the
+TUI's event loop now wakes up periodically even with no keypress, so the
+result gets picked up and rendered as soon as it's ready) -- but it still
+can't detect a step that's already deployed from outside this screen (a
+prior session, or the Bash wizard); every step starts `pending` until
+Deploy / Resume itself runs it. Bash's equivalent
 live-state detection (`certs_ready`, `ssc_ready`, etc.) does several
 kubectl probes per step and isn't ported yet (see the roadmap).
 

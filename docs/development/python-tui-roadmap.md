@@ -584,6 +584,27 @@ branch (all with regression tests):
   still-`PENDING` step in plan order (wrapping back to the start), never
   touching `self.states`, so the real DAG can't desync from what's being
   previewed.
+- **No way to tell a step is currently running.** Even after the fix
+  above, a real (`execute=True`) step still called
+  `OperationController.run()` -- a *blocking* subprocess call, potentially
+  minutes long -- directly inside `handle_event()`, and the app's own
+  event loop (`app.py`) only ever called `terminal_input.read_event(timeout=None)`,
+  blocking forever for a keypress. So the terminal genuinely froze on the
+  previous frame (still showing the step as `pending`) for the whole
+  duration of a real step, then jumped straight to `complete`/`failed` --
+  there was no frame in between showing anything was happening. Fixed
+  with a small background-execution mechanism: `DeployService.start_execute()`
+  marks the step `RUNNING` immediately and runs the actual command on a
+  daemon thread; `poll_execute()` (called from a `TickEvent`) picks up the
+  result once the thread finishes and commits it. `app.py`'s live loop now
+  polls `read_event(timeout=0.25)` and dispatches a real `TickEvent` when
+  nothing was typed, instead of blocking forever -- `TickEvent` already
+  existed for exactly this ("a periodic wake-up so a screen can refresh
+  live data... deployment progress", per its own docstring) but nothing
+  had ever wired it up to fire. Every other screen already no-ops on a
+  non-`KeyEvent`, so this doesn't change behavior anywhere else.
+  Dry-run previews stay synchronous (a dry-run never touches a real
+  subprocess side effect and returns instantly, nothing to background).
 
 **Deliberately not fixed here, scope trim:** the board still can't tell you
 a step is already deployed from a prior session or from outside the TUI

@@ -4,16 +4,22 @@ existing :class:`~fortifylab.orchestration.adapters.BashOperationAdapter`
 already knows how to run.
 
 Scope for M3: one profile at a time, steps run one at a time in dependency
-order, dry-run by default. There is no background/async execution --
-``OperationController.run()`` is a blocking subprocess call, same as every
-other Bash-backed operation in this codebase (see
-``fortifylab.core.command.run_command``), so "live" here means "the screen
-reflects real state after each step returns," not a background poller.
-Wiring true async/parallel execution is out of scope until a profile
-actually needs it.
+order, dry-run by default.
+
+A real (``execute=True``) step still ultimately calls
+``OperationController.run()``, a blocking subprocess call -- but
+:meth:`start_execute` runs that call on a background thread so the screen
+can show ``running`` immediately instead of freezing until a step that can
+take several minutes returns (bug report: "no way to tell tasks are
+currently running"). :meth:`poll_execute` is the other half: call it on
+every tick to pick up the result once the background thread finishes.
+``run_next(execute=True)`` stays as a synchronous convenience for direct/
+test callers that want to block until a step actually finishes.
 """
 
 from __future__ import annotations
+
+import threading
 
 from ..orchestration import (
     BashOperationAdapter,
@@ -65,6 +71,9 @@ class DeployService:
             step_id: OperationState(step_id) for step_id in self.plan.step_ids()
         }
         self._preview_cursor = 0
+        self._execution_lock = threading.Lock()
+        self._running_thread: threading.Thread | None = None
+        self._pending_result: OperationResult | None = None
         self.session = GuidedSession(
             session_id=f"deploy-{profile_id}",
             profile_id=profile_id,
@@ -86,6 +95,57 @@ class DeployService:
     @property
     def has_failed(self) -> bool:
         return any(state.status is StepStatus.FAILED for state in self.states.values())
+
+    @property
+    def is_executing(self) -> bool:
+        with self._execution_lock:
+            return self._running_thread is not None
+
+    def _commit_result(self, result: OperationResult) -> None:
+        self.states[result.step_id] = OperationState(result.step_id, result.status, result.attempts, result.detail)
+        self.session = self.session.mark(result.step_id, result.status, result.detail)
+
+    def start_execute(self) -> DeploymentStep | None:
+        """Start the next runnable step for real, on a background thread.
+
+        Marks the step ``RUNNING`` immediately (so the screen's very next
+        render shows it, without waiting for the subprocess to return) and
+        returns the step that was started, or ``None`` if nothing is
+        runnable or a step is already executing. Call :meth:`poll_execute`
+        on every tick to pick up the result once it's ready.
+        """
+
+        with self._execution_lock:
+            if self._running_thread is not None:
+                return None
+            runnable = self.runnable_steps()
+            if not runnable:
+                return None
+            step = runnable[0]
+            self.states[step.step_id] = OperationState(step.step_id, StepStatus.RUNNING)
+            thread = threading.Thread(target=self._run_in_background, args=(step,), daemon=True)
+            self._running_thread = thread
+        thread.start()
+        return step
+
+    def _run_in_background(self, step: DeploymentStep) -> None:
+        result = self.controller.run(step, dry_run=False)
+        with self._execution_lock:
+            self._pending_result = result
+
+    def poll_execute(self) -> OperationResult | None:
+        """Call on every tick. Returns and commits the finished result once
+        the background step from :meth:`start_execute` completes; returns
+        ``None`` while it's still running or if nothing is executing."""
+
+        with self._execution_lock:
+            if self._pending_result is None:
+                return None
+            result = self._pending_result
+            self._pending_result = None
+            self._running_thread = None
+        self._commit_result(result)
+        return result
 
     def run_next(self, *, execute: bool) -> OperationResult | None:
         """Run the next runnable step for real, or preview one step of a
@@ -114,8 +174,7 @@ class DeployService:
                 return None
             step = runnable[0]
             result = self.controller.run(step, dry_run=False)
-            self.states[step.step_id] = OperationState(step.step_id, result.status, result.attempts, result.detail)
-            self.session = self.session.mark(step.step_id, result.status, result.detail)
+            self._commit_result(result)
             return result
 
         pending = self._pending_steps_in_plan_order()

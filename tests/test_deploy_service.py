@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -127,6 +128,87 @@ class DeployServiceTests(unittest.TestCase):
             )
         self.assertIsNone(service.run_next(execute=True))
         self.assertTrue(service.is_complete)
+
+    def test_start_execute_marks_the_step_running_immediately(self) -> None:
+        # Core fix for "no way to tell tasks are currently running": the
+        # step must show RUNNING as soon as start_execute() returns, before
+        # the background thread's subprocess call has necessarily finished.
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("sleep", "0.2"))
+
+        started = service.start_execute()
+
+        self.assertEqual(started.step_id, "certs")
+        self.assertEqual(service.states["certs"].status, StepStatus.RUNNING)
+        self.assertTrue(service.is_executing)
+        self.assertIsNone(service.poll_execute())  # not finished yet
+
+        self._wait_until_not_executing(service)
+        self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
+        self.assertFalse(service.is_executing)
+
+    def test_poll_execute_commits_the_result_once_the_background_step_finishes(self) -> None:
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("true",))
+
+        service.start_execute()
+        result = self._poll_until_done(service)
+
+        self.assertEqual(result.step_id, "certs")
+        self.assertEqual(result.status, StepStatus.COMPLETE)
+        self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
+        self.assertEqual(service.session.states["certs"].status, StepStatus.COMPLETE)
+
+    def test_poll_execute_commits_a_real_failure(self) -> None:
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("false",))
+
+        service.start_execute()
+        result = self._poll_until_done(service)
+
+        self.assertEqual(result.status, StepStatus.FAILED)
+        self.assertEqual(service.states["certs"].status, StepStatus.FAILED)
+        self.assertTrue(service.has_failed)
+
+    def test_start_execute_returns_none_while_already_executing(self) -> None:
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("sleep", "0.2"))
+
+        service.start_execute()
+        second = service.start_execute()  # must not start a second thread
+
+        self.assertIsNone(second)
+        self._wait_until_not_executing(service)
+
+    def test_start_execute_returns_none_when_nothing_is_runnable(self) -> None:
+        service = DeployService("ssc_only")
+        for step in service.plan.steps:
+            service.states[step.step_id] = service.states[step.step_id].__class__(
+                step_id=step.step_id, status=StepStatus.COMPLETE
+            )
+        self.assertIsNone(service.start_execute())
+
+    def _poll_until_done(self, service: DeployService, *, timeout: float = 2.0):
+        deadline = time.monotonic() + timeout
+        while True:
+            result = service.poll_execute()
+            if result is not None:
+                return result
+            if time.monotonic() > deadline:
+                raise AssertionError("background step did not finish within the test timeout")
+            time.sleep(0.01)
+
+    def _wait_until_not_executing(self, service: DeployService, *, timeout: float = 2.0) -> None:
+        deadline = time.monotonic() + timeout
+        while service.is_executing:
+            service.poll_execute()
+            if time.monotonic() > deadline:
+                raise AssertionError("background step did not finish within the test timeout")
+            time.sleep(0.01)
 
     def test_adapter_step_ids_matches_the_bash_adapter_script_table(self) -> None:
         ids = adapter_step_ids()
