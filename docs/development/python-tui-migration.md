@@ -196,6 +196,35 @@ quarantine README classifies each file as keep, rewrite, quarantine, or delete
 for later milestones. These old preview contracts should not block M1 unless
 Architecture intentionally adopts the behavior.
 
+### 2026-08-25
+
+Milestone: M5
+
+Workstream: Test
+
+Branch: `agent/test-M5-diagnostics`
+
+Status: active
+
+Changed:
+
+- Added noninteractive M5 contract tests for diagnostic check/result models, default read-only check categories, injected execution, status aggregation, doctor/status CLI checks, and diagnostics redaction.
+- Kept implementation-dependent tests skipped until `fortifylab.diagnostics`, `fortifylab.status`, and doctor/status CLI APIs land.
+- Verified tests are designed around mocks, injected executors, and deterministic CLI test mode only.
+
+Next:
+
+- Open the test PR against `migration/python-tui`.
+- Coordinate with the Diagnostics implementation agent so the public M5 API activates these contracts without cluster, network, Kubernetes, Helm, or Docker requirements in default tests.
+
+Blockers:
+
+- Waiting on Diagnostics implementation APIs and doctor/status CLI commands.
+
+Risks:
+
+- M5 implementation must keep live probes behind explicit commands or test-mode fixtures so default CI remains offline-safe.
+
 ## Decision Log
 
 | Date | Decision | Status |
