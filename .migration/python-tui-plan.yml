@@ -37,10 +37,11 @@ heartbeat:
   changed:
     - Migration branch created locally from origin/dev.
     - Initial migration tracker added.
+    - Migration branch pushed to origin/migration/python-tui and upstream set.
   next:
-    - Add human-readable migration document.
-    - Push migration/python-tui when ready.
-    - Spawn or assign M0/M1 workstreams.
+    - Fold navigation audit into migration docs.
+    - Assign Architecture and Test workstreams for M1.
+    - Prepare M1 skeleton scope.
   blockers: []
   risks:
     - Existing src/ Python preview still has tests, docs, and Bash bridge references.
@@ -56,7 +57,7 @@ open_decisions:
       Textual is recommended for the long-term TUI because it supports richer
       screens, keybindings, status panes, logs, and future interactive workflows.
   - id: branch-upstream
-    status: pending
+    status: accepted
     recommendation: Push migration/python-tui and set upstream to origin/migration/python-tui.
     decision_needed_by: M0
     notes: >-

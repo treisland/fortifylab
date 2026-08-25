@@ -138,7 +138,7 @@ Cadence:
 | Decision | Recommendation | Needed By |
 | --- | --- | --- |
 | TUI framework | Textual | M1 |
-| Branch upstream | Push `migration/python-tui` and track `origin/migration/python-tui` | M0 |
+| Branch upstream | Push `migration/python-tui` and track `origin/migration/python-tui` | M0 - accepted |
 
 ## Heartbeat Log
 
@@ -152,12 +152,13 @@ Changed:
 
 - Created local `migration/python-tui` branch from `origin/dev`.
 - Added the initial migration tracker and this migration document.
+- Pushed `migration/python-tui` to GitHub and set upstream to `origin/migration/python-tui`.
 
 Next:
 
-- Review and commit M0 project-control files.
-- Push `migration/python-tui`.
-- Assign Architecture and Navigation audit workstreams.
+- Commit the heartbeat update.
+- Fold the navigation audit into migration docs.
+- Assign Architecture and Test workstreams for M1.
 
 Blockers: none.
 
