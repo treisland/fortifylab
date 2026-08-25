@@ -31,32 +31,33 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M1
-  workstream: pm-navigation-audit-foldin
-  branch: migration/python-tui
+  workstream: architecture-M1-skeleton
+  branch: agent/architecture-M1-skeleton
   status: active
   changed:
-    - Migration branch created locally from origin/dev.
-    - Initial migration tracker added.
-    - Migration branch pushed to origin/migration/python-tui and upstream set.
-    - M0 marked complete.
-    - Navigation audit completed and folded into migration planning docs.
+    - Root-level fortifylab package skeleton added.
+    - ./bin/fortifylab now imports from the new package instead of src/.
+    - start_wizard.sh converted to a compatibility shim.
+    - TUI smoke/check contract implemented for noninteractive tests.
+    - Textual accepted for M2 while M1 remains standard-library only.
   next:
-    - Spawn Architecture and Test agents for M1.
-    - Prepare M1 skeleton scope.
-    - Keep navigation parity map available for M2.
+    - Commit and push Architecture branch.
+    - Merge Architecture into migration/python-tui.
+    - Update Test PR #450 against the merged skeleton.
   blockers: []
   risks:
-    - Existing src/ Python preview still has tests, docs, and Bash bridge references.
-    - Replacing start_wizard.sh changes the primary user entrypoint and needs compatibility decisions.
+    - Legacy start_wizard.sh subcommands are not implemented in M1.
+    - Deprecated src/ preview code remains until cleanup is handled deliberately.
   needs_decision: []
+
 
 open_decisions:
   - id: tui-framework
-    status: proposed
+    status: accepted
     recommendation: Textual
     decision_needed_by: M1
     notes: >-
-      Textual is recommended for the long-term TUI because it supports richer
+      Textual is accepted for the long-term TUI because it supports richer
       screens, keybindings, status panes, logs, and future interactive workflows.
   - id: branch-upstream
     status: accepted
@@ -92,15 +93,27 @@ workstreams:
     blockers: []
   architecture:
     owner: architecture-agent
-    status: pending
+    status: active
     branch: agent/architecture-M1-skeleton
     owns:
       - fortifylab/
       - bin/fortifylab
       - start_wizard.sh
       - requirements-python.txt
-    current_task: Define target Python package layout and entrypoint transition.
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Implement target Python package layout and entrypoint transition for M1.
+    next_task: Merge the skeleton after M1 entrypoint tests pass and PM review clears it.
+    changed:
+      - Root-level fortifylab package skeleton added.
+      - ./bin/fortifylab now imports from the new package instead of src/.
+      - start_wizard.sh converted to a compatibility shim.
+      - TUI smoke-test contract coordinated with tests.
     blockers: []
+    risks:
+      - Legacy start_wizard.sh subcommands are not implemented in M1.
+      - Deprecated src/ preview code remains until cleanup is handled by later milestones.
+    last_heartbeat: 2026-08-25
   navigation:
     owner: navigation-agent
     status: complete

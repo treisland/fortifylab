@@ -174,13 +174,15 @@ Cadence:
 | 2026-08-25 | Preserve current navigation structure before improving interaction design. | Accepted |
 | 2026-08-25 | Treat current `src/` as deprecated preview code to replace intentionally. | Accepted |
 | 2026-08-25 | Keep Bash deployment scripts as temporary operation adapters in early milestones. | Accepted |
-| 2026-08-25 | Use Textual as the recommended TUI framework unless M1 discovers a blocking constraint. | Proposed |
+| 2026-08-25 | Use Textual as the interactive TUI framework starting in M2. M1 remains standard-library only for clone-and-run entrypoint checks. | Accepted |
+| 2026-08-25 | `./bin/fortifylab` is the primary Python application entrypoint. `./start_wizard.sh` is a compatibility shim during migration. | Accepted |
+| 2026-08-25 | The new root-level `fortifylab/` package is the intentional migration target. Deprecated preview code under `src/` remains in-tree until cleanup is handled deliberately. | Accepted |
 
 ## Open Decisions
 
 | Decision | Recommendation | Needed By |
 | --- | --- | --- |
-| TUI framework | Textual | M1 |
+| TUI framework | Textual | M1 - accepted |
 | Branch upstream | Push `migration/python-tui` and track `origin/migration/python-tui` | M0 - accepted |
 
 ## Heartbeat Log
@@ -209,3 +211,33 @@ Risks:
 
 - Existing Python preview references must be audited before `src/` cleanup.
 - Entrypoint policy must stay explicit as `start_wizard.sh` is replaced.
+
+### 2026-08-25
+
+Milestone: M1
+
+Workstream: Architecture
+
+Branch: agent/architecture-M1-skeleton
+
+Status: active
+
+Changed:
+
+- Added the intentional root-level Python package skeleton at `fortifylab/`.
+- Pointed `./bin/fortifylab` at the new package instead of deprecated `src/`.
+- Converted `./start_wizard.sh` into a deliberate compatibility shim.
+- Accepted Textual as the M2 TUI framework while keeping M1 standard-library only.
+- Defined the noninteractive TUI test contract: `./bin/fortifylab tui --smoke-test`, `./bin/fortifylab tui --check`, or `FORTIFYLAB_TUI_TEST_MODE=1`.
+
+Next:
+
+- Coordinate entrypoint smoke tests with the Test Agent.
+- Merge the M1 Architecture skeleton after acceptance checks pass.
+
+Blockers: none.
+
+Risks:
+
+- Deprecated `src/` preview code remains in-tree until references, tests, and docs are migrated or removed intentionally.
+- Legacy Bash wizard subcommands are not reimplemented in M1.
