@@ -467,3 +467,35 @@ Risks:
 
 - M3 must not execute mutating operations without explicit confirmation gates.
 - Config implementation should wait for operation runner boundaries before replacing editor behavior.
+
+### 2026-08-25
+
+Milestone: M3
+
+Workstream: Tests
+
+Branch: `agent/test-M3-operation-adapters`
+
+Status: active
+
+Changed:
+
+- Added noninteractive operation adapter contract tests for stable operation IDs, command plan shape, dry-run previews, mutating confirmation gates, mocked execution success/failure, stdout/stderr/result modeling, and secret redaction.
+- Kept the tests dependency-skipped until the M3 operations implementation exposes the agreed `fortifylab.operations` API.
+
+Verification:
+
+- `python3 -m unittest tests.test_m3_operation_adapters -v` passed with 6 skips.
+- `python3 -m unittest discover -s tests -v` passed with 105 tests and 6 skips.
+
+Next:
+
+- Re-run this suite after `agent/operations-M3-adapter-catalog` lands; the contract tests should activate automatically.
+
+Blockers:
+
+- Waiting on `fortifylab.operations` to expose `OperationCatalog`, `OperationRunner`, `CommandResult`, `OperationImpact`, and `redact_text`.
+
+Risks:
+
+- Tests intentionally make no Kubernetes, Helm, Docker, network, or mutating command calls; implementation branches must preserve that boundary in CI.

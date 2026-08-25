@@ -186,19 +186,21 @@ workstreams:
       - Architecture decisions must be recorded before broad doc rewrites.
   tests:
     owner: test-agent
-    status: complete
-    branch: agent/test-M2-menu-parity
+    status: active
+    branch: agent/test-M3-operation-adapters
     owns:
       - tests/test_m1_entrypoints.py
       - tests/test_m2_menu_parity.py
+      - tests/test_m3_operation_adapters.py
       - tests/quarantine/python_preview/
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Completed M2 menu parity and keybinding-safe contract tests.
-    result: M2 Test PR #453 merged into migration/python-tui.
-    next_task: Start M3 operation adapter tests on agent/test-M3-operation-adapters.
-    blockers: []
+    current_task: Added M3 operation adapter contract tests for catalog plans, dry-run behavior, confirmation gates, mocked execution results, and redaction.
+    result: M3 tests pass as dependency-skipped contracts until fortifylab.operations exposes the implementation API.
+    next_task: Re-run and activate M3 tests after agent/operations-M3-adapter-catalog lands.
+    blockers:
+      - Waiting on operations implementation branch to expose OperationCatalog, OperationRunner, CommandResult, OperationImpact, and redact_text.
     last_heartbeat: 2026-08-25
 
 milestones:
