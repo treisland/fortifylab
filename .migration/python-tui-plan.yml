@@ -118,14 +118,17 @@ workstreams:
     last_heartbeat: 2026-08-25
   navigation:
     owner: navigation-agent
-    status: complete
-    branch: agent/navigation-M0-audit
+    status: active
+    branch: agent/navigation-M2-menu-model
     owns:
+      - fortifylab/navigation/
+      - tests/test_m2_navigation_model.py
       - docs/development/python-tui-migration.md
       - .migration/python-tui-plan.yml
-    current_task: Completed read-only Bash wizard navigation audit.
+    current_task: Encode the documented Bash wizard baseline as deterministic Python menu models.
     result: Navigation parity baseline captured for M2 implementation.
     blockers: []
+    last_heartbeat: 2026-08-25
   tui:
     owner: tui-agent
     status: pending

@@ -105,6 +105,16 @@ Architecture and TUI decisions from the audit:
 - Preserve pending-change guards for Config and Flight Plan screens.
 - Remove or replace the current `bin/fortifylab` Python config bridge intentionally during M1-M4.
 
+M2 menu model contract:
+
+- Menu data lives in `fortifylab/navigation/models.py`, `baseline.py`, and `registry.py`.
+- Number keys are modeled as jump-highlight selection; Enter/Return activates the selected item.
+- Duplicate numbers are scoped by `MenuNode.id`, so `main:1`, `more_tools:1`, and `guided_deployment:1` can point to different targets.
+- Back and return aliases are metadata on screens and return items: `r`, `b`, Escape, and empty Enter are preserved where the Bash baseline accepted them.
+- Disabled entries keep `disabled_reason` text on the item; the first-scan demo is unavailable until prerequisites are ready.
+- Placeholder targets use stable `ActionRef` values until M3-M6 replace them with real operations, config, diagnostics, and runbook views.
+- Guided deployment is represented as a `workflow_boundary` screen for profile selection, deployment mode selection, per-step controls, and completion handoff.
+
 ## Workstreams
 
 The PM workstream owns coordination, milestone gates, heartbeats, branch rules,
@@ -335,3 +345,26 @@ Risks:
 
 - M2 must preserve the documented Bash wizard navigation before improving flow design.
 - No mutating operation wiring belongs in M2; that is M3.
+
+### 2026-08-25
+
+Milestone: M2
+
+Workstream: Navigation
+
+Branch: `agent/navigation-M2-menu-model`
+
+Status: active
+
+Changed:
+
+- Added the first Python menu model contract for the documented Bash wizard baseline.
+- Exposed deterministic helpers for menu keys, labels, lookup, disabled reasons, aliases, and workflow boundaries.
+
+Next:
+
+- Coordinate with TUI and Test agents after this branch lands on `migration/python-tui`.
+
+Blockers:
+
+- None.
