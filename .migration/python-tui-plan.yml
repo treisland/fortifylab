@@ -31,18 +31,16 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M7
-  workstream: pm-M6-closeout-open-M7
-  branch: agent/pm-M6-closeout-open-M7
+  workstream: test-M7-retirement
+  branch: agent/test-M7-retirement
   status: active
   changed:
-    - M6 accepted as complete by PM gate review.
-    - Runbook/help contract PR #466, tests PR #465, implementation PR #467, and docs PR #468 merged into migration/python-tui.
-    - M6 verification passed with 149 default tests and 16 active M6 tests.
-    - M7 Bash wizard retirement and deprecated source cleanup opened for the next milestone.
+    - Added clone-safe M7 retirement tests for supported Python CLI and start_wizard.sh shim commands.
+    - Added src import guard tests so supported entrypoints fail if they resolve through the deprecated preview package.
+    - Added discovery guardrails for runbooks, help topics, operation catalog scripts, and default unittest discovery.
   next:
-    - Merge PM closeout into migration/python-tui.
-    - Spawn M7 retirement audit and compatibility/test agents.
-    - Defer destructive removals until the audit classifies keep, migrate, remove, or adapter boundaries.
+    - Open the M7 test PR against migration/python-tui.
+    - Coordinate with M7 audit/cleanup agents so these contracts stay active while retired internals are removed or quarantined.
   blockers: []
   risks:
     - Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
@@ -252,21 +250,22 @@ workstreams:
     last_heartbeat: 2026-08-25
   tests:
     owner: test-agent
-    status: complete
-    branch: agent/test-M6-runbooks-help
+    status: active
+    branch: agent/test-M7-retirement
     owns:
       - tests/test_m1_entrypoints.py
       - tests/test_m2_menu_parity.py
       - tests/test_m4_config_engine.py
       - tests/test_m5_diagnostics.py
       - tests/test_m6_runbooks_help.py
+      - tests/test_m7_retirement_contract.py
       - tests/quarantine/python_preview/
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Added M6 runbook/help contract tests without live cluster, network, Kubernetes, Helm, or Docker dependencies.
-    result: M6 tests PR #465 merged into migration/python-tui; tests activated on agent/runbooks-M6-implementation.
-    next_task: Watch implementation PR and keep any new M6 regression coverage clone-safe.
+    current_task: Added M7 retirement and compatibility regression tests without live cluster, network, Kubernetes, Helm, or Docker dependencies.
+    result: In progress on agent/test-M7-retirement.
+    next_task: Open M7 test PR and coordinate with cleanup/audit agents.
     blockers: []
     last_heartbeat: 2026-08-25
 
