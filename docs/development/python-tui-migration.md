@@ -198,6 +198,36 @@ Architecture intentionally adopts the behavior.
 
 ### 2026-08-25
 
+Milestone: M7
+
+Workstream: Test
+
+Branch: `agent/test-M7-retirement`
+
+Status: active
+
+Changed:
+
+- Added clone-safe M7 retirement tests for supported Python CLI commands, `start_wizard.sh` shim commands, and the `config-diagnostics` compatibility alias.
+- Added deprecated `src/` import guard coverage for supported entrypoints.
+- Added discovery guardrails so default runbook/help/operation/test discovery excludes retired wizard internals and quarantined preview contracts.
+
+Next:
+
+- Open the test PR against `migration/python-tui`.
+- Coordinate with M7 audit and cleanup agents so retired internals can be removed or quarantined without breaking supported entrypoints.
+
+Blockers:
+
+- None.
+
+Risks:
+
+- Cleanup must preserve the M3 Bash lifecycle adapters and the intentional `start_wizard.sh` shim surface.
+- Default tests must stay free of Kubernetes, Helm, Docker, network, and live lab dependencies.
+
+### 2026-08-25
+
 Milestone: M5
 
 Workstream: Test
