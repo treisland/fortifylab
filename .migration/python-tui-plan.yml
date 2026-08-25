@@ -1,7 +1,7 @@
 program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
-current_milestone: M4
+current_milestone: M5
 overall_status: active
 
 goal:
@@ -30,21 +30,26 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-25
-  milestone: M4
-  workstream: config-M4-cli-bridge
-  branch: agent/config-M4-cli-bridge
+  milestone: M5
+  workstream: pm-M4-closeout-open-M5
+  branch: agent/pm-M4-closeout-open-M5
   status: active
   changed:
-    - Added Python config CLI bridge work on a focused branch after the M4 engine merge.
-    - Exposed planned commands for validate, diagnostics, and repair-derived through ./bin/fortifylab config.
-    - Added temp-file-only bridge tests for redacted validation, diagnostics, dry-run repair, guarded writes, backups, rollback marker creation, and start_wizard.sh config-diagnostics compatibility.
+    - M4 accepted as complete by PM gate review.
+    - Config Schema Design PR #457 merged into migration/python-tui.
+    - Python Config Engine PR #460 merged into migration/python-tui.
+    - Config CLI Bridge PR #461 merged into migration/python-tui.
+    - Python-native config behavior is reachable from supported CLI paths.
+    - M5 diagnostics and status work opened for the next concurrent wave.
   next:
-    - Run full discovery and exact requested CLI checks.
-    - Push the focused branch and open a PR against migration/python-tui.
-    - Watch CI and report merge readiness to the PM.
+    - Merge PM closeout into migration/python-tui.
+    - Spawn Diagnostics Contract and M5 Test agents.
+    - Start Diagnostics Implementation after the contract is visible.
+    - Start Docs M5 diagnostics surface after implementation shape settles.
   blockers: []
   risks:
-    - This bridge intentionally does not replace the full-screen TUI config editor.
+    - M5 checks must stay read-only and keep default tests free of cluster/network dependencies.
+    - Broader runbook/help migration remains M6, not M5.
 
   needs_decision: []
 
@@ -82,12 +87,12 @@ workstreams:
   pm:
     owner: pm-agent
     status: active
-    branch: agent/pm-M3-closeout-open-M4
+    branch: agent/pm-M4-closeout-open-M5
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Close M3 and open M4 coordination.
-    next_task: Spawn Config Implementation and M4 Test agents, then coordinate bridge/docs work.
+    current_task: Close M4 and open M5 coordination.
+    next_task: Spawn Diagnostics Contract and M5 Test agents, then coordinate implementation/docs work.
     blockers: []
   architecture:
     owner: architecture-agent
@@ -164,35 +169,37 @@ workstreams:
     last_heartbeat: 2026-08-25
   config:
     owner: config-agent
-    status: active
+    status: complete
     branch: agent/config-M4-cli-bridge
     owns:
       - fortifylab/config/
       - fortifylab/cli.py
       - start_wizard.sh
-      - tests/
+      - tests/test_m4_config_engine.py
+      - tests/test_m4_config_cli_bridge.py
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Expose the merged M4 config engine through supported CLI paths.
-    result: M4 schema design PR #457 and config engine PR #460 merged into migration/python-tui.
+    current_task: Completed Python-native config engine and supported CLI bridge.
+    result: Config Schema Design PR #457, Config Engine PR #460, and Config CLI Bridge PR #461 merged into migration/python-tui.
     changed:
-      - Audited active Bash .env bootstrap, editor, validation, repair, backup, and rollback behavior.
       - Added root fortifylab.config schema metadata and parser/writer capability contract.
       - Added Python-native config engine with parser, validation, repair, backup, rollback marker, and redacted diffs.
-      - Started CLI bridge for validate, diagnostics, and repair-derived commands.
+      - Exposed validate, diagnostics, and repair-derived through ./bin/fortifylab config.
+      - Preserved ./start_wizard.sh config-diagnostics as a compatibility alias.
     blockers: []
     risks:
-      - Full-screen TUI config editor remains future work and should not be mixed into the CLI bridge PR.
+      - Full-screen TUI config editor remains future work and should not be mixed into M5 diagnostics.
     last_heartbeat: 2026-08-25
+
   diagnostics:
     owner: diagnostics-agent
     status: pending
-    branch: agent/diagnostics-M5-status
+    branch: agent/diagnostics-M5-contract
     owns:
       - fortifylab/status/
       - fortifylab/diagnostics/
       - tests/
-    current_task: Port status, doctor, cluster, TLS, and diagnostics bundle behavior.
+    current_task: Define and implement read-only diagnostic/status contracts and doctor command behavior.
     blockers: []
   docs:
     owner: docs-agent
@@ -206,7 +213,7 @@ workstreams:
       - Architecture decisions must be recorded before broad doc rewrites.
   tests:
     owner: test-agent
-    status: active
+    status: complete
     branch: agent/test-M4-config-engine
     owns:
       - tests/test_m1_entrypoints.py
@@ -216,9 +223,9 @@ workstreams:
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Add noninteractive M4 config engine tests for parser, writer, backup, rollback, diff redaction, validation, and derived URL repair behavior.
-    result: M4 tests are contract/skipped until the implementation API lands.
-    next_task: Coordinate with Config Implementation so tests activate when agent/config-M4-engine merges.
+    current_task: Completed M4 config engine and CLI bridge tests.
+    result: M4 config tests merged through PR #460 and PR #461.
+    next_task: Start M5 diagnostics tests on agent/test-M5-diagnostics.
     blockers: []
     last_heartbeat: 2026-08-25
 
@@ -301,33 +308,31 @@ milestones:
       - Helmholtz branch agent/test-M3-operation-adapters was superseded by active tests in PR #458.
   - id: M4
     name: Python-native config editor
-    status: in_progress
+    status: complete
     acceptance:
       - .env parser preserves comments and ordering where practical.
       - Config updates create backups.
       - Diffs and secret redaction work.
       - Validation and derived URL repair are Python-native.
       - Bash config bridge is removed or no longer required.
-    active_work:
-      branch: agent/config-M4-cli-bridge
-      current_task: Expose Python-native config validation, diagnostics, and derived repair through supported CLI paths.
-      files:
-        - fortifylab/config/cli.py
-        - fortifylab/cli.py
-        - start_wizard.sh
-        - tests/test_m4_config_cli_bridge.py
-      evidence:
-        - python3 -m compileall -q fortifylab passed.
-        - python3 -m unittest tests.test_m4_config_cli_bridge -v passed with 7 tests.
-      guardrails:
-        - Tests use temporary files only.
-        - No Kubernetes, Helm, Docker, network, or real lab state is touched.
-        - Full-screen TUI config editor is out of scope for this branch.
-      notes:
-        - M4 engine is local-file only and now has an explicit CLI bridge for operator-safe inspection and repair.
+    completed_at: 2026-08-25
+    pull_requests:
+      - 457
+      - 460
+      - 461
+    evidence:
+      - python3 -m compileall -q fortifylab passed.
+      - python3 -m unittest tests.test_m4_config_engine -v passed with 6 tests.
+      - python3 -m unittest tests.test_m4_config_cli_bridge -v passed with 7 tests.
+      - python3 -m unittest discover -s tests -v passed with 125 tests.
+      - ./bin/fortifylab tui --check passed.
+      - PR #461 offline-docs CI passed before merge.
+    notes:
+      - Python-native config behavior is local-file only in tests and reachable from supported CLI paths.
+      - Full-screen TUI config editor remains future work.
   - id: M5
     name: Status and diagnostics
-    status: pending
+    status: in_progress
     acceptance:
       - Prerequisite, license, cluster, pod, registry, and TLS checks are available.
       - doctor command works without the Bash wizard.
