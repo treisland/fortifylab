@@ -35,19 +35,22 @@ heartbeat:
   branch: agent/test-M7-retirement
   status: active
   changed:
+    - Entry compatibility PR #470 and retirement audit PR #471 landed before the retirement test integration.
     - Added clone-safe M7 retirement tests for supported Python CLI and start_wizard.sh shim commands.
     - Added src import guard tests so supported entrypoints fail if they resolve through the deprecated preview package.
     - Added discovery guardrails for runbooks, help topics, operation catalog scripts, and default unittest discovery.
   next:
-    - Open the M7 test PR against migration/python-tui.
-    - Coordinate with M7 audit/cleanup agents so these contracts stay active while retired internals are removed or quarantined.
+    - Merge the M7 test PR against migration/python-tui.
+    - Coordinate with M7 cleanup agents so these contracts stay active while retired internals are removed or quarantined.
   blockers: []
   risks:
     - Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
     - Keep start_wizard.sh as a minimal compatibility shim unless docs and tests explicitly retire it.
     - Default tests must remain clone-safe and avoid live Kubernetes, Helm, Docker, or network dependencies.
+    - User docs still present the Bash wizard as the long-term guided app and need a focused M7 docs migration.
 
-  needs_decision: []
+  needs_decision:
+    - Confirm whether start_wizard.sh doctor/status/help topic aliases are long-term compatibility or migration-only affordances.
 
 
 open_decisions:
@@ -268,6 +271,28 @@ workstreams:
     next_task: Open M7 test PR and coordinate with cleanup/audit agents.
     blockers: []
     last_heartbeat: 2026-08-25
+  retirement_audit:
+    owner: retirement-audit-agent
+    status: active
+    branch: agent/retirement-M7-audit
+    owns:
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Audit M7 retirement targets and classify safe cleanup boundaries before deletion.
+    changed:
+      - Deprecated src preview package classified for removal after remaining reference-only tests/docs are migrated or retired.
+      - tests/quarantine/python_preview classified as retire/remove after harvested concepts are represented by M1-M6 active tests.
+      - tests/quarantine/bash_wizard_internal classified as quarantine/reference until compatibility entrypoints are locked, then remove or archive intentionally.
+      - scripts/wizard/*.sh classified as migrate or remove, not low-level adapters, once Python guided/config/runbook/flight-plan parity is explicit.
+      - M3 adapter-protected lifecycle scripts identified under apps/**/start.sh, stop.sh, and destroy.sh.
+      - start_wizard.sh classified as keep as compatibility shim.
+    next_task: Open audit PR, then hand off to compatibility/test, cleanup, and docs agents.
+    blockers: []
+    risks:
+      - Do not delete app lifecycle scripts referenced by fortifylab.operations.catalog.
+      - Preserve ./bin/fortifylab, ./start_wizard.sh, and ./start_wizard.sh config-diagnostics until compatibility tests say otherwise.
+      - Update stale docs before users are told the Bash wizard remains the production guided app.
+    last_heartbeat: 2026-08-25
 
 milestones:
   - id: M0
@@ -434,6 +459,10 @@ milestones:
       - Deprecated src preview references are removed or intentionally migrated.
       - Docs and tests reflect the Python TUI as the supported path.
       - Bash remains only for low-level adapters that are still intentionally retained.
+    notes:
+      - Audit branch agent/retirement-M7-audit found no destructive deletion should happen before compatibility entrypoints are locked.
+      - M3 operation catalog keeps app lifecycle scripts as low-level adapters; scripts/wizard internals are not M3 catalog dependencies.
+      - start_wizard.sh should remain a minimal compatibility shim for M7 unless a focused compatibility PR retires it explicitly.
   - id: M8
     name: Merge back to dev
     status: pending
