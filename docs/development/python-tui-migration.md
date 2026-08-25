@@ -165,6 +165,27 @@ Cadence:
 - The first TUI release should avoid rewriting every Helm/Kubernetes operation.
   Keep Bash operation adapters until Python ports have clear value and tests.
 
+## Test Strategy
+
+M1 tests live in `tests/test_m1_entrypoints.py` and cover only clone-safe
+entrypoint behavior:
+
+- `./bin/fortifylab --help`;
+- `./bin/fortifylab tui --smoke-test`;
+- import sanity from the repo root Python package;
+- `start_wizard.sh` removed or reduced to a deliberate shim.
+
+The noninteractive TUI launch contract for Architecture is
+`./bin/fortifylab tui --smoke-test`. It should print deterministic placeholder
+output identifying the FortifyLab TUI and M1 placeholder/skeleton state, then
+exit `0` without reading terminal input.
+
+Deprecated `tests/test_python_*.py` files have been moved to
+`tests/quarantine/python_preview/` with default-discovery-safe filenames. The
+quarantine README classifies each file as keep, rewrite, quarantine, or delete
+for later milestones. These old preview contracts should not block M1 unless
+Architecture intentionally adopts the behavior.
+
 ## Decision Log
 
 | Date | Decision | Status |
@@ -209,3 +230,36 @@ Risks:
 
 - Existing Python preview references must be audited before `src/` cleanup.
 - Entrypoint policy must stay explicit as `start_wizard.sh` is replaced.
+
+### 2026-08-25
+
+Milestone: M1
+
+Workstream: Tests
+
+Branch: `agent/test-M1-entrypoints`
+
+Status: active
+
+Changed:
+
+- Added clone-safe M1 entrypoint acceptance tests.
+- Defined the noninteractive TUI launch contract as
+  `./bin/fortifylab tui --smoke-test`.
+- Quarantined deprecated Python preview tests outside default discovery.
+- Documented preview test classification in
+  `tests/quarantine/python_preview/README.md`.
+
+Next:
+
+- Coordinate with Architecture so the skeleton satisfies the entrypoint tests.
+- Re-run M1 tests after the new package and `start_wizard.sh` decision land.
+
+Blockers:
+
+- Architecture skeleton is not merged yet.
+
+Risks:
+
+- Legacy Bash wizard tests may still assert old `start_wizard.sh` internals
+  until the Architecture branch replaces or updates that surface.

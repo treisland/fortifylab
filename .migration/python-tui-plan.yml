@@ -31,23 +31,22 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M1
-  workstream: pm-navigation-audit-foldin
-  branch: migration/python-tui
+  workstream: test-M1-entrypoints
+  branch: agent/test-M1-entrypoints
   status: active
   changed:
-    - Migration branch created locally from origin/dev.
-    - Initial migration tracker added.
-    - Migration branch pushed to origin/migration/python-tui and upstream set.
-    - M0 marked complete.
-    - Navigation audit completed and folded into migration planning docs.
+    - Test work branch created from migration/python-tui.
+    - M1 entrypoint acceptance tests added.
+    - Deprecated Python preview tests quarantined outside default discovery.
+    - Python preview test audit documented.
   next:
-    - Spawn Architecture and Test agents for M1.
-    - Prepare M1 skeleton scope.
-    - Keep navigation parity map available for M2.
+    - Coordinate with Architecture on ./bin/fortifylab tui --smoke-test.
+    - Re-run M1 tests after the skeleton contract lands.
+    - Restore quarantined concepts milestone by milestone when supported.
   blockers: []
   risks:
-    - Existing src/ Python preview still has tests, docs, and Bash bridge references.
-    - Replacing start_wizard.sh changes the primary user entrypoint and needs compatibility decisions.
+    - M1 tests are expected to fail until Architecture replaces the old src-backed entrypoint.
+    - Non-preview Bash wizard tests may still assert legacy start_wizard.sh internals until the architecture branch updates them.
   needs_decision: []
 
 open_decisions:
@@ -164,6 +163,20 @@ workstreams:
     current_task: Identify stale Python preview and web UI migration language.
     blockers:
       - Architecture decisions must be recorded before broad doc rewrites.
+  tests:
+    owner: test-agent
+    status: active
+    branch: agent/test-M1-entrypoints
+    owns:
+      - tests/test_m1_entrypoints.py
+      - tests/quarantine/python_preview/
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Prepare M1 entrypoint acceptance tests and quarantine deprecated Python preview tests.
+    next_task: Re-run M1 tests after Architecture implements the skeleton and shim contract.
+    blockers:
+      - Architecture skeleton not merged
+    last_heartbeat: 2026-08-25
 
 milestones:
   - id: M0
