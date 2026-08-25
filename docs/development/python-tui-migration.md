@@ -574,3 +574,74 @@ Risks:
 
 - M4 must preserve comments/order and create backups before mutation.
 - Config writes must stay local-file only in tests and avoid real cluster/network dependencies.
+
+### 2026-08-25
+
+Milestone: M4
+
+Workstream: Tests
+
+Branch: `agent/test-M4-config-engine`
+
+Status: active
+
+Changed:
+
+- Added noninteractive M4 config engine contract tests for parser fixtures, writer preservation, backup/rollback, redacted diff previews, validation, and derived URL repair.
+- Kept tests limited to in-memory documents and temporary files.
+- Guarded engine-dependent tests with skips until the implementation branch exposes the root-package config engine API.
+
+Next:
+
+- Open a PR against `migration/python-tui`.
+- Coordinate API naming and activation with `agent/config-M4-engine`.
+- Re-run full discovery after the engine implementation lands so skipped contracts become active checks.
+
+Blockers: none.
+
+Risks:
+
+- Contract skips must not become stale after implementation lands; the Test and Config agents should reconcile imports before M4 closeout.
+
+
+### 2026-08-25
+
+Milestone: M4
+
+Workstream: Config Implementation
+
+Branch: `agent/config-M4-engine`
+
+Status: active
+
+Changed:
+
+- Added a Python-native `.env` engine under `fortifylab/config/envfile.py`.
+- Added parser/writer support that preserves comments, blank lines, field order, existing `export` prefixes, inline comment spacing, and expression-style values such as `ssc.$DOMAIN`.
+- Added staged `ConfigChange` updates, redacted `ConfigDiffEntry` previews, schema-backed validation, backup creation, rollback marker creation, and deterministic derived DOMAIN/URL repair changes.
+- Exported the engine API through `fortifylab.config` for future TUI and CLI hooks.
+- Added focused M4 tests that use temporary files only.
+
+Public API shape:
+
+- `EnvDocument.parse/read/render/values/get/stage/diff/repair_domain_urls/validate`
+- `ConfigChange`, `ConfigDiffEntry`, `ConfigIssue`, `ConfigValidationError`
+- `EnvBackup`, `ConfigWriteResult`
+- `diff_preview`, `validate_env_file`, `repair_domain_changes`, `create_env_backup`, `write_env_file`
+
+Verification:
+
+- `python3 -m compileall -q fortifylab` passed.
+- `python3 -m unittest tests.test_m4_config_engine -v` passed with 6 tests.
+- `python3 -m unittest discover -s tests -v` passed with 118 tests.
+
+Guardrails:
+
+- The engine is local-file only and testable with temporary files.
+- No Kubernetes, Helm, Docker, network, or real lab state is used.
+- `src/` was not deleted or modified.
+
+Risks:
+
+- This branch does not replace the full interactive TUI config editor yet.
+- Validation is intentionally schema-shaped and conservative; future UI work should decide how to display and recover from each `ConfigIssue`.

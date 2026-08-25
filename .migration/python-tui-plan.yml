@@ -31,24 +31,23 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M4
-  workstream: pm-M3-closeout-open-M4
-  branch: agent/pm-M3-closeout-open-M4
+  workstream: test-M4-config-engine
+  branch: agent/test-M4-config-engine
   status: active
   changed:
-    - M3 accepted as complete by PM gate review.
-    - Operations Adapter PR #458 merged into migration/python-tui.
-    - M4 Config Schema Design PR #457 merged into migration/python-tui as bounded prep.
-    - Helmholtz test branch closed as superseded because active M3 tests landed in PR #458.
-    - M4 config engine work opened for the next concurrent wave.
+    - M4 config engine contract tests started on a focused branch.
+    - Tests cover parser fixtures, writer preservation, backup/rollback, diff redaction, validation, and derived URL repair.
+    - Tests use only in-memory documents and temp files, with no live .env, Kubernetes, Helm, Docker, network, or lab-state access.
+    - Engine-dependent tests skip until the implementation API lands.
   next:
-    - Merge PM closeout into migration/python-tui.
-    - Spawn Config Implementation and M4 Test agents.
+    - Open PR against migration/python-tui.
+    - Watch CI and coordinate with the Config Implementation branch.
+    - Remove skips naturally once agent/config-M4-engine exposes the expected API.
     - Start Config CLI/TUI Bridge after the engine contract is visible.
     - Start Docs M4 config surface after implementation shape settles.
   blockers: []
   risks:
-    - M4 must preserve comments/order and create backups before mutation.
-    - Config writes must stay local-file only in tests and avoid real cluster/network dependencies.
+    - API names must stay coordinated with the implementation agent to avoid stale contract skips.
 
   needs_decision: []
 
@@ -207,18 +206,19 @@ workstreams:
       - Architecture decisions must be recorded before broad doc rewrites.
   tests:
     owner: test-agent
-    status: complete
-    branch: agent/test-M3-operation-adapters
+    status: active
+    branch: agent/test-M4-config-engine
     owns:
       - tests/test_m1_entrypoints.py
       - tests/test_m2_menu_parity.py
+      - tests/test_m4_config_engine.py
       - tests/quarantine/python_preview/
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: M3 operation adapter tests superseded by active tests merged with PR #458.
-    result: Helmholtz branch closed as superseded; PR #458 includes the active M3 operation adapter tests.
-    next_task: Start M4 config engine tests on agent/test-M4-config-engine.
+    current_task: Add noninteractive M4 config engine tests for parser, writer, backup, rollback, diff redaction, validation, and derived URL repair behavior.
+    result: M4 tests are contract/skipped until the implementation API lands.
+    next_task: Coordinate with Config Implementation so tests activate when agent/config-M4-engine merges.
     blockers: []
     last_heartbeat: 2026-08-25
 
@@ -308,6 +308,22 @@ milestones:
       - Diffs and secret redaction work.
       - Validation and derived URL repair are Python-native.
       - Bash config bridge is removed or no longer required.
+    active_work:
+      branch: agent/config-M4-engine
+      current_task: Implement Python-native local .env parser, writer, validator, backup, diff, and derived repair engine.
+      files:
+        - fortifylab/config/envfile.py
+        - fortifylab/config/__init__.py
+        - tests/test_m4_config_engine.py
+      evidence:
+        - python3 -m compileall -q fortifylab passed.
+        - python3 -m unittest tests.test_m4_config_engine -v passed with 6 tests.
+        - python3 -m unittest discover -s tests -v passed with 118 tests.
+      guardrails:
+        - Tests use temporary files only.
+        - No Kubernetes, Helm, Docker, network, or real lab state is touched.
+      notes:
+        - M4 engine is local-file only and not wired into the full interactive TUI editor yet.
   - id: M5
     name: Status and diagnostics
     status: pending
