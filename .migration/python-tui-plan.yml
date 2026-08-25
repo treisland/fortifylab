@@ -1,0 +1,243 @@
+program: fortifylab-python-tui-migration
+branch: migration/python-tui
+base_branch: dev
+current_milestone: M0
+overall_status: active
+
+goal:
+  primary_objective: >-
+    Replace FortifyLab's current Bash wizard with a maintainable Python CLI/TUI
+    application while preserving the existing navigation structure and lab
+    operation behavior.
+  preserve:
+    - CLI-first application direction
+    - Existing wizard navigation structure
+    - Safe lab deployment and lifecycle behavior
+    - Proven Bash deployment scripts as temporary operation adapters
+  improve:
+    - Maintainability for future repo owners
+    - Testability of navigation, config, operations, and status flows
+    - Arrow-key selection and jump-to-number menu navigation
+    - Explicit module boundaries and typed application state
+    - Config safety, diagnostics, logging, and contributor onboarding
+  out_of_scope:
+    - Building a web UI
+    - Preserving deprecated Python preview code as-is
+    - Rewriting every Helm or Kubernetes command in the first milestones
+    - Changing FortifyLab's lab/training purpose
+
+heartbeat:
+  cadence: daily
+  stale_after_days: 3
+  last_updated: 2026-08-25
+  milestone: M0
+  workstream: pm-tracking
+  branch: migration/python-tui
+  status: active
+  changed:
+    - Migration branch created locally from origin/dev.
+    - Initial migration tracker added.
+  next:
+    - Add human-readable migration document.
+    - Push migration/python-tui when ready.
+    - Spawn or assign M0/M1 workstreams.
+  blockers: []
+  risks:
+    - Existing src/ Python preview still has tests, docs, and Bash bridge references.
+    - Replacing start_wizard.sh changes the primary user entrypoint and needs compatibility decisions.
+  needs_decision: []
+
+open_decisions:
+  - id: tui-framework
+    status: proposed
+    recommendation: Textual
+    decision_needed_by: M1
+    notes: >-
+      Textual is recommended for the long-term TUI because it supports richer
+      screens, keybindings, status panes, logs, and future interactive workflows.
+  - id: branch-upstream
+    status: pending
+    recommendation: Push migration/python-tui and set upstream to origin/migration/python-tui.
+    decision_needed_by: M0
+    notes: >-
+      The local branch was created from origin/dev and initially tracks origin/dev.
+      After first push, the upstream should be the migration integration branch.
+
+branch_rules:
+  integration_branch: migration/python-tui
+  base_branch: dev
+  focused_branch_pattern: agent/<workstream>-<milestone>-<short-topic>
+  pr_target: migration/python-tui
+  merge_back_to_dev_after: M8
+  rules:
+    - All migration implementation PRs target migration/python-tui.
+    - Keep workstreams narrow and file ownership explicit.
+    - Every PR updates this tracker when status, scope, risks, or blockers change.
+    - Every milestone requires acceptance criteria and relevant tests before advancing.
+    - Do not redesign navigation during M1/M2; preserve current structure first.
+
+workstreams:
+  pm:
+    owner: pm-agent
+    status: active
+    branch: migration/python-tui
+    owns:
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Establish M0 tracking, branch rules, milestones, and heartbeat ritual.
+    next_task: Coordinate specialist agents for M1 and M2.
+    blockers: []
+  architecture:
+    owner: architecture-agent
+    status: pending
+    branch: agent/architecture-M1-skeleton
+    owns:
+      - fortifylab/
+      - bin/fortifylab
+      - start_wizard.sh
+      - requirements-python.txt
+    current_task: Define target Python package layout and entrypoint transition.
+    blockers:
+      - M0 not complete
+  navigation:
+    owner: navigation-agent
+    status: pending
+    branch: agent/navigation-M0-audit
+    owns:
+      - docs/development/python-tui-migration.md
+      - .migration/python-tui-plan.yml
+    current_task: Audit current Bash wizard navigation, labels, ordering, hidden paths, and return/quit behavior.
+    next_task: Hand off a parity map to the TUI workstream after M1 skeleton exists.
+    blockers:
+      - M0 not complete
+  tui:
+    owner: tui-agent
+    status: pending
+    branch: agent/tui-M2-navigation
+    owns:
+      - fortifylab/tui/
+      - fortifylab/navigation/
+      - tests/
+    current_task: Implement Python TUI screens and keybindings from the navigation parity map.
+    blockers:
+      - M1 skeleton not merged
+  operations:
+    owner: operations-agent
+    status: pending
+    branch: agent/operations-M3-adapters
+    owns:
+      - fortifylab/operations/
+      - fortifylab/shell_adapters/
+      - tests/
+    current_task: Wrap existing Bash scripts as operation adapters with dry-run and confirmation support.
+    blockers:
+      - M1 skeleton not merged
+  config:
+    owner: config-agent
+    status: pending
+    branch: agent/config-M4-engine
+    owns:
+      - fortifylab/config/
+      - tests/
+    current_task: Port .env parsing, validation, backups, diffs, and derived URL repair.
+    blockers:
+      - M1 skeleton not merged
+  diagnostics:
+    owner: diagnostics-agent
+    status: pending
+    branch: agent/diagnostics-M5-status
+    owns:
+      - fortifylab/status/
+      - fortifylab/diagnostics/
+      - tests/
+    current_task: Port status, doctor, cluster, TLS, and diagnostics bundle behavior.
+    blockers:
+      - M1 skeleton not merged
+  docs:
+    owner: docs-agent
+    status: pending
+    branch: agent/docs-M0-cleanup
+    owns:
+      - README.md
+      - docs/
+    current_task: Identify stale Python preview and web UI migration language.
+    blockers:
+      - Architecture decisions must be recorded before broad doc rewrites.
+
+milestones:
+  - id: M0
+    name: Migration branch and project controls
+    status: in_progress
+    acceptance:
+      - migration/python-tui exists from current dev.
+      - Branch and PR rules are documented.
+      - Machine-readable tracker exists.
+      - Human-readable migration document exists.
+      - Heartbeat ritual is documented.
+      - Initial risks and blockers are captured.
+  - id: M1
+    name: Python app skeleton and entrypoints
+    status: pending
+    acceptance:
+      - Primary Python package skeleton exists.
+      - ./bin/fortifylab --help works from a clone.
+      - ./bin/fortifylab tui launches a placeholder TUI shell.
+      - start_wizard.sh is either a deliberate shim or intentionally removed.
+      - Entrypoint tests pass.
+  - id: M2
+    name: Navigation parity
+    status: pending
+    acceptance:
+      - Python menu tree mirrors the current Bash wizard structure.
+      - Arrow-key selection works.
+      - Jump-to-number selection works.
+      - Return, escape, help, and quit behavior are implemented.
+      - Menu parity tests cover labels and ordering.
+  - id: M3
+    name: Operation adapters
+    status: pending
+    acceptance:
+      - Existing Bash lifecycle scripts are represented in an operation catalog.
+      - Mutating operations show dry-run previews and require confirmation.
+      - Output streams into the TUI/log layer.
+      - Exit codes and failures are surfaced clearly.
+      - Secrets are redacted in logs.
+  - id: M4
+    name: Python-native config editor
+    status: pending
+    acceptance:
+      - .env parser preserves comments and ordering where practical.
+      - Config updates create backups.
+      - Diffs and secret redaction work.
+      - Validation and derived URL repair are Python-native.
+      - Bash config bridge is removed or no longer required.
+  - id: M5
+    name: Status and diagnostics
+    status: pending
+    acceptance:
+      - Prerequisite, license, cluster, pod, registry, and TLS checks are available.
+      - doctor command works without the Bash wizard.
+      - Sanitized diagnostics bundle behavior is covered by tests.
+  - id: M6
+    name: Runbooks and help
+    status: pending
+    acceptance:
+      - Runbook discovery and metadata validation are Python-native.
+      - Help Center topics are reachable from the TUI.
+      - Requirement checks and run previews work.
+  - id: M7
+    name: Bash wizard retirement
+    status: pending
+    acceptance:
+      - start_wizard.sh no longer contains the application wizard.
+      - Deprecated src preview references are removed or intentionally migrated.
+      - Docs and tests reflect the Python TUI as the supported path.
+      - Bash remains only for low-level adapters that are still intentionally retained.
+  - id: M8
+    name: Merge back to dev
+    status: pending
+    acceptance:
+      - All milestone acceptance tests pass.
+      - Migration tracker is complete.
+      - Maintainer docs explain the final architecture.
+      - migration/python-tui is ready for integration into dev.
