@@ -255,6 +255,60 @@ Risks:
 - Implementation must keep previews non-executing and require confirmation for high-risk or destructive runbooks.
 - Default tests must stay free of Kubernetes, Helm, Docker, network, and live lab dependencies.
 
+## M7 Retirement Audit
+
+The M7 audit classifies retirement targets before destructive cleanup. This PR
+records intent only; deletion and behavioral rewrites should happen in focused
+follow-up branches with compatibility tests.
+
+| Target | Classification | M7 guidance |
+| --- | --- | --- |
+| `./bin/fortifylab` | Keep as supported entrypoint | Primary Python CLI/TUI surface. Compatibility tests should continue to cover help, doctor/status checks, config diagnostics, help topics, and TUI checks. |
+| `./start_wizard.sh` | Keep as compatibility shim | Already delegates to `./bin/fortifylab` and preserves `config-diagnostics`. Do not break it during M7 cleanup unless a focused compatibility PR explicitly retires it. |
+| `./start_wizard.sh config-diagnostics` | Keep as compatibility shim | Supported alias for `./bin/fortifylab config diagnostics`; keep until docs/tests decide to remove the legacy alias. |
+| `./start_wizard.sh --help` and generic argument forwarding | Keep as compatibility shim | Current shim forwards to the Python CLI; lock this with compatibility coverage before deleting any old Bash internals. |
+| `./start_wizard.sh --accept-lab-use` | Migrate or document | Still appears in lab-use/user docs, but the shim now forwards to Python. Either implement/verify Python behavior or update docs to the supported acknowledgement path. |
+| `./start_wizard.sh doctor` | Migrate/document | Python `./bin/fortifylab doctor --check` is supported; legacy docs should stop presenting the Bash wizard as the long-term owner. |
+| `./start_wizard.sh apply-flight-plan <id> [--yes]` | Migrate or compatibility-shim | Still documented and implemented only in old wizard internals. Needs a Python CLI decision before `scripts/wizard/operations.sh` removal. |
+| `src/fortifylab/` | Remove after reference cleanup | Deprecated preview package. Active implementation lives in root `fortifylab/`; remaining references are quarantine/dev-doc reference points. |
+| `tests/quarantine/python_preview/` | Remove after harvesting | M1-M6 have active replacements for many concepts. Keep only until cleanup agents verify any unharvested behavior is either obsolete or covered in root-package tests. |
+| `tests/quarantine/bash_wizard_internal/` | Quarantine, then remove/archive intentionally | Reference-only contracts for retired internals. Useful for parity archaeology, but should not block default tests or imply supported Bash module behavior. |
+| `scripts/wizard/app-registry.sh` | Migrate | Registry/url metadata should move behind Python models or config/help registries before deletion. |
+| `scripts/wizard/env.sh` | Migrate | Bootstrap `.env` loading/copy behavior must be represented by Python config/startup behavior before removal. |
+| `scripts/wizard/guided.sh` | Migrate | Guided deployment workflow/state remains the largest parity target and should move into Python workflow screens. |
+| `scripts/wizard/menu.sh` | Remove after docs/tests migrate | Menu structure is already modeled in `fortifylab.navigation`; old Bash menu internals are not a low-level adapter. |
+| `scripts/wizard/operations.sh` | Split: migrate/remove | Config, diagnostics, runbook, help, lifecycle, Flight Plan, credentials, and logs behavior should be replaced by Python surfaces or retained lower-level scripts before deleting this module. |
+| `scripts/wizard/runbooks.sh` | Migrate/remove | Python M6 owns runbook discovery, validation, preview, guarded run, and help lookup. Keep only as reference until docs and any missing CLI/TUI views are reconciled. |
+| `scripts/wizard/scan-demo.sh` | Migrate | First-scan demo remains user-facing behavior; port or intentionally defer it before deleting the Bash module. |
+| `scripts/wizard/setup.sh` | Migrate | Setup/readiness/reset flows remain user-facing behavior; port or intentionally defer before deletion. |
+| `scripts/lib/*.sh` | Keep or migrate case by case | Shared shell libraries are not automatically retired; some are still useful to retained lifecycle scripts and runbooks. |
+| App lifecycle scripts under `apps/**/start.sh`, `apps/**/stop.sh`, `apps/**/destroy.sh` | Keep as low-level adapters | M3 operation catalog references these directly for component and all-lab lifecycle operations. Do not remove in M7 cleanup. |
+| Other app utility scripts, for example `scale_scanners.sh`, `shutdown.sh`, `create-lim-secrets.sh`, dashboard deploy scripts | Document/keep case by case | Not in the current M3 catalog, but may still be operational helpers. Audit separately before deletion. |
+| `scripts/create-certs.sh`, `scripts/create-secrets.sh`, `scripts/install_microk8s.sh` | Keep as low-level adapters | Host/lab bootstrap scripts are outside old wizard menu internals and remain useful execution adapters until Python ports exist. |
+| `scripts/tools/flight-plans.py` and `scripts/lib/flight-plans.sh` | Migrate/keep temporarily | Flight Plan behavior is still documented through legacy wizard commands; preserve until Python CLI/TUI parity exists. |
+| User docs that say Bash remains the production guided wizard | Document/migrate | `README.md`, getting-started, deployment/lifecycle, lab-use, versions/compatibility, phase-3 docs, ADR wording, help contributor docs, and modular Bash architecture need a focused M7 docs sweep. |
+| `docs/development/modular-bash-architecture.md` | Migrate or archive | Currently describes `source_wizard_module` and points new work at `src/fortifylab/`; update to retirement/history language or move out of active guidance. |
+
+Supported compatibility entrypoints to preserve before deletion:
+
+- `./bin/fortifylab --help`
+- `./bin/fortifylab tui --check`
+- `./bin/fortifylab doctor --check`
+- `./bin/fortifylab status --check`
+- `./bin/fortifylab config diagnostics`
+- `./bin/fortifylab help topic <id> --check`
+- `./start_wizard.sh --help`
+- `./start_wizard.sh config-diagnostics`
+- generic `./start_wizard.sh <python-cli-args>` forwarding, unless a focused compatibility PR narrows it deliberately
+
+Implementation agents can proceed in this order:
+
+1. Compatibility/test agent: add M7 tests for the supported entrypoints above and stale legacy commands that need an explicit decision.
+2. Docs agent: update user-facing docs so the Python CLI/TUI is the supported path and legacy Bash wizard language is historical or compatibility-only.
+3. Deprecated source cleanup agent: remove `src/fortifylab/` after references/tests are migrated or intentionally retired.
+4. Bash internals cleanup agent: remove or archive `tests/quarantine/*` and `scripts/wizard/*` only after Python parity or explicit deferral exists for guided setup, Flight Plans, scan demo, and lab-use acknowledgement.
+5. Operations agent: keep M3 adapter scripts under `apps/**` stable and only expand Python operation coverage with clone-safe previews/tests.
+
 ## Decision Log
 
 | Date | Decision | Status |
@@ -981,3 +1035,34 @@ Risks:
 - Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
 - Keep `start_wizard.sh` as a minimal compatibility shim unless docs and tests explicitly retire it.
 - Default tests must remain clone-safe and avoid live Kubernetes, Helm, Docker, or network dependencies.
+
+### 2026-08-25
+
+Milestone: M7
+
+Workstream: Retirement Audit
+
+Branch: `agent/retirement-M7-audit`
+
+Status: active
+
+Changed:
+
+- Audited deprecated `src/` preview code, `tests/quarantine/python_preview`, `tests/quarantine/bash_wizard_internal`, old Bash wizard internals, compatibility entrypoints, and stale docs.
+- Classified retirement targets as remove, migrate, keep as low-level adapter, keep as compatibility shim, quarantine, or document before deletion.
+- Confirmed M3 operation catalog still depends on app lifecycle scripts under `apps/**/start.sh`, `apps/**/stop.sh`, and `apps/**/destroy.sh`.
+- Confirmed `./start_wizard.sh` is already a minimal shim that delegates to `./bin/fortifylab` and preserves `config-diagnostics`.
+
+Next:
+
+- Open this audit PR against `migration/python-tui`.
+- Spawn a compatibility/test agent to lock preserved entrypoints before cleanup.
+- Spawn focused docs, deprecated source cleanup, and Bash internals cleanup agents.
+
+Blockers: none.
+
+Risks:
+
+- Do not remove app lifecycle scripts used by `fortifylab.operations.catalog`.
+- Do not break `./bin/fortifylab`, current `./start_wizard.sh` forwarding, or `./start_wizard.sh config-diagnostics`.
+- User docs still contain Bash wizard production-path language and need a focused M7 docs migration.

@@ -31,17 +31,19 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M7
-  workstream: entrypoint-compatibility
-  branch: agent/entrypoints-M7-compatibility
+  workstream: retirement-M7-audit
+  branch: agent/retirement-M7-audit
   status: active
   changed:
-    - Defined M7 start_wizard.sh compatibility behavior as a minimal shim over ./bin/fortifylab.
-    - Added clone-safe tests for --help, tui --check, config-diagnostics, doctor, status, and help topic compatibility.
-    - Preserved scripts/wizard and deprecated src preview files for the separate M7 cleanup decisions.
+    - Entry compatibility PR #470 landed before the retirement audit integration.
+    - Audited deprecated src preview code, quarantined preview tests, Bash wizard internals, compatibility shims, and stale docs.
+    - Classified M7 retirement targets before any destructive deletion.
+    - Confirmed M3 operation catalog still depends on app lifecycle scripts under apps/, not scripts/wizard/ menu internals.
+    - Confirmed start_wizard.sh is a minimal compatibility shim that delegates to ./bin/fortifylab.
   next:
-    - Run M7 entrypoint compatibility tests and the default unittest suite.
-    - Open PR against migration/python-tui.
-    - Ask PM whether legacy doctor/status/help topic shims should remain after M8 or only through migration.
+    - Merge the audit PR into migration/python-tui.
+    - Spawn M7 cleanup agents for deprecated src removal, Bash wizard internal quarantine/removal, and docs migration.
+    - Keep destructive removals out of this audit PR.
   blockers: []
   risks:
     - Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
@@ -270,6 +272,28 @@ workstreams:
     next_task: Watch implementation PR and keep any new M6 regression coverage clone-safe.
     blockers: []
     last_heartbeat: 2026-08-25
+  retirement_audit:
+    owner: retirement-audit-agent
+    status: active
+    branch: agent/retirement-M7-audit
+    owns:
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Audit M7 retirement targets and classify safe cleanup boundaries before deletion.
+    changed:
+      - Deprecated src preview package classified for removal after remaining reference-only tests/docs are migrated or retired.
+      - tests/quarantine/python_preview classified as retire/remove after harvested concepts are represented by M1-M6 active tests.
+      - tests/quarantine/bash_wizard_internal classified as quarantine/reference until compatibility entrypoints are locked, then remove or archive intentionally.
+      - scripts/wizard/*.sh classified as migrate or remove, not low-level adapters, once Python guided/config/runbook/flight-plan parity is explicit.
+      - M3 adapter-protected lifecycle scripts identified under apps/**/start.sh, stop.sh, and destroy.sh.
+      - start_wizard.sh classified as keep as compatibility shim.
+    next_task: Open audit PR, then hand off to compatibility/test, cleanup, and docs agents.
+    blockers: []
+    risks:
+      - Do not delete app lifecycle scripts referenced by fortifylab.operations.catalog.
+      - Preserve ./bin/fortifylab, ./start_wizard.sh, and ./start_wizard.sh config-diagnostics until compatibility tests say otherwise.
+      - Update stale docs before users are told the Bash wizard remains the production guided app.
+    last_heartbeat: 2026-08-25
 
 milestones:
   - id: M0
@@ -436,6 +460,10 @@ milestones:
       - Deprecated src preview references are removed or intentionally migrated.
       - Docs and tests reflect the Python TUI as the supported path.
       - Bash remains only for low-level adapters that are still intentionally retained.
+    notes:
+      - Audit branch agent/retirement-M7-audit found no destructive deletion should happen before compatibility entrypoints are locked.
+      - M3 operation catalog keeps app lifecycle scripts as low-level adapters; scripts/wizard internals are not M3 catalog dependencies.
+      - start_wizard.sh should remain a minimal compatibility shim for M7 unless a focused compatibility PR retires it explicitly.
   - id: M8
     name: Merge back to dev
     status: pending
