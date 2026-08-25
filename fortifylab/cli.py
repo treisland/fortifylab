@@ -8,7 +8,9 @@ import sys
 from collections.abc import Sequence
 
 from .config.cli import diagnostics_command, repair_derived_command, validate_command
+from .diagnostics import doctor_command
 from .paths import repo_root
+from .status import status_command
 from .tui.app import run_placeholder_tui
 from .version import __version__
 
@@ -38,6 +40,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="render deterministic placeholder output and exit without an interactive terminal",
     )
+
+    doctor = subparsers.add_parser(
+        "doctor",
+        help="run read-only Fortify Lab health diagnostics",
+        description="Run clone-safe read-only Fortify Lab diagnostics.",
+    )
+    doctor.add_argument("--check", action="store_true", help="run deterministic noninteractive checks")
+    doctor.add_argument("--strict", action="store_true", help="return nonzero when warnings or failures are present")
+    doctor.add_argument("--scenario", default="ok", choices=("ok", "warning"), help=argparse.SUPPRESS)
+    _add_env_file_argument(doctor)
+
+    status = subparsers.add_parser(
+        "status",
+        help="print read-only Fortify Lab status summary",
+        description="Print a clone-safe Fortify Lab status summary.",
+    )
+    status.add_argument("--check", action="store_true", help="run deterministic noninteractive status checks")
 
     config = subparsers.add_parser(
         "config",
@@ -95,6 +114,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "tui":
         smoke_test = bool(args.smoke_test or os.environ.get("FORTIFYLAB_TUI_TEST_MODE"))
         return run_placeholder_tui(smoke_test=smoke_test)
+
+    if args.command == "doctor":
+        return doctor_command(check=bool(args.check), strict=bool(args.strict), scenario=str(args.scenario))
+
+    if args.command == "status":
+        return status_command(check=bool(args.check))
 
     if args.command == "config":
         if args.config_command is None:
