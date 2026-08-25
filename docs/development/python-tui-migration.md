@@ -879,3 +879,34 @@ Risks:
 
 - Run execution remains explicit and environment-dependent; default tests must not execute live lab scripts or probe Kubernetes, Helm, Docker, network, or lab state.
 - Bash wizard retirement and deprecated `src/` cleanup remain M7 work.
+
+
+### 2026-08-25
+
+Milestone: M6
+
+Workstream: Docs Help/Runbooks
+
+Branch: `agent/docs-M6-help-runbooks`
+
+Status: active
+
+Changed:
+
+- Added Python CLI preview examples for `doctor --check`, `status --check`, and `help topic <id> --check`.
+- Documented that Bash remains the runbook script format while Python owns M6 discovery, validation, preview, and guarded execution contracts.
+- Updated Help Center and contributor guidance so the Python help registry is maintained alongside Bash compatibility mappings during migration.
+- Added read-only Python diagnostics/status commands to troubleshooting and diagnostics guidance without replacing the sanitized bundle workflow.
+
+Next:
+
+- Push `agent/docs-M6-help-runbooks` and open a PR against `migration/python-tui`.
+- Run documentation and default test gates.
+- Ask PM whether M6 can close after the docs PR lands.
+
+Blockers: none.
+
+Risks:
+
+- Do not replace `./start_wizard.sh` as the production guided deployment entrypoint until M7.
+- Do not document a runbook CLI command until one exists; M6 documents the Python API/TUI migration contract and implemented help topic CLI only.

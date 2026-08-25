@@ -1,8 +1,9 @@
 # Fortify Lab Help Center
 
-These offline topics support the wizard's Help and Fortify Knowledge Center.
-They explain the lab architecture without querying or changing the host,
-Kubernetes cluster, credentials, or Fortify applications.
+These offline topics support the wizard's Help and Fortify Knowledge Center and
+the Python CLI/TUI migration's `fortifylab.help` registry. They explain the lab
+architecture without querying or changing the host, Kubernetes cluster,
+credentials, or Fortify applications.
 
 Start with:
 
@@ -30,10 +31,12 @@ aligned with `start_wizard.sh`, `.env.example`, and the corresponding tests.
 ## Stable topic IDs
 
 Wizard steps and troubleshooting failures refer to stable, path-like topic IDs,
-such as `guided/mysql` and `troubleshooting/pending-pods`. The registry in
-`scripts/lib/help.sh` resolves each ID to both a committed offline text file and
-an online MkDocs route. Resolution only formats known strings: it does not query
-MicroK8s, access credentials, inspect secret input paths, or make network calls.
+such as `guided/mysql` and `troubleshooting/pending-pods`. During the migration,
+`scripts/lib/help.sh` remains the Bash wizard registry while
+`fortifylab.help.HelpRegistry` and the catalog in `fortifylab.runbooks` expose
+the Python-native lookup contract. Resolution only formats known strings: it
+does not query MicroK8s, access credentials, inspect secret input paths, or make
+network calls.
 
 Set `FORTIFY_DOCS_BASE_URL` to the root of a trusted documentation deployment to
 change every online link in one place. The value must begin with `https://` or
