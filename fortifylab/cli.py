@@ -7,6 +7,8 @@ import os
 import sys
 from collections.abc import Sequence
 
+from .config.cli import diagnostics_command, repair_derived_command, validate_command
+from .paths import repo_root
 from .tui.app import run_placeholder_tui
 from .version import __version__
 
@@ -37,7 +39,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="render deterministic placeholder output and exit without an interactive terminal",
     )
 
+    config = subparsers.add_parser(
+        "config",
+        help="inspect and repair Fortify Lab .env configuration",
+        description="Validate, inspect, and safely repair Fortify Lab .env configuration.",
+    )
+    config_subparsers = config.add_subparsers(dest="config_command", metavar="CONFIG_COMMAND")
+
+    validate = config_subparsers.add_parser(
+        "validate",
+        help="validate a Fortify Lab .env file",
+        description="Validate a Fortify Lab .env file and print redacted findings.",
+    )
+    _add_env_file_argument(validate)
+
+    diagnostics = config_subparsers.add_parser(
+        "diagnostics",
+        help="print a redacted configuration diagnostics summary",
+        description="Print read-only Fortify Lab domain, URL, section, and validation diagnostics.",
+    )
+    _add_env_file_argument(diagnostics)
+
+    repair = config_subparsers.add_parser(
+        "repair-derived",
+        help="repair DOMAIN-derived host and URL values",
+        description="Repair DOMAIN-derived host and URL values with dry-run and guarded write modes.",
+    )
+    _add_env_file_argument(repair)
+    repair.add_argument("--dry-run", action="store_true", help="print the redacted diff without writing changes")
+    repair.add_argument("--yes", action="store_true", help="apply the repair without an interactive confirmation prompt")
+
     return parser
+
+
+def _add_env_file_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help="path to the Fortify Lab .env file; defaults to the repo root .env",
+    )
+
+
+def _env_file_path(value: str | None) -> str:
+    return value or str(repo_root() / ".env")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -51,6 +95,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "tui":
         smoke_test = bool(args.smoke_test or os.environ.get("FORTIFYLAB_TUI_TEST_MODE"))
         return run_placeholder_tui(smoke_test=smoke_test)
+
+    if args.command == "config":
+        if args.config_command is None:
+            parser.error("config command required")
+        env_file = _env_file_path(args.env_file)
+        if args.config_command == "validate":
+            return validate_command(env_file)
+        if args.config_command == "diagnostics":
+            return diagnostics_command(env_file)
+        if args.config_command == "repair-derived":
+            return repair_derived_command(env_file, dry_run=bool(args.dry_run), yes=bool(args.yes))
 
     parser.error(f"unsupported command: {args.command}")
     return 2

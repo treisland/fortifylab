@@ -645,3 +645,34 @@ Risks:
 
 - This branch does not replace the full interactive TUI config editor yet.
 - Validation is intentionally schema-shaped and conservative; future UI work should decide how to display and recover from each `ConfigIssue`.
+
+### 2026-08-25
+
+Milestone: M4
+
+Workstream: Config CLI Bridge
+
+Branch: `agent/config-M4-cli-bridge`
+
+Status: active
+
+Changed:
+
+- Added a supported `./bin/fortifylab config` command group for Python-native config operations.
+- Added `validate`, `diagnostics`, and `repair-derived` command paths backed by the merged root-package config engine.
+- Added a `./start_wizard.sh config-diagnostics` compatibility alias that delegates to `./bin/fortifylab config diagnostics`.
+- Added temp-file-only tests for redacted validation findings, read-only diagnostics, dry-run repairs, noninteractive write refusal, `--yes` backups, rollback markers, and the compatibility alias.
+
+Next:
+
+- Run full test discovery and requested command-line verification.
+- Push `agent/config-M4-cli-bridge` and open a PR against `migration/python-tui`.
+- Watch CI and report merge readiness to the PM.
+
+Blockers: none.
+
+Risks:
+
+- This branch intentionally does not build or replace the full-screen TUI config editor.
+- Deprecated `src/` config helpers remain in-tree for later planned cleanup; active CLI paths now use the root `fortifylab.config` engine.
+

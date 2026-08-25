@@ -31,23 +31,20 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M4
-  workstream: test-M4-config-engine
-  branch: agent/test-M4-config-engine
+  workstream: config-M4-cli-bridge
+  branch: agent/config-M4-cli-bridge
   status: active
   changed:
-    - M4 config engine contract tests started on a focused branch.
-    - Tests cover parser fixtures, writer preservation, backup/rollback, diff redaction, validation, and derived URL repair.
-    - Tests use only in-memory documents and temp files, with no live .env, Kubernetes, Helm, Docker, network, or lab-state access.
-    - Engine-dependent tests skip until the implementation API lands.
+    - Added Python config CLI bridge work on a focused branch after the M4 engine merge.
+    - Exposed planned commands for validate, diagnostics, and repair-derived through ./bin/fortifylab config.
+    - Added temp-file-only bridge tests for redacted validation, diagnostics, dry-run repair, guarded writes, backups, rollback marker creation, and start_wizard.sh config-diagnostics compatibility.
   next:
-    - Open PR against migration/python-tui.
-    - Watch CI and coordinate with the Config Implementation branch.
-    - Remove skips naturally once agent/config-M4-engine exposes the expected API.
-    - Start Config CLI/TUI Bridge after the engine contract is visible.
-    - Start Docs M4 config surface after implementation shape settles.
+    - Run full discovery and exact requested CLI checks.
+    - Push the focused branch and open a PR against migration/python-tui.
+    - Watch CI and report merge readiness to the PM.
   blockers: []
   risks:
-    - API names must stay coordinated with the implementation agent to avoid stale contract skips.
+    - This bridge intentionally does not replace the full-screen TUI config editor.
 
   needs_decision: []
 
@@ -167,22 +164,25 @@ workstreams:
     last_heartbeat: 2026-08-25
   config:
     owner: config-agent
-    status: complete
-    branch: agent/config-M4-schema-design
+    status: active
+    branch: agent/config-M4-cli-bridge
     owns:
       - fortifylab/config/
+      - fortifylab/cli.py
+      - start_wizard.sh
       - tests/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Completed read-only M4 .env schema and parser/writer contracts without replacing Bash behavior.
-    result: M4 Config Schema Design PR #457 merged into migration/python-tui.
+    current_task: Expose the merged M4 config engine through supported CLI paths.
+    result: M4 schema design PR #457 and config engine PR #460 merged into migration/python-tui.
     changed:
       - Audited active Bash .env bootstrap, editor, validation, repair, backup, and rollback behavior.
-      - Identified deprecated src/fortifylab/config bridge as reference-only code to remove or replace intentionally in M7.
-      - Added root fortifylab.config read-only schema metadata and parser/writer capability contract.
+      - Added root fortifylab.config schema metadata and parser/writer capability contract.
+      - Added Python-native config engine with parser, validation, repair, backup, rollback marker, and redacted diffs.
+      - Started CLI bridge for validate, diagnostics, and repair-derived commands.
     blockers: []
     risks:
-      - Config editor replacement must wait for M3 operation boundaries and explicit M4 implementation work.
+      - Full-screen TUI config editor remains future work and should not be mixed into the CLI bridge PR.
     last_heartbeat: 2026-08-25
   diagnostics:
     owner: diagnostics-agent
@@ -309,21 +309,22 @@ milestones:
       - Validation and derived URL repair are Python-native.
       - Bash config bridge is removed or no longer required.
     active_work:
-      branch: agent/config-M4-engine
-      current_task: Implement Python-native local .env parser, writer, validator, backup, diff, and derived repair engine.
+      branch: agent/config-M4-cli-bridge
+      current_task: Expose Python-native config validation, diagnostics, and derived repair through supported CLI paths.
       files:
-        - fortifylab/config/envfile.py
-        - fortifylab/config/__init__.py
-        - tests/test_m4_config_engine.py
+        - fortifylab/config/cli.py
+        - fortifylab/cli.py
+        - start_wizard.sh
+        - tests/test_m4_config_cli_bridge.py
       evidence:
         - python3 -m compileall -q fortifylab passed.
-        - python3 -m unittest tests.test_m4_config_engine -v passed with 6 tests.
-        - python3 -m unittest discover -s tests -v passed with 118 tests.
+        - python3 -m unittest tests.test_m4_config_cli_bridge -v passed with 7 tests.
       guardrails:
         - Tests use temporary files only.
         - No Kubernetes, Helm, Docker, network, or real lab state is touched.
+        - Full-screen TUI config editor is out of scope for this branch.
       notes:
-        - M4 engine is local-file only and not wired into the full interactive TUI editor yet.
+        - M4 engine is local-file only and now has an explicit CLI bridge for operator-safe inspection and repair.
   - id: M5
     name: Status and diagnostics
     status: pending
