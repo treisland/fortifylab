@@ -195,13 +195,15 @@ Architecture intentionally adopts the behavior.
 | 2026-08-25 | Preserve current navigation structure before improving interaction design. | Accepted |
 | 2026-08-25 | Treat current `src/` as deprecated preview code to replace intentionally. | Accepted |
 | 2026-08-25 | Keep Bash deployment scripts as temporary operation adapters in early milestones. | Accepted |
-| 2026-08-25 | Use Textual as the recommended TUI framework unless M1 discovers a blocking constraint. | Proposed |
+| 2026-08-25 | Use Textual as the interactive TUI framework starting in M2. M1 remains standard-library only for clone-and-run entrypoint checks. | Accepted |
+| 2026-08-25 | `./bin/fortifylab` is the primary Python application entrypoint. `./start_wizard.sh` is a compatibility shim during migration. | Accepted |
+| 2026-08-25 | The new root-level `fortifylab/` package is the intentional migration target. Deprecated preview code under `src/` remains in-tree until cleanup is handled deliberately. | Accepted |
 
 ## Open Decisions
 
 | Decision | Recommendation | Needed By |
 | --- | --- | --- |
-| TUI framework | Textual | M1 |
+| TUI framework | Textual | M1 - accepted |
 | Branch upstream | Push `migration/python-tui` and track `origin/migration/python-tui` | M0 - accepted |
 
 ## Heartbeat Log
@@ -235,6 +237,36 @@ Risks:
 
 Milestone: M1
 
+Workstream: Architecture
+
+Branch: `agent/architecture-M1-skeleton`
+
+Status: complete
+
+Changed:
+
+- Added the intentional root-level Python package skeleton at `fortifylab/`.
+- Pointed `./bin/fortifylab` at the new package instead of deprecated `src/`.
+- Converted `./start_wizard.sh` into a deliberate compatibility shim.
+- Accepted Textual as the M2 TUI framework while keeping M1 standard-library only.
+- Defined the noninteractive TUI test contract: `./bin/fortifylab tui --smoke-test`, `./bin/fortifylab tui --check`, or `FORTIFYLAB_TUI_TEST_MODE=1`.
+- Merged Architecture PR #451 into `migration/python-tui`.
+
+Next:
+
+- Update Test PR #450 against the merged skeleton.
+
+Blockers: none.
+
+Risks:
+
+- Deprecated `src/` preview code remains in-tree until references, tests, and docs are migrated or removed intentionally.
+- Legacy Bash wizard subcommands are not reimplemented in M1.
+
+### 2026-08-25
+
+Milestone: M1
+
 Workstream: Tests
 
 Branch: `agent/test-M1-entrypoints`
@@ -243,23 +275,22 @@ Status: active
 
 Changed:
 
+- Merged the Architecture skeleton into the Test branch.
 - Added clone-safe M1 entrypoint acceptance tests.
-- Defined the noninteractive TUI launch contract as
-  `./bin/fortifylab tui --smoke-test`.
+- Defined the noninteractive TUI launch contract as `./bin/fortifylab tui --smoke-test`.
 - Quarantined deprecated Python preview tests outside default discovery.
-- Documented preview test classification in
-  `tests/quarantine/python_preview/README.md`.
+- Quarantined retired Bash wizard internal tests outside default discovery.
+- Documented quarantine rationale in `tests/quarantine/python_preview/README.md` and `tests/quarantine/bash_wizard_internal/README.md`.
 
 Next:
 
-- Coordinate with Architecture so the skeleton satisfies the entrypoint tests.
-- Re-run M1 tests after the new package and `start_wizard.sh` decision land.
+- Re-run M1 tests and default unittest discovery against the merged skeleton.
+- Push the updated Test PR #450.
+- Request PM review for the M1 test gate.
 
-Blockers:
-
-- Architecture skeleton is not merged yet.
+Blockers: none.
 
 Risks:
 
-- Legacy Bash wizard tests may still assert old `start_wizard.sh` internals
-  until the Architecture branch replaces or updates that surface.
+- Behavior-level coverage from quarantined tests must be reintroduced milestone by milestone as supported Python CLI/TUI behavior lands.
+
