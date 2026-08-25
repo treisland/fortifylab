@@ -507,7 +507,7 @@ Workstream: Config Design
 
 Branch: `agent/config-M4-schema-design`
 
-Status: active
+Status: complete
 
 Changed:
 
@@ -516,6 +516,7 @@ Changed:
 - Confirmed active config editor behavior lives in `scripts/wizard/operations.sh`, including staged edits, preview, apply-with-backup, rollback, selected backup restore, raw editor backup, domain/URL repair, and validation.
 - Identified old preview bridge references under `src/fortifylab/config` for parser, store, repair, and CLI behavior; these remain reference-only and should be removed or replaced deliberately later.
 - Added a root-package read-only config schema contract under `fortifylab/config/` for future M4 work.
+- Merged M4 Config Schema Design PR #457 into `migration/python-tui`.
 
 Parser/writer contract proposed for M4:
 
@@ -539,3 +540,37 @@ Risks:
 
 - This branch intentionally does not replace the config editor, does not wire config writes into the CLI/TUI, and does not delete `src/`.
 - M4 implementation should wait for M3 operation boundaries before config mutation is wired into operator flows.
+
+### 2026-08-25
+
+Milestone: M4
+
+Workstream: PM
+
+Branch: `agent/pm-M3-closeout-open-M4`
+
+Status: active
+
+Changed:
+
+- PM gate review accepted M3 as complete.
+- Updated the tracker to set `current_milestone: M4`.
+- Recorded Operations Adapter PR #458 as M3 completion evidence.
+- Recorded M4 Config Schema Design PR #457 as completed prep.
+- Closed Helmholtz's standalone test branch as superseded by active tests in PR #458.
+- Opened M4 config engine work as the next milestone.
+
+Next:
+
+- Merge this closeout branch into `migration/python-tui`.
+- Spawn Config Implementation on `agent/config-M4-engine`.
+- Spawn M4 Test on `agent/test-M4-config-engine`.
+- Start Config CLI/TUI Bridge after the engine contract is visible.
+- Start Docs M4 config surface after the implementation shape settles.
+
+Blockers: none.
+
+Risks:
+
+- M4 must preserve comments/order and create backups before mutation.
+- Config writes must stay local-file only in tests and avoid real cluster/network dependencies.
