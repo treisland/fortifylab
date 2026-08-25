@@ -30,7 +30,7 @@ HELP_TOPIC_ROUTE=(
     index.html fortify/architecture-and-flows/ fortify/ssc/ fortify/scancentral-sast/
     fortify/scancentral-dast/ fortify/lim/ fortify/mysql/ fortify/postgresql/
     fortify/kubernetes-dashboard/ fortify/ fortify/ operations/networking-and-tls/ safety/
-    getting-started/ getting-started/#1-clone-and-prepare-configuration getting-started/#2-start-the-wizard
+    getting-started/ getting-started/#1-clone-and-prepare-configuration getting-started/#2-start-fortify-lab
     operations/networking-and-tls/ fortify/kubernetes-dashboard/ operations/secrets-and-licenses/
     fortify/mysql/ fortify/postgresql/ fortify/ssc/ fortify/lim/ fortify/scancentral-sast/
     fortify/scancentral-dast/ operations/deployment-and-lifecycle/

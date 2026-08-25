@@ -3,8 +3,8 @@
 A scripted Fortify deployment for evaluation, training, and demos:
 **SSC**, **ScanCentral SAST**, **ScanCentral DAST**, **LIM**, plus the
 Kubernetes Dashboard, all running on [microk8s](https://microk8s.io/) with
-mkcert-issued TLS. Every step driven by an interactive wizard or a single
-"deploy from scratch" command.
+mkcert-issued TLS. Fortify Lab is now a Python CLI/TUI-first operator tool,
+with retained Bash scripts only at the operation-adapter and bootstrap edges.
 
 > Not a production deployment guide — opinionated defaults, single-node
 > cluster, NFS PVCs. Intended for lab and evaluation use.
@@ -19,7 +19,7 @@ reference (getting started, troubleshooting, architecture, operations).
 - [What you get](#what-you-get)
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
-- [Using the wizard](#using-the-wizard)
+- [Using Fortify Lab](#using-fortify-lab)
 - [DNS and TLS](#dns-and-tls)
 - [Manual configuration after deploy](#manual-configuration-after-deploy)
 - [Repo layout](#repo-layout)
@@ -32,10 +32,11 @@ reference (getting started, troubleshooting, architecture, operations).
 ## Scope
 
 This repository intentionally has one job: guide an operator through creating
-and running a Fortify lab with the interactive wizard. Kubernetes Dashboard
-provides cluster monitoring. The repository does not include a second Web UI,
-an autonomous SDLC supervisor, Telegram/GitHub automation, or an ASPM. Those
-are separate products with different users and security boundaries.
+and running a Fortify lab from the terminal. The supported application
+entrypoint is the Python CLI/TUI at `./bin/fortifylab`. Kubernetes Dashboard
+provides cluster monitoring. The repository does not include a Fortify Lab web
+UI, an autonomous SDLC supervisor, Telegram/GitHub automation, or an ASPM.
+Those are separate products with different users and security boundaries.
 
 ## What you get
 
@@ -67,8 +68,8 @@ compatibility](docs/operations/versions-and-compatibility.md).
 - For DAST: ScanCentral DAST and WebInspect licenses loaded into LIM before
   DAST scans can run successfully
 
-MicroK8s itself does not need to be pre-installed — the wizard's guided setup
-installs it (and other host prerequisites) for you; see
+MicroK8s itself does not need to be pre-installed. Fortify Lab's guided setup
+installs it and other host prerequisites; see
 [`scripts/install_microk8s.sh`](scripts/install_microk8s.sh) if you'd rather
 run that step by hand first.
 
@@ -80,16 +81,18 @@ cd fortifylab
 cp .env.example .env
 # Edit .env: at minimum set DOMAIN, DEFAULT_PASS, FORTIFY_LICENSE_FILE,
 # and check image versions. The repository-local license default still works.
-./start_wizard.sh
+./bin/fortifylab --help
+./bin/fortifylab doctor --check
+./bin/fortifylab status --check
+./bin/fortifylab tui --check
 ```
 
-The first launch shows a Fortify Lab banner and a mandatory **LAB / DEMO USE
-ONLY** notice — type `LAB` to acknowledge it. That limitation applies to this
-deployment toolkit, not to the production capabilities of Fortify products;
-see [`docs/lab-use.md`](docs/lab-use.md). From there, the welcome screen
-recommends **Guided deployment** for first-time use: a numbered,
-explanatory walkthrough that installs host prerequisites, then TLS, secrets,
-databases, and each Fortify component in dependency order.
+`./bin/fortifylab` is the supported application surface for operator checks,
+configuration diagnostics, offline help, runbook contracts, and the emerging
+TUI. The first guided deployment experience continues to carry the **LAB /
+DEMO USE ONLY** boundary described in [`docs/lab-use.md`](docs/lab-use.md);
+that limitation applies to this deployment toolkit, not to the production
+capabilities of Fortify products.
 
 **What to expect:** allow roughly 15–20 minutes for Express deployment once
 prerequisites and images are already available, and 30–60 minutes for a
@@ -99,28 +102,41 @@ won't look stuck. Full walkthrough, including expected screen-by-screen
 output: [Getting started](docs/getting-started/index.md).
 
 If a step fails, fix the reported dependency and retry the same step, or quit
-safely and come back later — choose **Resume or repair** and the wizard picks
-up at the first incomplete step. It never deletes data on its own.
+safely and come back later. Resume/repair picks up at the first incomplete
+step and never deletes data on its own.
 
-### Python CLI preview
+### Supported entrypoints
 
-A Python CLI/TUI migration is in progress alongside the Bash wizard. Bash remains the production guided wizard and compatibility entrypoint; the
-preview commands run from a clone with the standard library only:
+The Python CLI/TUI is the supported architecture:
 
 ```bash
 ./bin/fortifylab --help
 ./bin/fortifylab doctor --check
 ./bin/fortifylab status --check
 ./bin/fortifylab help topic ssc --check
+./bin/fortifylab config diagnostics
+./bin/fortifylab tui --check
 ```
 
-The preview also includes Python-native runbook discovery, validation,
-preview, and guarded execution APIs in `fortifylab.runbooks`; the Bash wizard
-remains the production path for guided deployment until the retirement
-milestone lands.
+`./start_wizard.sh` remains only as a compatibility shim through M8 for these
+legacy aliases:
 
-Install `requirements-python.txt` only if you're developing or previewing
-those CLI/TUI slices (kept separate from `requirements-docs.txt`, which is
+```bash
+./start_wizard.sh --help
+./start_wizard.sh doctor          # delegates to ./bin/fortifylab doctor --check
+./start_wizard.sh status          # delegates to ./bin/fortifylab status --check
+./start_wizard.sh help topic ssc  # delegates to ./bin/fortifylab help topic ssc --check
+./start_wizard.sh config-diagnostics
+```
+
+Do not add new interactive application behavior to `start_wizard.sh` or
+`scripts/wizard/`; the retired Bash wizard internals have been removed. Retained
+Bash scripts are low-level adapters for host setup, certificates, secrets, and
+component lifecycle actions that the Python operation catalog can preview and
+call deliberately.
+
+Install `requirements-python.txt` only if you're developing the CLI/TUI slices
+(kept separate from `requirements-docs.txt`, which is
 for building the documentation site):
 
 ```bash
@@ -129,26 +145,22 @@ python3 -m venv .venv
 python -m pip install -r requirements-python.txt
 ```
 
-## Using the wizard
+## Using Fortify Lab
 
-The main menu opens on a small **Essentials** screen (Deploy, Lab lifecycle
-controls, Configuration editor, Logs, and a first-scan one-click demo once
-SSC and ScanCentral SAST are up), a **`?`** hotkey straight to the Help
-Center from anywhere on that screen, and **m. More tools** for everything
-else, organized by task: Deploy, Diagnostics and advanced, Operations, and
-Learn (an offline Help Center with guides to every component, answerable even
-when the cluster is down).
+The CLI/TUI direction is task-oriented: Deploy / Resume, Applications,
+Configuration, Runbooks, Logs, Diagnostics, Certificates & Trust, Tools, and
+Help. Current clone-safe commands include:
 
-- **Guided deployment (recommended)** — a numbered, explanatory walkthrough
-  with a deployment-profile picker (SSC only, SAST, DAST, Full lab, sample
-  apps, or Custom).
-- **Express deployment** — the same underlying operations, run unattended
-  back-to-back.
-- **Resume or repair** — after a failure or safe quit, picks up at the first
-  incomplete step; never persists passwords or tokens.
-- **Deployment Versions and Flight Plan** — pick, preview, upgrade, or
-  compare component-version bundles; see [Versions and
-  compatibility](docs/operations/versions-and-compatibility.md).
+- `./bin/fortifylab doctor --check` for read-only health checks.
+- `./bin/fortifylab status --check` for a non-mutating status summary.
+- `./bin/fortifylab config diagnostics` for `.env` host and URL wiring.
+- `./bin/fortifylab help topic <id> --check` for offline help topics.
+- `./bin/fortifylab tui --check` for the deterministic TUI smoke contract.
+
+Guided deployment, express deployment, resume/repair, and lifecycle controls
+are being carried into Python while preserving the existing operation behavior.
+The retained Bash scripts under `scripts/` and `apps/**/{start,stop,destroy}.sh`
+remain implementation adapters, not the supported interactive application flow.
 
 Full menu tour, screen-by-screen: [Getting started](docs/getting-started/index.md).
 Stuck on something specific: [Troubleshooting](docs/troubleshooting/index.md).
@@ -193,8 +205,10 @@ scan handoff: [Getting started](docs/getting-started/index.md).
 
 ```
 .env.example              Template — copy to .env, edit DOMAIN/passwords/versions.
-start_wizard.sh           Interactive launcher.
-setup.sh                  One-shot bootstrap (delegates to the wizard).
+bin/fortifylab            Primary Python CLI/TUI entrypoint.
+fortifylab/               Supported Python application package.
+start_wizard.sh           M7/M8 compatibility shim for supported legacy aliases.
+setup.sh                  Convenience launcher that currently delegates through the shim.
 scripts/
   create-certs.sh         mkcert root + leaf, JKS keystore, JVM truststore.
   create-secrets.sh       k8s Secrets: explicit per-key, no folder dump.
@@ -217,7 +231,7 @@ tests/                    Python test suite (unittest); run before opening a PR.
 
 ## Conventions and gotchas
 
-- **Run as your normal user**, never `sudo ./start_wizard.sh`. mkcert is
+- **Run as your normal user**, never `sudo ./bin/fortifylab`. mkcert is
   per-user; running as root would create a different CA at `/root/...` and
   silently rotate every cert. `create-certs.sh` and `create-secrets.sh`
   refuse to start under sudo.
@@ -248,8 +262,9 @@ tests/                    Python test suite (unittest); run before opening a PR.
 ## Cleanup
 
 ```bash
-./start_wizard.sh
-# Apps → each app → Destroy
+./bin/fortifylab --help
+# Use the Python CLI/TUI lifecycle surface or the retained low-level adapter
+# scripts intentionally for each component.
 # Then on the host:
 microk8s helm -n fortify list                     # confirm none remain
 microk8s kubectl delete namespace fortify         # nuke everything else
@@ -270,9 +285,9 @@ mappings, review checklist).
 
 For deployment errors, start with the read-only Python checks
 `./bin/fortifylab doctor --check` and `./bin/fortifylab status --check`. When
-evidence must be shared, use **Operational guidance → Create sanitized
-diagnostics bundle**, inspect the allow-listed archive locally, and include only
-that minimum evidence plus the failed wizard step. Do not attach raw logs,
+evidence must be shared, create a sanitized diagnostics bundle, inspect the
+allow-listed archive locally, and include only that minimum evidence plus the
+failed step. Do not attach raw logs,
 `.env`, Secret values, license data, tokens, or private keys.
 
 Questions or ideas: open a [GitHub issue](https://github.com/treisland/fortifylab/issues).

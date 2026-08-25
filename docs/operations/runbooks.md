@@ -6,9 +6,9 @@ runbook can be a demo helper, diagnostic check, customer-environment adapter,
 class exercise, or file generator.
 
 Runbooks are local-first. Fortify Lab discovers scripts only when they opt in
-with metadata comments. During the Python CLI/TUI migration,
-`fortifylab.runbooks` provides clone-safe discovery, metadata validation, script
-preview, command preview, and guarded execution contracts. Preview and
+with metadata comments. The Python CLI/TUI module `fortifylab.runbooks`
+provides clone-safe discovery, metadata validation, script preview, command
+preview, and guarded execution contracts. Preview and
 validation do not execute scripts; run actions remain environment-dependent and
 require explicit confirmation for high or destructive risk.
 
@@ -82,13 +82,10 @@ command string from user input.
 
 ## Use the library
 
-For the current production guided flow, open the wizard and choose:
-
-```text
-Runbook Library
-```
-
-From there you can:
+Use the supported Python CLI/TUI surface for runbook discovery, validation,
+preview, and guarded execution as those commands are exposed. The retired Bash
+wizard internals are not the supported runbook application flow. From the
+Runbook Library you can:
 
 - validate all discovered runbooks
 - inspect a runbook's purpose, source, path, risk, and required tools

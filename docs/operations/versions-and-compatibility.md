@@ -246,23 +246,13 @@ of removing it, re-run `discover` and `promote-local` for the same id --
 `promote-local` upserts by plan id, so this overwrites the existing local
 entry in place.
 
-## Applying a Flight Plan without the interactive menu
+## Applying a Flight Plan
 
-Everything above manages *which Flight Plans exist*. To actually write a
-Flight Plan's versions into your real `.env`, use the wizard's non-interactive
-`apply-flight-plan` command -- no need to open the interactive menu:
-
-```bash
-./start_wizard.sh apply-flight-plan fortify-26.2          # dry run: shows impact and pending changes only
-./start_wizard.sh apply-flight-plan fortify-26.2 --yes    # writes .env with a backup first
-```
-
-This reuses the same staging, impact-preview, and backup-and-apply machinery
-as **Deployment Versions -> Upgrade full Flight Plan**. Without `--yes` it
-never writes anything (dry run is the default, matching `promote`/
-`promote-local`); it also refuses -- in both modes -- to apply a Flight Plan
-with no populated component versions, the same guard the interactive menu
-uses.
+Everything above manages *which Flight Plans exist*. The old Bash wizard
+`apply-flight-plan` command is not part of the supported M7 compatibility shim.
+Until a Python command restores this write path, apply a plan by reviewing it
+with `./scripts/tools/flight-plans.py show <plan-id>`, updating `.env`
+deliberately, and keeping a backup of the previous file.
 
 ## Rollback expectations
 

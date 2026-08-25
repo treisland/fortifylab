@@ -1,7 +1,7 @@
 # Fortify Lab Help Center
 
-These offline topics support the wizard's Help and Fortify Knowledge Center and
-the Python CLI/TUI migration's `fortifylab.help` registry. They explain the lab
+These offline topics support the Python CLI/TUI help registry and the Fortify
+Knowledge Center. They explain the lab
 architecture without querying or changing the host, Kubernetes cluster,
 credentials, or Fortify applications.
 
@@ -26,13 +26,12 @@ diagnostics, and the first-scan walkthrough are under
 and acknowledgement behavior are documented in [Lab use](../lab-use.md).
 
 Keep component names, dependency claims, URLs, and version-sensitive behavior
-aligned with `start_wizard.sh`, `.env.example`, and the corresponding tests.
+aligned with `./bin/fortifylab`, `.env.example`, and the corresponding tests.
 
 ## Stable topic IDs
 
-Wizard steps and troubleshooting failures refer to stable, path-like topic IDs,
-such as `guided/mysql` and `troubleshooting/pending-pods`. During the migration,
-`scripts/lib/help.sh` remains the Bash wizard registry while
+Guided steps and troubleshooting failures refer to stable, path-like topic IDs,
+such as `guided/mysql` and `troubleshooting/pending-pods`.
 `fortifylab.help.HelpRegistry` and the catalog in `fortifylab.runbooks` expose
 the Python-native lookup contract. Resolution only formats known strings: it
 does not query MicroK8s, access credentials, inspect secret input paths, or make

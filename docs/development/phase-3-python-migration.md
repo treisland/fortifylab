@@ -53,14 +53,14 @@ will not grow a replacement web console in this runway; browser-based cluster
 views remain the Kubernetes Dashboard's job, and Fortify product UIs remain the
 application-facing surfaces.
 
-This phase also records the compatibility boundary: Bash remains the production guided wizard through `./start_wizard.sh` until the Python guided experience reaches parity. New application logic should land in Python when practical, while proven Bash scripts remain execution adapters and recovery tools.
+This phase also records the compatibility boundary: after M7, `./bin/fortifylab` is the supported Python CLI/TUI entrypoint. `./start_wizard.sh` remains only as a compatibility shim for supported legacy aliases through M8, while proven Bash scripts remain low-level execution adapters and recovery tools.
 
 ## Phase 3.8 dependency foundation
 
 Phase 3.8 introduces a conservative Python runtime dependency posture without
-breaking clone-and-run behavior. The existing `./bin/fortifylab` wrapper and
-preview commands continue to run from source with the Python standard library.
-Richer Python CLI/TUI work can install the explicit runtime dependency file:
+breaking clone-and-run behavior. The `./bin/fortifylab` wrapper and clone-safe
+commands continue to run from source with the Python standard library. Richer
+Python CLI/TUI work can install the explicit runtime dependency file:
 
 ```bash
 python3 -m venv .venv
@@ -83,13 +83,12 @@ features must explain missing dependency installation steps clearly.
 
 ## Guided TUI prototype
 
-Phase 3.2 introduces a Python guided deployment TUI prototype as an opt-in
-preview through `./bin/fortifylab tui --demo-screen`. The prototype owns the
+Phase 3.2 introduced a Python guided deployment TUI prototype. By M7, the
+supported smoke contract is `./bin/fortifylab tui --check`; the TUI owns the
 Python screen model, smooth in-place rendering primitives, auto-advance control
 labels, contextual log and diagnostics entry points, and deployment profile data.
-It does not execute live deployment operations yet; `./start_wizard.sh` remains
-the production guided deployment path until later Phase 3 work replaces each
-behavior with tested Python modules.
+Retired Bash wizard internals must not be restored as the interactive
+application implementation.
 
 ## Deployment orchestration model
 
@@ -103,8 +102,8 @@ the cluster unless later Phase 3 work explicitly wires live execution.
 
 Phase 3.4 adds Python APIs and CLI commands for `.env` parsing, preservation,
 validation, derived host/URL repair, backup metadata, diff preview, and rollback.
-The Bash wizard can call the Python config bridge when available and keeps its
-existing Bash implementation as the production fallback during migration.
+Compatibility shims can call the Python config bridge, but new configuration
+behavior belongs in Python.
 
 ## Diagnostics engine
 
@@ -122,9 +121,10 @@ Bash operation internals incrementally without surprising operators.
 
 ## Entry points
 
-`./start_wizard.sh` remains the friendly command for existing users. As Python
-matures, it should launch the Python guided experience rather than host new
-application logic.
+`./bin/fortifylab` is the primary supported entrypoint for the Python CLI/TUI.
+`./start_wizard.sh` remains only as a compatibility shim through M8 for
+`--help`, `doctor`, `status`, `help topic ...`, and `config-diagnostics`. Do
+not document generic shim forwarding as supported automation.
 
 Clone-and-run support means contributors and operators can work from a checked
 out repository without requiring `pipx`, a `.deb`, a container image, or a

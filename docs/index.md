@@ -8,7 +8,7 @@ This site is the version-controlled documentation for the Fortify lab deployment
 toolkit. Choose the path that matches what you need:
 
 - [Getting started](getting-started/index.md) takes a new operator from the
-  lab-use boundary to the interactive deployment wizard.
+  lab-use boundary to the Python CLI/TUI entrypoint.
 - [Fortify system](fortify/index.md) explains the applications, databases,
   dependencies, interfaces, and learning roles.
 - [Deployment](deployment/index.md) covers lifecycle, networking, and TLS.

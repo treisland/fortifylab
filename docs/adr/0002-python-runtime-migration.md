@@ -25,9 +25,9 @@ The repository remains clone-and-run in Phase 3. Packaging formats such as
 `pipx`, `.deb`, containers, or single-file binaries are deferred until the
 Python core is stable and the operator workflow is proven.
 
-`start_wizard.sh` remains a supported compatibility entrypoint. Over time it
-should become a thin launcher for the Python guided experience instead of the
-place where application logic lives.
+`./bin/fortifylab` is the supported Python CLI/TUI entrypoint.
+`start_wizard.sh` remains a supported compatibility shim for the documented
+legacy aliases through M8 instead of the place where application logic lives.
 
 Phase 3.7-3.8 also establishes the dependency posture for the Python runtime.
 The current clone-and-run CLI continues to work with the Python standard
@@ -40,8 +40,8 @@ operators can distinguish lab runtime needs from MkDocs publishing needs.
 ## Consequences
 
 - Python modules become the preferred home for new application logic.
-- Bash scripts remain as compatibility wrappers and short-lived adapters during
-  replacement.
+- Bash scripts remain as compatibility wrappers or low-level operation adapters
+  during replacement.
 - Existing script entrypoints should continue to work while their internals move
   behind Python commands.
 - Tests must cover both the compatibility wrappers and the Python behavior they
@@ -66,10 +66,14 @@ but the wizard has grown beyond simple shell-script state and screen handling.
 
 ## Compatibility policy
 
-During Phase 3, user-facing Bash entrypoints are compatibility launchers:
+During Phase 3 after M7, user-facing Bash entrypoints are compatibility
+launchers or low-level adapters:
 
-- `./start_wizard.sh` continues to start the normal guided workflow.
-- Existing app scripts continue to exist while Python replacements land.
+- `./bin/fortifylab` is the primary supported Python CLI/TUI surface.
+- `./start_wizard.sh` is a shim for `--help`, `doctor`, `status`,
+  `help topic ...`, and `config-diagnostics` through M8.
+- Existing app scripts continue to exist as low-level lifecycle adapters while
+  Python replacements land.
 - A Bash script can become a wrapper once its behavior is covered by Python
   tests and the wrapper preserves documented arguments and exit behavior.
 - Removing a Bash entrypoint requires a later explicit compatibility decision.
@@ -119,4 +123,4 @@ The runtime dependency set is intentionally small:
 The standard-library CLI wrapper remains valid while these dependencies are
 introduced. A command that needs optional TUI dependencies must fail with a clear
 message that explains how to install the Python runtime dependencies instead of
-breaking unrelated Bash or Python preview commands.
+breaking unrelated compatibility shim or clone-safe Python commands.

@@ -1,8 +1,9 @@
 # Get from zero to a running lab
 
 This is the shortest safe path for a new operator to clone the repository,
-deploy the tested single-node lab, and reach its user interfaces. The wizard
-does the installation work; this page explains what it checks and changes.
+deploy the tested single-node lab, and reach its user interfaces. The supported
+entrypoint is `./bin/fortifylab`; this page explains what the guided CLI/TUI
+checks and changes.
 
 !!! danger "Lab and demo use only"
 
@@ -35,7 +36,7 @@ network speed vary. Guided mode displays an estimate for each step.
 The deployment installs host packages and MicroK8s add-ons, creates a local
 certificate authority, writes generated material under this checkout, creates
 Kubernetes Secrets, allocates persistent volumes, and applies workloads and
-ingress resources. Run the wizard as your normal user, not with `sudo`; it asks
+ingress resources. Run Fortify Lab as your normal user, not with `sudo`; it asks
 for elevation only where host installation requires it.
 
 ## 1. Clone and prepare configuration
@@ -61,20 +62,28 @@ export FORTIFY_LICENSE_FILE="/srv/fortify-lab-private/fortify.license"
 Put that assignment in `.env` if it should persist between wizard runs. The
 backward-compatible default, `secrets/input/fortify.license`, is gitignored,
 but an external protected directory makes the repository boundary clearer.
-The wizard checks only that the configured file is readable and non-empty; it
+Fortify Lab checks only that the configured file is readable and non-empty; it
 does not print the path or contents. See [Secrets and licenses](../operations/secrets-and-licenses.md).
 
-## 2. Start the wizard
+## 2. Start Fortify Lab
 
 ```bash
-./start_wizard.sh
+./bin/fortifylab --help
+./bin/fortifylab doctor --check
+./bin/fortifylab status --check
+./bin/fortifylab tui --check
 ```
 
-On first use, the wizard shows a Fortify Lab welcome banner with the current version,
-then asks you to read the **LAB / DEMO USE ONLY** notice and type `LAB` to
-acknowledge it. The next screen is a beginner-oriented welcome page with the
-recommended path, a short component map, warnings, important local file
-locations, and a read-only snapshot of `.env`, license, Docker, MicroK8s,
+`./bin/fortifylab` is the supported Python CLI/TUI entrypoint. Through M8,
+`./start_wizard.sh` remains only as a compatibility shim for `--help`,
+`doctor`, `status`, `help topic ...`, and `config-diagnostics`; use the Python
+entrypoint for new documentation, automation, and maintainer work.
+
+On first guided use, Fortify Lab shows a welcome banner with the current
+version, then asks you to read the **LAB / DEMO USE ONLY** notice and type
+`LAB` to acknowledge it. The next screen is a beginner-oriented welcome page
+with the recommended path, a short component map, warnings, important local
+file locations, and a read-only snapshot of `.env`, license, Docker, MicroK8s,
 domain, and deployment profile. Use it to confirm where generated files and
 logs live before you deploy. From there, start Guided deployment or continue to
 the main menu.
