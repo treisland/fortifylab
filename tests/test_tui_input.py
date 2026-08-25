@@ -64,6 +64,18 @@ class TerminalInputReadEventTests(unittest.TestCase):
         event = self.input.read_event(timeout=1)
         self.assertEqual(event.key, "é")
 
+    def test_del_byte_normalizes_to_backspace(self) -> None:
+        # \x7f (DEL) is what most terminals actually send for the
+        # Backspace key.
+        self._send("\x7f")
+        event = self.input.read_event(timeout=1)
+        self.assertEqual(event.key, "backspace")
+
+    def test_bs_byte_normalizes_to_backspace(self) -> None:
+        self._send("\x08")
+        event = self.input.read_event(timeout=1)
+        self.assertEqual(event.key, "backspace")
+
     def test_timeout_with_no_input_returns_none(self) -> None:
         event = self.input.read_event(timeout=0.05)
         self.assertIsNone(event)

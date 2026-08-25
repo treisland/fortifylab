@@ -37,6 +37,14 @@ def _normalize_key(raw: str) -> str:
         return "escape"
     if raw == "\x03":
         return "ctrl-c"
+    if raw in ("\x7f", "\x08"):
+        # \x7f (DEL) is what most terminals actually send for the
+        # Backspace key; \x08 (BS) is what a few (older serial terminals,
+        # some Windows-originated SSH clients) send instead -- both mean
+        # the same "delete the character before the cursor" to a text
+        # entry widget, so normalize them to one name rather than making
+        # every future TextField field consumer handle both raw bytes.
+        return "backspace"
     return raw
 
 

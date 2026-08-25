@@ -812,6 +812,66 @@ need the still-missing text-entry widget).
 Lab Lifecycle bulk-action coverage every other app already has. Met in
 this pass.
 
+## M15 — Text-entry widget, and Applications' Destroy action
+
+The single blocker repeated across every remaining `#446` gap: destroy
+(any screen), `scale_workers()`'s replica count, credential `REVEAL`,
+Dashboard's `PERSISTENT` tokens, and per-key `.env` editing all need
+typed free-text input, and the TUI had no widget for it. Rather than
+keep deferring one gap at a time, this milestone builds that widget once
+and wires it into the highest-value, most-requested unlock: destroy, for
+every app `ApplicationsScreen` already manages.
+
+- `src/fortifylab/tui/widgets.py` (new) — `TextField`, a single-line,
+  append/backspace-only text buffer. Deliberately no cursor movement, no
+  paste, no multi-line support: every use case this unblocks is a short
+  line typed left to right and corrected with backspace. `handle_key()`
+  only ever touches its own buffer and reports whether it consumed the
+  event; Enter/Escape are never consumed by the widget itself, since what
+  they mean (submit-and-compare, cancel) is a per-screen decision, not a
+  widget one — the same "plain data in, plain data out" shape every
+  `Screen` already has.
+- `src/fortifylab/tui/input.py` — `\x7f` (DEL, what most terminals
+  actually send for the Backspace key) and `\x08` (BS, what a few older
+  or Windows-originated clients send instead) now both normalize to one
+  `"backspace"` key name, so `TextField` (or any future consumer) only
+  has to handle one name rather than two raw bytes.
+- `src/fortifylab/tui/screens/applications.py` — `ApplicationsScreen`
+  gained a `Destroy` action and a `CONFIRM_DESTROY` stage: selecting it
+  shows the exact confirmation phrase to type
+  (`OperationSpec.confirmation_phrase`, e.g. `"DESTROY ssc"`) next to a
+  `TextField`; Enter submits, Escape cancels back to the app menu without
+  running anything. Submission always dispatches through the same
+  background-thread/poll mechanism every other real execution already
+  uses (`OperationRunner.run()`'s confirmation-mismatch rejection returns
+  immediately without invoking the destroy script, so routing a wrong
+  phrase through that same path costs at most one tick's latency for the
+  rejection message, in exchange for not needing a second, duplicate
+  equality check in the screen). The `Destroy` row itself is styled warn
+  (yellow) in the per-app menu so it never reads as just another
+  equally-safe choice.
+
+**Scope trims, deliberate:** this milestone wires the widget into exactly
+one action (`ApplicationsScreen`'s per-app Destroy). Every other gap the
+widget could unblock is still out, tracked in `#446`, since each needs
+its own validation shape, not just a `TextField`:
+- **Scale workers** (SAST/DAST only) needs numeric-only input and a
+  replica-count range check, not a fixed phrase comparison.
+- **Lab Lifecycle's destroy/reset-wizard quarter** (`"DESTROY FORTIFY
+  LAB"`/`"DESTROY SELECTED PROFILE"`) is a different screen with its own
+  confirmation phrases; not wired by this pass.
+- **Dashboard access's `PERSISTENT` tokens** and **credential `REVEAL`**
+  are each their own screen's confirmation gate.
+- **Configuration's per-key `.env` editing** and **Flight Plans'
+  promote/apply** need free-typed *values*, not just a fixed phrase to
+  match against — a materially different validation shape from a
+  confirmation gate.
+
+**Done when:** `ApplicationsScreen` offers Destroy for every app it
+manages, gated by the same exact typed confirmation phrase Bash requires,
+with no way to trigger a real destroy without typing it correctly. Met in
+this pass.
+
 ## What this PR actually delivers
 
 M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
@@ -819,11 +879,12 @@ M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
 (Certificates & Trust), M12 (Lab Status Dashboard), the Guided Deploy bug
 fixes, the feature-parity audit fixes, M13 (deployment & individual
 component management: live per-app status, per-app menu, Lab Lifecycle
-bulk shutdown/start), and M14 (SAST/DAST in the app list) above, as the
-first six milestone picks from the post-M6 follow-up plus a hardening
-pass and a deep parity pass on the one area specifically called out --
-M6 delivered as an opt-in preview hook, not a default cutover, because
-the parity that cutover depends on doesn't exist yet.
+bulk shutdown/start), M14 (SAST/DAST in the app list), and M15 (the
+`TextField` text-entry widget, and Applications' Destroy action) above,
+as the first six milestone picks from the post-M6 follow-up plus a
+hardening pass and a deep parity pass on the one area specifically
+called out -- M6 delivered as an opt-in preview hook, not a default
+cutover, because the parity that cutover depends on doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked
 here rather than claimed. This keeps the claim in this document honest:

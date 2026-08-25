@@ -194,19 +194,25 @@ levels, matching Bash's `apps_menu()`/`app_action_menu()` shape: pick an
 app from the live-status list, then Start/Upgrade, Stop, Logs (jumps
 straight into the Logs screen pre-filtered to that app), or Show URL &
 credentials (inline, not a duplicate of the URLs & Credentials screen --
-just its per-app subset). Lab Lifecycle is new: the non-destructive
-quarter of Bash's `lab_lifecycle_menu()` (shutdown/start, scoped to the
-active profile or the whole lab), built by handing an ordered sequence of
-app operations to the same `DeployService`/`GuidedDeployScreen` Guided
-Deploy already uses -- so the color-coding, dry-run-cycling, and
-running-indicator behavior apply automatically, no separate
-implementation to keep in sync. ScanCentral SAST and DAST are in the
-Applications app list too, each as one combined row over Bash's
-controller+sensor/core+scanner pair (DAST's start/stop chains its two
-scripts the same way Bash's `run_app_scripts()` does, aborting on the
-first failure). Destroy and Scale workers stay out everywhere, same
-reason as everywhere else -- both need free-text input (a confirmation
-phrase, or a replica count) the TUI still doesn't have a widget for.
+just its per-app subset), or Destroy, gated by typing the exact
+confirmation phrase Bash requires (e.g. `DESTROY ssc`) into a new
+`TextField` text-entry widget -- the piece every typed-confirmation gap
+in this migration had been waiting on. Lab Lifecycle is new: the
+non-destructive quarter of Bash's `lab_lifecycle_menu()` (shutdown/start,
+scoped to the active profile or the whole lab), built by handing an
+ordered sequence of app operations to the same
+`DeployService`/`GuidedDeployScreen` Guided Deploy already uses -- so the
+color-coding, dry-run-cycling, and running-indicator behavior apply
+automatically, no separate implementation to keep in sync. ScanCentral
+SAST and DAST are in the Applications app list too, each as one combined
+row over Bash's controller+sensor/core+scanner pair (DAST's start/stop
+chains its two scripts the same way Bash's `run_app_scripts()` does,
+aborting on the first failure). Scale workers, Lab Lifecycle's own
+destroy/reset quarter, credential `REVEAL`, Dashboard's `PERSISTENT`
+tokens, and per-key `.env` editing all still need their own screen-
+specific wiring onto the new text-entry widget -- each needs its own
+validation shape (a numeric range, a different confirmation phrase, an
+arbitrary value), not just a `TextField`.
 
 `./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`
 and it execs into the Python TUI above (after the same acknowledgement,

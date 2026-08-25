@@ -32,13 +32,14 @@ def _no_pods_status_service() -> AppStatusService:
 
 def _plain_screen(*, env_dir: Path | None = None, **kwargs) -> ApplicationsScreen:
     kwargs.setdefault("status_service", _no_pods_status_service())
+    kwargs.setdefault("style", TerminalStyle(color=False, symbols=False))
     if env_dir is not None:
         kwargs.setdefault("env_file", env_dir / ".env")
     elif "env_file" not in kwargs:
         # Isolate from any real .env in the working directory -- this
         # screen's __post_init__ reads NAMESPACE/URL keys from it.
         kwargs["env_file"] = Path("/nonexistent/.env")
-    return ApplicationsScreen(style=TerminalStyle(color=False, symbols=False), **kwargs)
+    return ApplicationsScreen(**kwargs)
 
 
 def _wait_for_execution(screen: ApplicationsScreen, *, timeout: float = 2.0) -> None:
@@ -107,9 +108,12 @@ class ApplicationsListStageTests(unittest.TestCase):
         command = screen.handle_event(KeyEvent("q"))
         self.assertEqual(command.kind, NavigationKind.POP)
 
-    def test_no_repair_or_destroy_hint_offered(self) -> None:
+    def test_no_repair_hint_offered(self) -> None:
+        # Destroy is now available (per-app, gated by a typed confirmation
+        # phrase) -- this only guards against a leftover repair/no-destroy
+        # hint the list stage used to render before that.
         screen = _plain_screen()
-        self.assertIn("destroy is not available here", screen.render())
+        self.assertNotIn("repair", screen.render())
 
     def test_includes_sast_and_dast_alongside_core_apps(self) -> None:
         screen = _plain_screen()
@@ -138,7 +142,7 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         rendered = screen.render()
         self.assertNotIn("URL:", rendered)
 
-    def test_offers_start_stop_logs_and_credentials_but_not_destroy_or_scale(self) -> None:
+    def test_offers_start_stop_logs_credentials_and_destroy_but_not_scale(self) -> None:
         screen = _plain_screen()
         _enter_app_menu(screen, "ssc")
         rendered = screen.render()
@@ -146,7 +150,7 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         self.assertIn("Stop", rendered)
         self.assertIn("Logs", rendered)
         self.assertIn("Show URL & credentials", rendered)
-        self.assertNotIn("Destroy", rendered)
+        self.assertIn("Destroy", rendered)
         self.assertNotIn("Scale", rendered)
 
     def test_credentials_toggle_shows_login_hint_for_ssc(self) -> None:
@@ -195,6 +199,92 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         _select_action(screen, "logs")
         command = screen.handle_event(KeyEvent("enter"))
         self.assertEqual(command.screen.initial_prefix, "sdast")
+
+    def test_destroy_action_enters_a_confirmation_stage_instead_of_running_immediately(self) -> None:
+        screen = _plain_screen(catalog=OperationCatalog(), runner=OperationRunner(lambda c: CommandResult(c, 0, "ok", "", 0.0)))
+        _enter_app_menu(screen, "ssc")
+        _select_action(screen, "destroy")
+        screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(screen.stage, _Stage.CONFIRM_DESTROY)
+        self.assertFalse(screen.is_executing)
+        rendered = screen.render()
+        self.assertIn("Destroy Software Security Center", rendered)
+        self.assertIn("DESTROY ssc", rendered)
+
+    def test_typing_into_the_confirm_field_appends_characters(self) -> None:
+        screen = _plain_screen()
+        _enter_app_menu(screen, "ssc")
+        _select_action(screen, "destroy")
+        screen.handle_event(KeyEvent("enter"))
+        for char in "DESTROY ssc":
+            screen.handle_event(KeyEvent(char))
+        self.assertEqual(screen.confirm_field.value, "DESTROY ssc")
+        self.assertIn("DESTROY ssc", screen.render())
+
+    def test_escape_from_confirm_destroy_cancels_back_to_the_app_menu_without_running(self) -> None:
+        release_calls: list[tuple[str, ...]] = []
+        screen = _plain_screen(
+            catalog=OperationCatalog(), runner=OperationRunner(lambda c: release_calls.append(c) or CommandResult(c, 0, "ok", "", 0.0))
+        )
+        _enter_app_menu(screen, "ssc")
+        _select_action(screen, "destroy")
+        screen.handle_event(KeyEvent("enter"))
+        for char in "DESTROY ssc":
+            screen.handle_event(KeyEvent(char))
+        screen.handle_event(KeyEvent("escape"))
+        self.assertEqual(screen.stage, _Stage.APP_MENU)
+        self.assertFalse(screen.is_executing)
+        self.assertEqual(release_calls, [])
+
+    def test_wrong_confirmation_phrase_is_rejected_without_destroying_anything(self) -> None:
+        calls: list[tuple[str, ...]] = []
+        screen = _plain_screen(
+            catalog=OperationCatalog(), runner=OperationRunner(lambda c: calls.append(c) or CommandResult(c, 0, "destroyed", "", 0.0))
+        )
+        _enter_app_menu(screen, "ssc")
+        _select_action(screen, "destroy")
+        screen.handle_event(KeyEvent("enter"))
+        for char in "not the right phrase":
+            screen.handle_event(KeyEvent(char))
+        screen.handle_event(KeyEvent("enter"))
+
+        _wait_for_execution(screen)
+
+        self.assertFalse(screen.last_execution.executed)
+        self.assertFalse(screen.last_execution.ok)
+        self.assertIn("DESTROY ssc", screen.last_execution.detail)
+        self.assertEqual(calls, [])  # the underlying script never ran
+
+    def test_correct_confirmation_phrase_runs_destroy_in_the_background(self) -> None:
+        release = threading.Event()
+
+        def slow_runner(command):
+            release.wait(timeout=2.0)
+            return CommandResult(args=command, returncode=0, stdout="destroyed", stderr="", duration_seconds=0.0)
+
+        screen = _plain_screen(catalog=OperationCatalog(), runner=OperationRunner(slow_runner))
+        _enter_app_menu(screen, "ssc")
+        _select_action(screen, "destroy")
+        screen.handle_event(KeyEvent("enter"))
+        for char in "DESTROY ssc":
+            screen.handle_event(KeyEvent(char))
+
+        screen.handle_event(KeyEvent("enter"))
+
+        self.assertEqual(screen.stage, _Stage.APP_MENU)
+        self.assertTrue(screen.is_executing)
+        release.set()
+        _wait_for_execution(screen)
+        self.assertTrue(screen.last_execution.executed)
+        self.assertTrue(screen.last_execution.ok)
+        self.assertEqual(screen.last_execution.operation_id, "app.ssc.destroy")
+
+    def test_destroy_row_is_styled_as_a_warning_in_the_app_menu(self) -> None:
+        screen = _plain_screen(style=TerminalStyle(color=True, symbols=True))
+        _enter_app_menu(screen, "ssc")
+        rendered = screen.render()
+        destroy_line = next(line for line in rendered.splitlines() if "Destroy" in line)
+        self.assertIn("[33m", destroy_line)
 
     def test_sast_start_uses_the_real_start_script_via_bash(self) -> None:
         screen = _plain_screen(catalog=OperationCatalog(), runner=OperationRunner(lambda c: CommandResult(c, 0, "ok", "", 0.0)))

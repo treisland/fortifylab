@@ -8,23 +8,30 @@ knows how to run (``ssc``, ``lim``, ``mysql``, ``postgresql``, ScanCentral
 Two levels, matching Bash's shape: a list of apps with live pod status
 (``app_status()`` -- "N/M running"/"N/M ready"/"not deployed", the same
 three states and colors), then a per-app menu (Start/Upgrade, Stop, Logs,
-Show URL & credentials) once one is selected. Bash keeps core apps and
-sample apps on separate menu numbers, but the underlying shape is
+Show URL & credentials, Destroy) once one is selected. Bash keeps core
+apps and sample apps on separate menu numbers, but the underlying shape is
 identical, so this one screen covers both -- sample apps are just labeled
 "(sample)". SAST and DAST are each a single combined row over two Bash
 sub-components (controller+sensor, core+scanner), matching Bash's own
 ``APP_PODS``/``APP_START``/``APP_STOP`` entries for them.
 
-Not wired here, same reason in both cases -- no text-entry widget yet:
-- **Destroy**: requires typing an exact confirmation phrase
-  (``OperationSpec.confirmation_phrase``, e.g. ``"DESTROY ssc"``).
-- **Scale workers** (SAST/DAST only): Bash's ``scale_workers`` reads a
-  free-typed replica count.
+Destroy uses the new :class:`~fortifylab.tui.widgets.TextField` (the
+migration's first typed-confirmation gate) to require the operator type
+``OperationSpec.confirmation_phrase`` (e.g. ``"DESTROY ssc"``) exactly,
+same as Bash -- ``OperationRunner.run()`` already rejects a real
+execution whose ``confirmation`` doesn't match, so this screen only adds
+a place to type one in.
 
-A real (``execute=True``) start/stop runs on a background thread, the
-same mechanism ``GuidedDeployScreen``/``DeployService`` use: without it, a
-Helm-backed start that takes minutes would freeze the whole TUI with no
-visual feedback. Dry-run previews stay synchronous.
+Not wired here still: **Scale workers** (SAST/DAST only) -- Bash's
+``scale_workers`` reads a free-typed replica count; unlike a fixed
+confirmation phrase, that's arbitrary numeric input with its own
+validation, a separate small piece of work from wiring up ``TextField``
+itself.
+
+A real (``execute=True``) start/stop/destroy runs on a background
+thread, the same mechanism ``GuidedDeployScreen``/``DeployService`` use:
+without it, a Helm-backed operation that takes minutes would freeze the
+whole TUI with no visual feedback. Dry-run previews stay synchronous.
 """
 
 from __future__ import annotations
@@ -42,6 +49,7 @@ from fortifylab.services.app_status_service import AppStatus, AppStatusService
 
 from ..events import Event, KeyEvent, TickEvent
 from ..theme import TerminalStyle
+from ..widgets import TextField
 from .base import Armable, NavigationCommand, Screen
 from .logs import LogsScreen
 
@@ -88,12 +96,14 @@ _APP_ACTIONS: tuple[tuple[str, str], ...] = (
     ("stop", "Stop"),
     ("logs", "Logs"),
     ("credentials", "Show URL & credentials"),
+    ("destroy", "Destroy"),
 )
 
 
 class _Stage(str, Enum):
     LIST = "list"
     APP_MENU = "app_menu"
+    CONFIRM_DESTROY = "confirm_destroy"
 
 
 @dataclass
@@ -109,6 +119,7 @@ class ApplicationsScreen(Armable, Screen):
     selected_action_index: int = 0
     statuses: dict[str, AppStatus] = field(default_factory=dict)
     show_credentials: bool = False
+    confirm_field: TextField = field(default_factory=TextField)
     last_execution: OperationExecution | None = None
     running: bool = False
     _execution_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
@@ -143,6 +154,8 @@ class ApplicationsScreen(Armable, Screen):
         return f"{status.ready}/{status.total} ready", "warn"
 
     def render(self) -> str:
+        if self.stage is _Stage.CONFIRM_DESTROY:
+            return self._render_confirm_destroy()
         if self.stage is _Stage.APP_MENU:
             return self._render_app_menu()
         return self._render_list()
@@ -159,7 +172,6 @@ class ApplicationsScreen(Armable, Screen):
             (
                 "",
                 self.style.muted("up/down to move, enter to manage, r: refresh status, q: back"),
-                self.style.muted("(destroy is not available here -- use the Bash wizard's expert menu)"),
             )
         )
         return "\n".join(lines) + "\n"
@@ -173,11 +185,14 @@ class ApplicationsScreen(Armable, Screen):
         if url:
             lines.append(f"  URL:    {url}")
         lines.append("")
-        for index, (_action_id, action_label) in enumerate(_APP_ACTIONS):
+        for index, (action_id, action_label) in enumerate(_APP_ACTIONS):
             marker = self.style.paint(">", "1;36") if index == self.selected_action_index else " "
             suffix = "  (running...)" if self.running and index == self.selected_action_index else ""
             row = f" {marker} {action_label}{suffix}"
-            lines.append(self.style.warn(row) if suffix else row)
+            # Destroy is destructive and irreversible -- flag it the same
+            # warn color as an in-progress row, so it never reads as just
+            # another equally-safe menu choice.
+            lines.append(self.style.warn(row) if (suffix or action_id == "destroy") else row)
         if self.show_credentials:
             lines.extend(("", "Login guidance"))
             hints = _LOGIN_HINTS.get(app_id)
@@ -201,6 +216,21 @@ class ApplicationsScreen(Armable, Screen):
         )
         return "\n".join(lines) + "\n"
 
+    def _render_confirm_destroy(self) -> str:
+        app_id, label, *_rest = self.apps[self.selected_app_index]
+        phrase = self.catalog.app(app_id, "destroy").confirmation_phrase
+        lines = [
+            self.style.warn(f"Destroy {label}"),
+            "",
+            self.style.warn("This deletes the deployment and cannot be undone."),
+            f"Type '{phrase}' to confirm:",
+            "",
+            f"  {self.confirm_field.render()}",
+            "",
+            self.style.muted("enter to confirm, escape to cancel"),
+        ]
+        return "\n".join(lines) + "\n"
+
     def _current_url(self, url_key: str) -> str:
         if not url_key or not self.env_file.exists():
             return ""
@@ -219,6 +249,8 @@ class ApplicationsScreen(Armable, Screen):
             return NavigationCommand.stay()
         if self.stage is _Stage.LIST:
             return self._handle_list(event)
+        if self.stage is _Stage.CONFIRM_DESTROY:
+            return self._handle_confirm_destroy(event)
         return self._handle_app_menu(event)
 
     def _handle_list(self, event: KeyEvent) -> NavigationCommand:
@@ -268,6 +300,16 @@ class ApplicationsScreen(Armable, Screen):
             return command if command is not None else NavigationCommand.stay()
         return NavigationCommand.stay()
 
+    def _handle_confirm_destroy(self, event: KeyEvent) -> NavigationCommand:
+        if event.key == "escape":
+            self.stage = _Stage.APP_MENU
+            return NavigationCommand.stay()
+        if event.key == "enter":
+            self._submit_destroy_confirmation()
+            return NavigationCommand.stay()
+        self.confirm_field.handle_key(event)
+        return NavigationCommand.stay()
+
     def _select_action(self) -> NavigationCommand | None:
         action_id, _label = _APP_ACTIONS[self.selected_action_index]
         if action_id == "logs":
@@ -278,8 +320,36 @@ class ApplicationsScreen(Armable, Screen):
         if action_id == "credentials":
             self.show_credentials = not self.show_credentials
             return None
+        if action_id == "destroy":
+            if self.is_executing:
+                return None
+            self.confirm_field = TextField()
+            self.stage = _Stage.CONFIRM_DESTROY
+            return None
         self._run_selected(action_id)
         return None
+
+    def _submit_destroy_confirmation(self) -> None:
+        if self.is_executing:
+            return
+        app_id, _label, _prefix, _step_id, _log_prefix, _url = self.apps[self.selected_app_index]
+        spec = self.catalog.app(app_id, "destroy")
+        confirmation = self.confirm_field.value
+        self.stage = _Stage.APP_MENU
+        # Dispatched on the same background thread as every other real
+        # execution, even for a phrase that turns out to be wrong: the
+        # confirmation-mismatch rejection inside OperationRunner.run()
+        # returns immediately without invoking the destroy script, so
+        # routing it through the shared thread/poll path costs at most
+        # one tick's latency for the "confirmation" message, in exchange
+        # for not needing a second, duplicate equality check here.
+        with self._execution_lock:
+            self.running = True
+            thread = threading.Thread(
+                target=self._execute_in_background, args=(spec,), kwargs={"confirmation": confirmation}, daemon=True
+            )
+            self._running_thread = thread
+        thread.start()
 
     def _run_selected(self, action: str) -> None:
         if self.is_executing:
@@ -302,8 +372,8 @@ class ApplicationsScreen(Armable, Screen):
             self._running_thread = thread
         thread.start()
 
-    def _execute_in_background(self, spec: OperationSpec) -> None:
-        result = self.runner.run(spec, execute=True)
+    def _execute_in_background(self, spec: OperationSpec, *, confirmation: str | None = None) -> None:
+        result = self.runner.run(spec, execute=True, confirmation=confirmation)
         with self._execution_lock:
             self._pending_execution = result
 
