@@ -1,11 +1,11 @@
 # Python TUI Migration
 
-FortifyLab is migrating from the current Bash wizard to a maintainable Python
+Fortify Lab is migrating from the current Bash wizard to a maintainable Python
 CLI/TUI application. The new application must preserve the existing navigation
 structure and lab operation behavior while making the repo easier for future
 maintainers to understand, test, and extend.
 
-This is not a web UI effort. FortifyLab remains a CLI-first lab management tool,
+This is not a web UI effort. Fortify Lab remains a CLI-first lab management tool,
 with a terminal user interface as the target interactive experience.
 
 ## Objective
@@ -177,7 +177,7 @@ entrypoint behavior:
 
 The noninteractive TUI launch contract for Architecture is
 `./bin/fortifylab tui --smoke-test`. It should print deterministic placeholder
-output identifying the FortifyLab TUI and M1 placeholder/skeleton state, then
+output identifying the Fortify Lab TUI and M1 placeholder/skeleton state, then
 exit `0` without reading terminal input.
 
 Deprecated `tests/test_python_*.py` files have been moved to
@@ -191,7 +191,7 @@ Architecture intentionally adopts the behavior.
 | Date | Decision | Status |
 | --- | --- | --- |
 | 2026-08-25 | Use `migration/python-tui` as the migration integration branch created from current `dev`. | Accepted |
-| 2026-08-25 | FortifyLab remains CLI/TUI focused; no web UI will be built. | Accepted |
+| 2026-08-25 | Fortify Lab remains CLI/TUI focused; no web UI will be built. | Accepted |
 | 2026-08-25 | Preserve current navigation structure before improving interaction design. | Accepted |
 | 2026-08-25 | Treat current `src/` as deprecated preview code to replace intentionally. | Accepted |
 | 2026-08-25 | Keep Bash deployment scripts as temporary operation adapters in early milestones. | Accepted |
