@@ -654,7 +654,7 @@ Workstream: Config CLI Bridge
 
 Branch: `agent/config-M4-cli-bridge`
 
-Status: active
+Status: complete
 
 Changed:
 
@@ -662,6 +662,7 @@ Changed:
 - Added `validate`, `diagnostics`, and `repair-derived` command paths backed by the merged root-package config engine.
 - Added a `./start_wizard.sh config-diagnostics` compatibility alias that delegates to `./bin/fortifylab config diagnostics`.
 - Added temp-file-only tests for redacted validation findings, read-only diagnostics, dry-run repairs, noninteractive write refusal, `--yes` backups, rollback markers, and the compatibility alias.
+- Merged Config CLI Bridge PR #461 into `migration/python-tui`.
 
 Next:
 
@@ -676,3 +677,35 @@ Risks:
 - This branch intentionally does not build or replace the full-screen TUI config editor.
 - Deprecated `src/` config helpers remain in-tree for later planned cleanup; active CLI paths now use the root `fortifylab.config` engine.
 
+
+### 2026-08-25
+
+Milestone: M5
+
+Workstream: PM
+
+Branch: `agent/pm-M4-closeout-open-M5`
+
+Status: active
+
+Changed:
+
+- PM gate review accepted M4 as complete.
+- Updated the tracker to set `current_milestone: M5`.
+- Recorded Config Schema Design PR #457, Config Engine PR #460, and Config CLI Bridge PR #461 as M4 completion evidence.
+- Opened M5 diagnostics/status work as the next milestone.
+
+Next:
+
+- Merge this closeout branch into `migration/python-tui`.
+- Spawn Diagnostics Contract on `agent/diagnostics-M5-contract`.
+- Spawn M5 Test on `agent/test-M5-diagnostics`.
+- Start Diagnostics Implementation after the contract is visible.
+- Start Docs M5 diagnostics surface after implementation shape settles.
+
+Blockers: none.
+
+Risks:
+
+- M5 checks must stay read-only and keep default tests free of cluster/network dependencies.
+- Broader runbook/help migration remains M6, not M5.
