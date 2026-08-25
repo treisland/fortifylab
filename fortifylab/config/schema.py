@@ -79,7 +79,7 @@ class ParserWriterContract:
     backup_directory: str = ".env.backups"
     rollback_marker: str = ".env.rollback"
     source_of_truth: str = ".env.example"
-    deprecated_bridge: str = "src/fortifylab/config"
+    implementation_package: str = "fortifylab/config"
 
 
 SECRET_KEY_RE = re.compile(r"(PASS|PASSWORD|TOKEN|SECRET|KEY|LICENSE|CREDENTIAL)", re.IGNORECASE)

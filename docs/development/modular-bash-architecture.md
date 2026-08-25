@@ -11,3 +11,5 @@ Retained Bash is limited to low-level operation adapters and host bootstrap help
 Do not add new menu, guided workflow, config editor, runbook browser, or status behavior under `scripts/wizard/`. New user-facing application behavior belongs in the root `fortifylab/` Python package and should expose clone-safe tests that avoid live Kubernetes, Helm, Docker, network, or lab requirements by default.
 
 The old Bash wizard modules are intentionally not operation adapters. Lifecycle behavior that remains available to Python is represented by the operation catalog and executes existing app scripts directly, with previews and confirmation metadata in Python.
+
+The deprecated Python preview package under `src/fortifylab` has also been removed on the migration branch. New application logic belongs in the root `fortifylab/` package; new compatibility behavior should be covered by clone-safe tests before it is documented.

@@ -299,7 +299,7 @@ follow-up branches with compatibility tests.
 | `./start_wizard.sh --help` and generic argument forwarding | Keep as compatibility shim | Current shim forwards to the Python CLI; lock this with compatibility coverage before deleting any old Bash internals. |
 | `./start_wizard.sh --accept-lab-use` | Not supported by M7 shim | Still appears in some user docs, but the shim now forwards to Python and no Python command owns this behavior yet. Do not keep retired wizard internals solely for this stale path; migrate or update docs in a focused follow-up. |
 | `./start_wizard.sh doctor` | Migrate/document | Python `./bin/fortifylab doctor --check` is supported; legacy docs should stop presenting the Bash wizard as the long-term owner. |
-| `./start_wizard.sh apply-flight-plan <id> [--yes]` | Not supported by M7 shim | Still documented in legacy docs, but no supported shim/config/doctor/status/help/tui path invokes it. Flight Plan behavior should move to a Python command or be explicitly retired; the retired wizard module is removed in this boundary branch. |
+| `./start_wizard.sh apply-flight-plan <id> [--yes]` | Not supported by M7 shim | Still documented in legacy docs, but no supported shim/config/doctor/status/help/tui path invokes it. Flight Plan behavior should move to a Python command or be explicitly retired; the retired wizard module is removed. |
 | `src/fortifylab/` | Removed by `agent/src-M7-retirement` | Deprecated preview package retired after supported entrypoints and tests resolved through the root `fortifylab/` package. |
 | `tests/quarantine/python_preview/` | Removed by `agent/src-M7-retirement` | Preview contracts retired after retained concepts were covered by active M1-M7 tests. |
 | `tests/quarantine/bash_wizard_internal/` | Quarantine, then remove/archive intentionally | Reference-only contracts for retired internals. Useful for parity archaeology, but should not block default tests or imply supported Bash module behavior. |
@@ -317,7 +317,7 @@ follow-up branches with compatibility tests.
 | `scripts/create-certs.sh`, `scripts/create-secrets.sh`, `scripts/install_microk8s.sh` | Keep as low-level adapters | Host/lab bootstrap scripts are outside old wizard menu internals and remain useful execution adapters until Python ports exist. |
 | `scripts/tools/flight-plans.py` and `scripts/lib/flight-plans.sh` | Migrate/keep temporarily | Flight Plan behavior is still documented through legacy wizard commands; preserve until Python CLI/TUI parity exists. |
 | User docs that say Bash remains the production guided wizard | Document/migrate | `README.md`, getting-started, deployment/lifecycle, lab-use, versions/compatibility, phase-3 docs, ADR wording, help contributor docs, and modular Bash architecture need a focused M7 docs sweep. |
-| `docs/development/modular-bash-architecture.md` | Updated | Now documents the retired Bash wizard and retained low-level Bash adapter boundary. |
+| `docs/development/modular-bash-architecture.md` | Updated | Now documents the retired Bash wizard, removed deprecated preview package, and retained low-level Bash adapter boundary. |
 
 Supported compatibility entrypoints to preserve before deletion:
 
@@ -336,7 +336,7 @@ Implementation agents can proceed in this order:
 1. Compatibility/test agent: add M7 tests for the supported entrypoints above and stale legacy commands that need an explicit decision.
 2. Docs agent: update user-facing docs so the Python CLI/TUI is the supported path and legacy Bash wizard language is historical or compatibility-only.
 3. Deprecated source cleanup agent: completed on `agent/src-M7-retirement`; keep its removal contract active through M8.
-4. Bash internals cleanup agent: `scripts/wizard/*` has been removed after supported entrypoint tests confirmed no shim/config/doctor/status/help/tui path depends on it. Remaining quarantine cleanup and stale user-doc command migration stay separate from this adapter-boundary branch.
+4. Bash internals cleanup agent: `scripts/wizard/*` has been removed after supported entrypoint tests confirmed no shim/config/doctor/status/help/tui path depends on it. Remaining quarantine cleanup and stale user-doc command migration stay separate follow-up work.
 5. Operations agent: keep M3 adapter scripts under `apps/**` stable and only expand Python operation coverage with clone-safe previews/tests.
 
 ## Decision Log

@@ -31,21 +31,20 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M7
-  workstream: bash-M7-adapter-boundary
-  branch: agent/bash-M7-adapter-boundary
+  workstream: src-M7-retirement
+  branch: agent/src-M7-retirement
   status: active
   changed:
-    - Entry compatibility PR #470, retirement audit PR #471, and retirement test PR #472 are present on migration/python-tui.
-    - Removed retired scripts/wizard/*.sh internals after auditing supported shim/config/doctor/status/help/tui paths.
-    - Preserved start_wizard.sh as a minimal compatibility shim over ./bin/fortifylab, including config-diagnostics.
-    - Preserved app lifecycle Bash adapters used by fortifylab.operations.catalog under apps/**/start.sh, stop.sh, and destroy.sh.
-    - Added regression coverage that catalog scripts remain existing apps/** lifecycle adapters and retired wizard internals are absent from Git-tracked sources.
+    - Bash adapter boundary PR #473 landed before source cleanup integration.
+    - Removed deprecated src/fortifylab preview package after supported M1-M7 entrypoints resolved through the root fortifylab/ package.
+    - Removed tests/quarantine/python_preview after active M1-M7 tests covered retained CLI, config, diagnostics, operations, navigation, runbook, and compatibility contracts.
+    - Replaced active src/fortifylab references in contributor and modular Bash architecture docs with root package guidance.
+    - Updated M7 retirement coverage to assert deprecated preview artifacts and retired scripts/wizard internals stay removed.
   next:
-    - Open this adapter-boundary PR against migration/python-tui.
-    - Keep stale docs for unsupported apply-flight-plan and lab-use wizard commands on the M7 docs migration list unless Python intentionally restores them.
+    - Merge this cleanup PR against migration/python-tui.
+    - Start focused M7 docs migration for supported Python architecture and remaining stale legacy command references.
   blockers: []
   risks:
-    - Do not remove src/ or tests/quarantine/python_preview in this branch; Pauli owns source cleanup.
     - Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
     - Keep start_wizard.sh as a minimal compatibility shim unless docs and tests explicitly retire it.
     - Default tests must remain clone-safe and avoid live Kubernetes, Helm, Docker, or network dependencies.
@@ -461,10 +460,10 @@ milestones:
       - Bash remains only for low-level adapters that are still intentionally retained.
     notes:
       - Audit branch agent/retirement-M7-audit found scripts/wizard internals are not M3 catalog dependencies and should not be kept as operation adapters.
-      - This branch removes scripts/wizard/*.sh after supported compatibility tests confirmed shim/config/doctor/status/help/tui paths no longer source them.
+      - Bash boundary branch agent/bash-M7-adapter-boundary removed scripts/wizard/*.sh after supported compatibility tests confirmed shim/config/doctor/status/help/tui paths no longer source them.
+      - Source cleanup branch agent/src-M7-retirement removes src/fortifylab and tests/quarantine/python_preview after supported entrypoints resolve through the root fortifylab package.
       - M3 operation catalog keeps app lifecycle scripts as low-level adapters under apps/**/start.sh, stop.sh, and destroy.sh.
       - start_wizard.sh remains a minimal compatibility shim for M7 unless a focused compatibility PR retires it explicitly.
-      - src/ and tests/quarantine/python_preview remain out of scope for this branch.
   - id: M8
     name: Merge back to dev
     status: pending
