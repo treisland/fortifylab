@@ -1,7 +1,14 @@
 # Sanitized diagnostics bundle
 
-From the wizard, choose **Operational guidance → Create sanitized diagnostics
-bundle**. The wizard creates a private directory at
+Start with clone-safe Python checks when you only need a local summary:
+
+```bash
+./bin/fortifylab doctor --check
+./bin/fortifylab status --check
+```
+
+To create the support archive, choose **Operational guidance → Create sanitized
+diagnostics bundle** in the wizard. The wizard creates a private directory at
 `${XDG_STATE_HOME:-$HOME/.local/state}/fortify-lab/diagnostics`, sets mode 700,
 and calls the same function documented below.
 

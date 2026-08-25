@@ -1,13 +1,16 @@
 # Runbook Library
 
 The Runbook Library lets Solutions Engineers and instructors add reusable Bash
-scripts to Fortify Lab and run them from the wizard. A runbook can be a demo
-helper, diagnostic check, customer-environment adapter, class exercise, or file
-generator.
+scripts to Fortify Lab and run them through supported Fortify Lab interfaces. A
+runbook can be a demo helper, diagnostic check, customer-environment adapter,
+class exercise, or file generator.
 
-Runbooks are local-first. Fortify Lab discovers scripts only when they opt in with
-metadata comments. The wizard lets you inspect metadata, preview the script, edit
-parameters, show the resolved command, validate the script, and run it.
+Runbooks are local-first. Fortify Lab discovers scripts only when they opt in
+with metadata comments. During the Python CLI/TUI migration,
+`fortifylab.runbooks` provides clone-safe discovery, metadata validation, script
+preview, command preview, and guarded execution contracts. Preview and
+validation do not execute scripts; run actions remain environment-dependent and
+require explicit confirmation for high or destructive risk.
 
 ## Folders
 
@@ -77,9 +80,9 @@ when the script runs. For example, `target_repo` becomes `TARGET_REPO`.
 The wizard passes parameters as environment variables rather than building a
 command string from user input.
 
-## Use the wizard
+## Use the library
 
-Open the wizard and choose:
+For the current production guided flow, open the wizard and choose:
 
 ```text
 Runbook Library

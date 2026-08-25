@@ -109,7 +109,15 @@ preview commands run from a clone with the standard library only:
 
 ```bash
 ./bin/fortifylab --help
+./bin/fortifylab doctor --check
+./bin/fortifylab status --check
+./bin/fortifylab help topic ssc --check
 ```
+
+The preview also includes Python-native runbook discovery, validation,
+preview, and guarded execution APIs in `fortifylab.runbooks`; the Bash wizard
+remains the production path for guided deployment until the retirement
+milestone lands.
 
 Install `requirements-python.txt` only if you're developing or previewing
 those CLI/TUI slices (kept separate from `requirements-docs.txt`, which is
@@ -260,10 +268,12 @@ See [Contributing documentation](docs/contributing/index.md) for the full
 docs-as-code workflow (sources of truth, screenshot sanitization, wizard help
 mappings, review checklist).
 
-For deployment errors, use **Operational guidance → Create sanitized diagnostics bundle**,
-inspect the allow-listed archive locally, and include only that minimum
-evidence plus the failed wizard step. Do not attach raw logs, `.env`, Secret
-values, license data, tokens, or private keys.
+For deployment errors, start with the read-only Python checks
+`./bin/fortifylab doctor --check` and `./bin/fortifylab status --check`. When
+evidence must be shared, use **Operational guidance → Create sanitized
+diagnostics bundle**, inspect the allow-listed archive locally, and include only
+that minimum evidence plus the failed wizard step. Do not attach raw logs,
+`.env`, Secret values, license data, tokens, or private keys.
 
 Questions or ideas: open a [GitHub issue](https://github.com/treisland/fortifylab/issues).
 

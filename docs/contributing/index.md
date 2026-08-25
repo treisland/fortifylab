@@ -106,12 +106,14 @@ one topic to both a readable file in `docs/help/` and an online MkDocs route:
 - `HELP_TOPIC_FILE` contains offline resources; and
 - `HELP_TOPIC_ROUTE` contains site routes and optional anchors.
 
-Keep the arrays aligned. A new wizard step or troubleshooting outcome needs an
-offline file mapping and an online route in the same change. Add or update its
-call-site mapping, tests, and relevant long-form page. When replacing a released
-topic ID, retain the old ID as an alias that resolves to the same content; do
-not rename it in place. The gate rejects missing files, routes, anchors,
-duplicate IDs, and incomplete arrays.
+Keep the arrays aligned. During the Python CLI/TUI migration, also keep
+`fortifylab.help` and the help catalog exposed through `fortifylab.runbooks` in
+sync with those stable topic IDs. A new wizard step or troubleshooting outcome
+needs an offline file mapping and an online route in the same change. Add or
+update its call-site mapping, tests, and relevant long-form page. When replacing
+a released topic ID, retain the old ID as an alias that resolves to the same
+content; do not rename it in place. The gate rejects missing files, routes,
+anchors, duplicate IDs, and incomplete arrays.
 
 Offline help is intentionally brief. It should orient the user and point to a
 safe next action; keep detailed procedures in MkDocs.

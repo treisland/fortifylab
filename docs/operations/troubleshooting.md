@@ -10,10 +10,12 @@ storage, or network path is unhealthy.
     succeeds. Conversely, a useful application may still be starting while its
     pod is not yet Ready; wait for the configured timeout before intervening.
 
-Use **Operational guidance → Create sanitized diagnostics bundle** in the
-wizard when evidence must be shared. The commands below are read-only, but raw
-output can still contain local names. Do not paste Secret values, environment
-variables, arbitrary logs, or license data into an issue.
+Start with `./bin/fortifylab doctor --check` and `./bin/fortifylab status
+--check` for clone-safe Python summaries. Use **Operational guidance → Create
+sanitized diagnostics bundle** in the wizard when evidence must be shared. The
+commands below are read-only, but raw output can still contain local names. Do
+not paste Secret values, environment variables, arbitrary logs, or license data
+into an issue.
 
 ## Fast symptom index
 

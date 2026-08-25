@@ -31,18 +31,18 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M6
-  workstream: runbooks-M6-implementation
-  branch: agent/runbooks-M6-implementation
+  workstream: docs-M6-help-runbooks
+  branch: agent/docs-M6-help-runbooks
   status: active
   changed:
-    - Activated M6 runbook/help behavior behind Python-native fortifylab.runbooks and fortifylab.help APIs.
-    - Added clone-safe runbook load, validation, requirement checking, preview redaction, guarded run execution, and injected executor boundaries.
-    - Added offline help topic registry and deterministic CLI topic check behavior.
-    - Preserved existing Runbook Library and Help Center navigation ids.
+    - Documented Python preview commands for doctor, status, and offline help topic checks.
+    - Updated Runbook Library docs to describe Python-native discovery, validation, preview, and guarded execution contracts.
+    - Updated help/contributing docs to recognize the Python help registry alongside Bash compatibility mappings.
+    - Added M5 diagnostics command references where users start troubleshooting.
   next:
-    - Push agent/runbooks-M6-implementation and open a PR against migration/python-tui.
-    - Let Docs M6 begin documenting the implemented help/runbook surface.
-    - Keep broader TUI view wiring and Bash wizard retirement scoped to later milestones unless split into focused follow-up work.
+    - Push agent/docs-M6-help-runbooks and open a PR against migration/python-tui.
+    - Run docs and default test gates.
+    - Ask PM whether M6 is ready for closeout after docs land.
   blockers: []
   risks:
     - M6 previews and tests must stay clone-safe unless live lab execution is explicitly requested.
@@ -232,14 +232,21 @@ workstreams:
     last_heartbeat: 2026-08-25
   docs:
     owner: docs-agent
-    status: pending
-    branch: agent/docs-M0-cleanup
+    status: active
+    branch: agent/docs-M6-help-runbooks
     owns:
       - README.md
       - docs/
-    current_task: Identify stale Python preview and web UI migration language.
-    blockers:
-      - Architecture decisions must be recorded before broad doc rewrites.
+      - runbooks/README.md
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Document the implemented M6 help/runbook surface and M5 diagnostics command references.
+    changed:
+      - Added Python preview examples for help, doctor, and status commands.
+      - Documented runbook clone-safe preview/validation and environment-dependent execution boundaries.
+      - Updated help mapping contribution guidance for the Python registry during migration.
+    blockers: []
+    last_heartbeat: 2026-08-25
   tests:
     owner: test-agent
     status: active
