@@ -1,7 +1,7 @@
 program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
-current_milestone: M1
+current_milestone: M2
 overall_status: active
 
 goal:
@@ -30,25 +30,25 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-25
-  milestone: M1
-  workstream: test-M1-entrypoints
-  branch: agent/test-M1-entrypoints
+  milestone: M2
+  workstream: pm-M1-closeout-open-M2
+  branch: agent/pm-M1-closeout-open-M2
   status: active
   changed:
-    - Architecture skeleton merged into migration/python-tui.
-    - Test branch merged the M1 skeleton contract.
-    - M1 entrypoint acceptance tests added.
-    - Deprecated Python preview tests quarantined outside default discovery.
-    - Retired Bash wizard internal tests quarantined outside default discovery.
-    - Python preview and Bash wizard quarantine notes documented.
+    - M1 accepted as complete by PM gate review.
+    - Architecture PR #451 merged into migration/python-tui.
+    - Test PR #450 merged into migration/python-tui.
+    - Entry point, import, compile, unittest, and docs acceptance evidence recorded.
+    - M2 navigation parity opened for the next concurrent wave.
   next:
-    - Run M1 entrypoint tests and default unittest discovery.
-    - Push updated Test PR #450.
-    - Request PM review for the M1 test gate.
+    - Merge PM closeout into migration/python-tui.
+    - Spawn Navigation Model and M2 Test agents.
+    - Start TUI keybinding work after the menu model contract is visible or with close coordination.
   blockers: []
   risks:
     - Behavior-level coverage from quarantined tests must be reintroduced milestone by milestone.
     - Deprecated src/ preview concepts need milestone-by-milestone recovery or deletion.
+    - M2 must preserve navigation before improving product flow.
 
   needs_decision: []
 
@@ -86,12 +86,12 @@ workstreams:
   pm:
     owner: pm-agent
     status: active
-    branch: migration/python-tui
+    branch: agent/pm-M1-closeout-open-M2
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Establish M0 tracking, branch rules, milestones, and heartbeat ritual.
-    next_task: Coordinate specialist agents for M1 and M2.
+    current_task: Close M1 and open M2 coordination.
+    next_task: Spawn Navigation Model and M2 Test agents, then coordinate TUI keybinding work.
     blockers: []
   architecture:
     owner: architecture-agent
@@ -129,14 +129,14 @@ workstreams:
   tui:
     owner: tui-agent
     status: pending
-    branch: agent/tui-M2-navigation
+    branch: agent/tui-M2-keybindings
     owns:
       - fortifylab/tui/
       - fortifylab/navigation/
       - tests/
-    current_task: Implement Python TUI screens and keybindings from the navigation parity map.
+    current_task: Implement Textual screens and keybindings against the M2 menu model.
     blockers:
-      - M1 skeleton not merged
+      - Initial M2 menu model contract not visible yet
   operations:
     owner: operations-agent
     status: pending
@@ -146,8 +146,7 @@ workstreams:
       - fortifylab/shell_adapters/
       - tests/
     current_task: Wrap existing Bash scripts as operation adapters with dry-run and confirmation support.
-    blockers:
-      - M1 skeleton not merged
+    blockers: []
   config:
     owner: config-agent
     status: pending
@@ -156,8 +155,7 @@ workstreams:
       - fortifylab/config/
       - tests/
     current_task: Port .env parsing, validation, backups, diffs, and derived URL repair.
-    blockers:
-      - M1 skeleton not merged
+    blockers: []
   diagnostics:
     owner: diagnostics-agent
     status: pending
@@ -167,8 +165,7 @@ workstreams:
       - fortifylab/diagnostics/
       - tests/
     current_task: Port status, doctor, cluster, TLS, and diagnostics bundle behavior.
-    blockers:
-      - M1 skeleton not merged
+    blockers: []
   docs:
     owner: docs-agent
     status: pending
@@ -181,15 +178,17 @@ workstreams:
       - Architecture decisions must be recorded before broad doc rewrites.
   tests:
     owner: test-agent
-    status: active
+    status: complete
     branch: agent/test-M1-entrypoints
     owns:
       - tests/test_m1_entrypoints.py
       - tests/quarantine/python_preview/
+      - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Prepare M1 entrypoint acceptance tests and quarantine deprecated preview/internal tests.
-    next_task: Request PM review after M1 tests and default discovery pass.
+    current_task: Completed M1 entrypoint acceptance tests and quarantine cleanup.
+    result: M1 Test PR #450 merged into migration/python-tui.
+    next_task: Start M2 menu parity tests on agent/test-M2-menu-parity.
     blockers: []
     last_heartbeat: 2026-08-25
 
@@ -206,16 +205,28 @@ milestones:
       - Initial risks and blockers are captured.
   - id: M1
     name: Python app skeleton and entrypoints
-    status: in_progress
+    status: complete
     acceptance:
       - Primary Python package skeleton exists.
       - ./bin/fortifylab --help works from a clone.
       - ./bin/fortifylab tui launches a placeholder TUI shell.
       - start_wizard.sh is either a deliberate shim or intentionally removed.
       - Entrypoint tests pass.
+    completed_at: 2026-08-25
+    pull_requests:
+      - 451
+      - 450
+    evidence:
+      - ./bin/fortifylab --help passed during Architecture review.
+      - ./bin/fortifylab tui --smoke-test passed during Architecture review.
+      - ./bin/fortifylab tui --check passed during Architecture and Test review.
+      - python3 -m compileall -q fortifylab passed during Architecture and Test review.
+      - python3 -m unittest tests.test_m1_entrypoints -v passed.
+      - python3 -m unittest discover -s tests -v passed with 81 tests.
+      - ./scripts/validate-docs.sh passed documentation quality gates in CI.
   - id: M2
     name: Navigation parity
-    status: pending
+    status: in_progress
     acceptance:
       - Python menu tree mirrors the current Bash wizard structure.
       - Arrow-key selection works.
