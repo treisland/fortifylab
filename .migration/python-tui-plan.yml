@@ -1,7 +1,7 @@
 program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
-current_milestone: M6
+current_milestone: M7
 overall_status: active
 
 goal:
@@ -30,23 +30,24 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-25
-  milestone: M6
-  workstream: docs-M6-help-runbooks
-  branch: agent/docs-M6-help-runbooks
+  milestone: M7
+  workstream: pm-M6-closeout-open-M7
+  branch: agent/pm-M6-closeout-open-M7
   status: active
   changed:
-    - Documented Python preview commands for doctor, status, and offline help topic checks.
-    - Updated Runbook Library docs to describe Python-native discovery, validation, preview, and guarded execution contracts.
-    - Updated help/contributing docs to recognize the Python help registry alongside Bash compatibility mappings.
-    - Added M5 diagnostics command references where users start troubleshooting.
+    - M6 accepted as complete by PM gate review.
+    - Runbook/help contract PR #466, tests PR #465, implementation PR #467, and docs PR #468 merged into migration/python-tui.
+    - M6 verification passed with 149 default tests and 16 active M6 tests.
+    - M7 Bash wizard retirement and deprecated source cleanup opened for the next milestone.
   next:
-    - Push agent/docs-M6-help-runbooks and open a PR against migration/python-tui.
-    - Run docs and default test gates.
-    - Ask PM whether M6 is ready for closeout after docs land.
+    - Merge PM closeout into migration/python-tui.
+    - Spawn M7 retirement audit and compatibility/test agents.
+    - Defer destructive removals until the audit classifies keep, migrate, remove, or adapter boundaries.
   blockers: []
   risks:
-    - M6 previews and tests must stay clone-safe unless live lab execution is explicitly requested.
-    - Final Bash wizard retirement and src deletion remain M7, not M6.
+    - Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
+    - Keep start_wizard.sh as a minimal compatibility shim unless docs and tests explicitly retire it.
+    - Default tests must remain clone-safe and avoid live Kubernetes, Helm, Docker, or network dependencies.
 
   needs_decision: []
 
@@ -209,7 +210,7 @@ workstreams:
     last_heartbeat: 2026-08-25
   runbooks:
     owner: runbooks-agent
-    status: active
+    status: complete
     branch: agent/runbooks-M6-implementation
     owns:
       - fortifylab/runbooks/
@@ -225,14 +226,15 @@ workstreams:
       - Added offline HelpRegistry topic lookup with alias preservation and typed lookup errors.
       - Added clone-safe CLI help topic check behavior.
       - Activated tests/test_m6_runbooks_help.py with no implementation-dependent skips.
-    next_task: Open implementation PR and hand off to Docs M6 once merged or accepted.
+    result: M6 runbook/help implementation PR #467 merged into migration/python-tui.
+    next_task: Watch M7 audit for any retained runbook/help adapter boundaries.
     blockers: []
     risks:
       - Run execution must remain explicit and environment-dependent; default tests must not invoke lab scripts or live services.
     last_heartbeat: 2026-08-25
   docs:
     owner: docs-agent
-    status: active
+    status: complete
     branch: agent/docs-M6-help-runbooks
     owns:
       - README.md
@@ -240,7 +242,8 @@ workstreams:
       - runbooks/README.md
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Document the implemented M6 help/runbook surface and M5 diagnostics command references.
+    current_task: Completed implemented M6 help/runbook surface and M5 diagnostics command documentation.
+    result: M6 docs PR #468 merged into migration/python-tui.
     changed:
       - Added Python preview examples for help, doctor, and status commands.
       - Documented runbook clone-safe preview/validation and environment-dependent execution boundaries.
@@ -249,7 +252,7 @@ workstreams:
     last_heartbeat: 2026-08-25
   tests:
     owner: test-agent
-    status: active
+    status: complete
     branch: agent/test-M6-runbooks-help
     owns:
       - tests/test_m1_entrypoints.py
@@ -393,22 +396,40 @@ milestones:
       - Diagnostics docs cleanup is deferred into M6 docs or the M7 final docs sweep.
   - id: M6
     name: Runbooks and help
-    status: in_progress
+    status: complete
     acceptance:
       - Runbook discovery and metadata validation are Python-native.
       - Help Center topics are reachable from the TUI.
       - Requirement checks and run previews work.
+    completed_at: 2026-08-25
+    pull_requests:
+      - 466
+      - 465
+      - 467
+      - 468
+    merge_commits:
+      - 5c4f136b38800d0a1886476cdd8c69ee3d5e28c0
+      - 2281e6612c59ad92d1350044cd4266b0cc562341
+      - 9580a17eb085ca7c7e245e12adb91d5c73b1c42c
+      - 9ddef23249c9b3385967c8584e4fb0562c3cc4d5
     evidence:
-      - python3 -m compileall -q fortifylab passed on agent/runbooks-M6-implementation.
+      - python3 -m compileall -q fortifylab passed.
       - python3 -m unittest tests.test_m6_runbooks_contract tests.test_m6_runbooks_help -v passed with 16 tests and no skips.
       - python3 -m unittest discover -s tests -v passed with 149 tests.
+      - ./bin/fortifylab help topic guided/sast --check passed.
+      - ./bin/fortifylab doctor --check passed.
+      - ./bin/fortifylab status --check passed.
+      - ./bin/fortifylab tui --check passed.
+      - git diff --check passed.
+      - GitHub offline-docs passed for M6 PRs.
     notes:
       - fortifylab.runbooks defines validation, script preview, and command preview as clone-safe.
       - fortifylab.runbooks defines run actions and live requirement checks as environment-dependent.
-      - Navigation ids for Runbook Library, Help Center, and Operational guidance are preserved for implementation wiring.
+      - Navigation ids for Runbook Library, Help Center, and Operational guidance are preserved.
+      - Local ./scripts/validate-docs.sh passed Markdown and unittest gates, then stopped because local mkdocs is not installed; remote offline-docs passed.
   - id: M7
     name: Bash wizard retirement
-    status: pending
+    status: in_progress
     acceptance:
       - start_wizard.sh no longer contains the application wizard.
       - Deprecated src preview references are removed or intentionally migrated.

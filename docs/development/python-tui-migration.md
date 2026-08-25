@@ -910,3 +910,47 @@ Risks:
 
 - Do not replace `./start_wizard.sh` as the production guided deployment entrypoint until M7.
 - Do not document a runbook CLI command until one exists; M6 documents the Python API/TUI migration contract and implemented help topic CLI only.
+
+
+### 2026-08-25
+
+Milestone: M7
+
+Workstream: PM
+
+Branch: `agent/pm-M6-closeout-open-M7`
+
+Status: active
+
+Changed:
+
+- PM gate review accepted M6 as complete.
+- Recorded merged M6 PRs: contract #466, tests #465, implementation #467, and docs #468.
+- Updated the tracker to set `current_milestone: M7`.
+- Opened M7 Bash wizard retirement and deprecated source cleanup work.
+
+Verification:
+
+- `python3 -m compileall -q fortifylab` passed.
+- `python3 -m unittest tests.test_m6_runbooks_contract tests.test_m6_runbooks_help -v` passed with 16 tests and no skips.
+- `python3 -m unittest discover -s tests -v` passed with 149 tests.
+- `./bin/fortifylab help topic guided/sast --check` passed.
+- `./bin/fortifylab doctor --check` passed.
+- `./bin/fortifylab status --check` passed.
+- `./bin/fortifylab tui --check` passed.
+- `git diff --check` passed.
+- GitHub `offline-docs` passed for M6 PRs.
+
+Next:
+
+- Merge this closeout branch into `migration/python-tui`.
+- Spawn M7 retirement audit and compatibility/test agents.
+- Start deletion or retirement branches only after the audit classifies each target as remove, migrate, keep as adapter, or document.
+
+Blockers: none.
+
+Risks:
+
+- Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
+- Keep `start_wizard.sh` as a minimal compatibility shim unless docs and tests explicitly retire it.
+- Default tests must remain clone-safe and avoid live Kubernetes, Helm, Docker, or network dependencies.
