@@ -1,7 +1,7 @@
 program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
-current_milestone: M0
+current_milestone: M1
 overall_status: active
 
 goal:
@@ -30,18 +30,20 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-25
-  milestone: M0
-  workstream: pm-tracking
+  milestone: M1
+  workstream: pm-navigation-audit-foldin
   branch: migration/python-tui
   status: active
   changed:
     - Migration branch created locally from origin/dev.
     - Initial migration tracker added.
     - Migration branch pushed to origin/migration/python-tui and upstream set.
+    - M0 marked complete.
+    - Navigation audit completed and folded into migration planning docs.
   next:
-    - Fold navigation audit into migration docs.
-    - Assign Architecture and Test workstreams for M1.
+    - Spawn Architecture and Test agents for M1.
     - Prepare M1 skeleton scope.
+    - Keep navigation parity map available for M2.
   blockers: []
   risks:
     - Existing src/ Python preview still has tests, docs, and Bash bridge references.
@@ -98,19 +100,17 @@ workstreams:
       - start_wizard.sh
       - requirements-python.txt
     current_task: Define target Python package layout and entrypoint transition.
-    blockers:
-      - M0 not complete
+    blockers: []
   navigation:
     owner: navigation-agent
-    status: pending
+    status: complete
     branch: agent/navigation-M0-audit
     owns:
       - docs/development/python-tui-migration.md
       - .migration/python-tui-plan.yml
-    current_task: Audit current Bash wizard navigation, labels, ordering, hidden paths, and return/quit behavior.
-    next_task: Hand off a parity map to the TUI workstream after M1 skeleton exists.
-    blockers:
-      - M0 not complete
+    current_task: Completed read-only Bash wizard navigation audit.
+    result: Navigation parity baseline captured for M2 implementation.
+    blockers: []
   tui:
     owner: tui-agent
     status: pending
@@ -168,7 +168,7 @@ workstreams:
 milestones:
   - id: M0
     name: Migration branch and project controls
-    status: in_progress
+    status: complete
     acceptance:
       - migration/python-tui exists from current dev.
       - Branch and PR rules are documented.
@@ -178,7 +178,7 @@ milestones:
       - Initial risks and blockers are captured.
   - id: M1
     name: Python app skeleton and entrypoints
-    status: pending
+    status: in_progress
     acceptance:
       - Primary Python package skeleton exists.
       - ./bin/fortifylab --help works from a clone.

@@ -62,6 +62,49 @@ the tracker.
 | M7 | Bash wizard retirement | `start_wizard.sh` is retired or reduced to an intentional shim |
 | M8 | Merge back to dev | All gates pass and maintainer docs describe the final architecture |
 
+## Navigation Baseline
+
+Pascal completed a read-only audit of the current Bash wizard navigation. M2 should use this as the parity baseline before changing interaction design.
+
+Entrypoints to preserve or intentionally replace:
+
+- `./start_wizard.sh` launches the interactive menu.
+- `./start_wizard.sh --accept-lab-use` accepts lab-use terms, then launches the menu.
+- `./start_wizard.sh doctor` runs read-only health summary.
+- `./start_wizard.sh config-diagnostics` inspects `.env` host and URL wiring.
+- `./start_wizard.sh apply-flight-plan <plan-id> [--yes]` stages or applies Flight Plan versions.
+- `./start_wizard.sh -h|--help` prints usage.
+
+Main menu essentials:
+
+- `0` Initial setup and readiness.
+- `1` Deploy: guided, express, resume.
+- `2` Lab lifecycle controls.
+- `3` Configuration editor.
+- `4` Logs.
+- `5` First-scan one-click demo, shown as unavailable until prerequisites are ready.
+- `?` Help Center / Fortify Knowledge Center.
+- `m` More tools.
+- `q` Quit.
+
+More tools preserves the full compatibility menu and numbering for docs and runbooks: setup, guided deployment, express deployment, resume or repair, Flight Plans, app management, sample apps, Dashboard access, diagnostics, advanced setup, lifecycle controls, logs, cluster snapshot, URLs and credentials, FCLI readiness, Runbook Library, configuration editor, Help Center, operational guidance, wizard log, and first-scan demo.
+
+Workflow screens to model explicitly:
+
+- Guided deployment profile selection, deployment mode selection, per-step controls, and completion handoff.
+- Setup and readiness workflow, including guided setup steps and complete lab reset tiers.
+- App lifecycle menus for MySQL, PostgreSQL, SSC, LIM, ScanCentral SAST, ScanCentral DAST, Juice Shop, WebGoat, and DVWA.
+- Configuration editor, Flight Plan editor, Runbook Library, operational guidance, logs, diagnostics, and credentials views.
+
+Architecture and TUI decisions from the audit:
+
+- Normalize back behavior internally while preserving existing aliases: `r`, `b`, Escape, and empty Enter where historically accepted.
+- Distinguish process quit from workflow return; current Bash uses `q` inconsistently.
+- Decide whether number keys execute immediately or jump/highlight before Enter. The user requested jump-to-number selection, so M2 should define this deliberately.
+- Treat guided deployment as a state machine, not as a simple nested menu.
+- Preserve pending-change guards for Config and Flight Plan screens.
+- Remove or replace the current `bin/fortifylab` Python config bridge intentionally during M1-M4.
+
 ## Workstreams
 
 The PM workstream owns coordination, milestone gates, heartbeats, branch rules,
