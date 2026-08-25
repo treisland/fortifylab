@@ -30,10 +30,12 @@ isn't all-digits -- is rejected the same way Bash's own
 ``scale_workers()`` case statement and ``[[ "$replicas" =~ ^[0-9]+$ ]]``
 check reject it, without ever calling ``kubectl scale``.
 
-A real (``execute=True``) start/stop/destroy runs on a background
+A real (``execute=True``) start/stop/destroy/scale runs on a background
 thread, the same mechanism ``GuidedDeployScreen``/``DeployService`` use:
-without it, a Helm-backed operation that takes minutes would freeze the
-whole TUI with no visual feedback. Dry-run previews stay synchronous.
+without it, a slow or unreachable cluster (a Helm-backed operation that
+takes minutes, or just ``KubectlBackedService``'s own 20s timeout) would
+freeze the whole TUI with no visual feedback. Dry-run previews stay
+synchronous.
 """
 
 from __future__ import annotations
@@ -415,6 +417,8 @@ class ApplicationsScreen(Armable, Screen):
         thread.start()
 
     def _submit_scale_workers(self) -> None:
+        if self.is_executing:
+            return
         app_id, _label, _prefix, _step_id, _log_prefix, _url = self.apps[self.selected_app_index]
         value = self.scale_field.value
         self.stage = _Stage.APP_MENU
@@ -422,16 +426,35 @@ class ApplicationsScreen(Armable, Screen):
             # Matches Bash's `[ -z "$replicas" ] && return` -- empty input
             # cancels silently, no error message.
             return
-        if not value.isdigit():
-            # Matches Bash's `[[ "$replicas" =~ ^[0-9]+$ ]] || { error "Not
-            # a number"; return; }` -- kubectl scale is never called.
+        # Matches Bash's `[[ "$replicas" =~ ^[0-9]+$ ]] || { error "Not a
+        # number"; return; }` exactly: str.isdigit() alone also accepts
+        # non-ASCII digit characters (e.g. Arabic-indic, full-width) that
+        # Bash's ASCII-only regex would reject, which would otherwise
+        # reach kubectl's --replicas flag as a value it can't parse
+        # instead of failing cleanly here.
+        if not (value.isascii() and value.isdigit()):
             self.last_execution = OperationExecution(f"app.{app_id}.scale", (), False, False, "Not a number")
             return
-        result = self.scale_service.scale(app_id, value)
-        self.last_execution = OperationExecution(
-            f"app.{app_id}.scale", (), True, result.ok, result.stdout or result.stderr or "scaled"
+        command = self.scale_service.scale_command(app_id, value)
+        # Dispatched on the same background thread as every other real
+        # execution: a `kubectl scale` call is normally near-instant, but
+        # KubectlBackedService._run() still carries a real 20s timeout,
+        # and this file's whole background-thread/poll mechanism exists
+        # precisely so a slow or unreachable cluster can't freeze the TUI
+        # -- there's no reason scale should be the one exception.
+        with self._execution_lock:
+            self.running = True
+            thread = threading.Thread(target=self._execute_scale_in_background, args=(app_id, value, command), daemon=True)
+            self._running_thread = thread
+        thread.start()
+
+    def _execute_scale_in_background(self, app_id: str, replicas: str, command: tuple[str, ...]) -> None:
+        result = self.scale_service.scale(app_id, replicas)
+        execution = OperationExecution(
+            f"app.{app_id}.scale", command, True, result.ok, result.stdout or result.stderr or "scaled"
         )
-        self._refresh_statuses()
+        with self._execution_lock:
+            self._pending_execution = execution
 
     def _run_selected(self, action: str) -> None:
         if self.is_executing:

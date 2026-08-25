@@ -60,7 +60,17 @@ class ScaleWorkersService(KubectlBackedService):
         loop before ``scale_workers()`` ever calls ``kubectl scale``.
         """
 
+        return self._run(self._scale_args(app_id, replicas))
+
+    def scale_command(self, app_id: str, replicas: str) -> tuple[str, ...]:
+        """The full argv (kubectl binary included) ``scale()`` would run,
+        for a caller that wants to display it (e.g. as an
+        ``OperationExecution.command``) without invoking it."""
+
+        return (*tuple(self.kubectl.split()), *self._scale_args(app_id, replicas))
+
+    def _scale_args(self, app_id: str, replicas: str) -> tuple[str, ...]:
         statefulset = self.statefulset_for(app_id)
         if statefulset is None:
             raise ValueError(f"Scaling not supported for app: {app_id}")
-        return self._run(("-n", self.namespace, "scale", "statefulset", statefulset, f"--replicas={replicas}"))
+        return ("-n", self.namespace, "scale", "statefulset", statefulset, f"--replicas={replicas}")

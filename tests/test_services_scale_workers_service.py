@@ -82,6 +82,21 @@ class ScaleWorkersServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             service.scale("ssc", "3")
 
+    def test_scale_command_returns_the_full_argv_without_running_it(self) -> None:
+        calls = []
+        service = ScaleWorkersService(runner=lambda args: calls.append(args) or CommandResult(args, 0, "", "", 0.0))
+        command = service.scale_command("sast", "5")
+        self.assertEqual(
+            command,
+            ("microk8s", "kubectl", "-n", "fortify", "scale", "statefulset", "scancentral-sast-worker-linux", "--replicas=5"),
+        )
+        self.assertEqual(calls, [])
+
+    def test_scale_command_for_unsupported_app_raises(self) -> None:
+        service = ScaleWorkersService()
+        with self.assertRaises(ValueError):
+            service.scale_command("ssc", "3")
+
 
 if __name__ == "__main__":
     unittest.main()

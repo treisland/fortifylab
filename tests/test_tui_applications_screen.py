@@ -365,14 +365,23 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         self.assertIn("Not a number", screen.last_execution.detail)
         self.assertEqual(calls, [])
 
-    def test_valid_replica_count_scales_the_statefulset(self) -> None:
+    def test_valid_replica_count_scales_the_statefulset_in_the_background(self) -> None:
+        # Regression test (code review finding): a kubectl scale call is
+        # normally near-instant, but KubectlBackedService._run() still
+        # carries a real 20s timeout -- scale must go through the same
+        # background-thread/poll mechanism as start/stop/destroy so a
+        # slow or unreachable cluster can't freeze the whole TUI.
+        release = threading.Event()
         calls: list[tuple[str, ...]] = []
 
         def runner(args):
             calls.append(args)
-            return CommandResult(args, 0, "1", "", 0.0) if "get" in args else CommandResult(args, 0, "scaled", "", 0.0)
+            if "get" in args:
+                return CommandResult(args, 0, "1", "", 0.0)
+            release.wait(timeout=2.0)
+            return CommandResult(args, 0, "scaled", "", 0.0)
 
-        screen = _plain_screen(scale_service=ScaleWorkersService(runner=runner))
+        screen = _plain_screen(catalog=OperationCatalog(), scale_service=ScaleWorkersService(runner=runner))
         _enter_app_menu(screen, "dast")
         _select_action(screen, "scale")
         screen.handle_event(KeyEvent("enter"))
@@ -382,13 +391,60 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         screen.handle_event(KeyEvent("enter"))
 
         self.assertEqual(screen.stage, _Stage.APP_MENU)
+        self.assertTrue(screen.is_executing)
+        release.set()
+        _wait_for_execution(screen)
         self.assertTrue(screen.last_execution.executed)
         self.assertTrue(screen.last_execution.ok)
+        self.assertEqual(
+            screen.last_execution.command,
+            ("microk8s", "kubectl", "-n", "fortify", "scale", "statefulset", "sdast-scanner-scancentral-dast-scanner", "--replicas=4"),
+        )
         scale_calls = [c for c in calls if "scale" in c]
         self.assertEqual(
             scale_calls[0],
             ("-n", "fortify", "scale", "statefulset", "sdast-scanner-scancentral-dast-scanner", "--replicas=4"),
         )
+
+    def test_non_ascii_digit_replica_count_is_rejected_without_scaling(self) -> None:
+        # Regression test (code review finding): str.isdigit() alone
+        # accepts non-ASCII digit characters (Arabic-indic, full-width)
+        # that Bash's ASCII-only ^[0-9]+$ regex would reject -- those must
+        # not reach kubectl's --replicas flag.
+        calls: list[tuple[str, ...]] = []
+        screen = _plain_screen(scale_service=ScaleWorkersService(runner=lambda args: calls.append(args) or CommandResult(args, 0, "1", "", 0.0)))
+        _enter_app_menu(screen, "sast")
+        _select_action(screen, "scale")
+        screen.handle_event(KeyEvent("enter"))
+        calls.clear()
+        screen.handle_event(KeyEvent("４"))  # full-width "4"
+
+        screen.handle_event(KeyEvent("enter"))
+
+        self.assertEqual(screen.stage, _Stage.APP_MENU)
+        self.assertIn("Not a number", screen.last_execution.detail)
+        self.assertEqual(calls, [])
+
+    def test_scale_action_is_blocked_while_another_execution_is_in_flight(self) -> None:
+        release = threading.Event()
+
+        def slow_runner(command):
+            release.wait(timeout=2.0)
+            return CommandResult(args=command, returncode=0, stdout="started", stderr="", duration_seconds=0.0)
+
+        screen = _plain_screen(catalog=OperationCatalog(), runner=OperationRunner(slow_runner))
+        _enter_app_menu(screen, "sast")
+        _select_action(screen, "start")
+        screen.toggle_armed()
+        screen.handle_event(KeyEvent("enter"))
+        self.assertTrue(screen.is_executing)
+
+        _select_action(screen, "scale")
+        screen.handle_event(KeyEvent("enter"))
+
+        self.assertEqual(screen.stage, _Stage.APP_MENU)  # never entered SCALE_WORKERS
+        release.set()
+        _wait_for_execution(screen)
 
     def test_escape_from_scale_workers_cancels_without_scaling(self) -> None:
         calls: list[tuple[str, ...]] = []

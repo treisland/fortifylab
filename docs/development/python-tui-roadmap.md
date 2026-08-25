@@ -883,10 +883,12 @@ gated by numeric free-text input rather than a fixed confirmation phrase
   StatefulSet lookup (`scancentral-sast-worker-linux` for SAST,
   `sdast-scanner-scancentral-dast-scanner` for DAST -- every other app id
   returns `None`), `current_replicas()` (`kubectl get statefulset -o
-  jsonpath={.spec.replicas}`, falling back to `"?"` on failure or blank
-  output, matching Bash's `|| echo "?"`), and `scale()` (`kubectl scale
-  statefulset --replicas=N`). Built on the same `KubectlBackedService`
-  base `AppStatusService`/`DashboardAccessService`/`UrlsCredentialsService`/
+  jsonpath={.spec.replicas}`, falling back to `"?"` on failure, and also
+  on blank-but-successful output -- a case Bash's own `|| echo "?"`
+  doesn't independently handle, since that only fires on kubectl's exit
+  status), and `scale()` (`kubectl scale statefulset --replicas=N`).
+  Built on the same `KubectlBackedService` base
+  `AppStatusService`/`DashboardAccessService`/`UrlsCredentialsService`/
   `LabStatusService` already share.
 - `src/fortifylab/tui/screens/applications.py` — `ApplicationsScreen`
   gained a `Scale workers` action (offered in the same per-app menu for
@@ -895,21 +897,28 @@ gated by numeric free-text input rather than a fixed confirmation phrase
   a `SCALE_WORKERS` stage. Selecting it for SAST/DAST shows the current
   replica count and a `TextField` prompt ("New replica count (leave empty
   to cancel):"); Enter on an empty value cancels silently
-  (`[ -z "$replicas" ] && return`), a non-digit value is rejected with
-  "Not a number" and no `kubectl scale` call
-  (`[[ "$replicas" =~ ^[0-9]+$ ]] || { error ...; return; }`), and a valid
-  count calls `ScaleWorkersService.scale()` synchronously (unlike
-  start/stop/destroy, a `kubectl scale` call is near-instant, so this
-  doesn't need the background-thread/poll machinery those use) and
-  refreshes the live status list. Selecting it for any other app sets the
-  same "Scaling not supported for `<label>`" result Bash's own error
-  produces, without ever calling `kubectl`.
+  (`[ -z "$replicas" ] && return`), a value that isn't all ASCII digits is
+  rejected with "Not a number" and no `kubectl scale` call
+  (`[[ "$replicas" =~ ^[0-9]+$ ]] || { error ...; return; }` -- checked as
+  `value.isascii() and value.isdigit()` rather than bare `.isdigit()`,
+  since the latter alone also accepts non-ASCII digit characters, e.g.
+  Arabic-indic or full-width, that Bash's ASCII-only regex would reject),
+  and a valid count dispatches through the same background-thread/poll
+  mechanism start/stop/destroy already use: `kubectl scale` is normally
+  near-instant, but `KubectlBackedService._run()` still carries a real
+  20s timeout, and there's no reason scale should be the one action that
+  can freeze the whole TUI on a slow or unreachable cluster. Selecting it
+  for any other app sets the same "Scaling not supported for `<label>`"
+  result Bash's own error produces, without ever calling `kubectl`.
 
 **Done when:** Scale workers works for SAST and DAST exactly like Bash's
 `scale_workers()` -- same StatefulSet targets, same empty-cancels/
 non-digit-rejects/valid-scales behavior -- and is a visible, matching
 "not supported" result everywhere else, never a hidden menu entry. Met in
-this pass.
+this pass (a first-pass review found the validation accepted non-ASCII
+digit characters Bash's regex wouldn't, and ran the actual scale
+synchronously rather than through the shared background-thread path --
+both fixed before finalizing).
 
 ## What this PR actually delivers
 
