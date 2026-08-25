@@ -9,6 +9,7 @@ from collections.abc import Sequence
 
 from .config.cli import diagnostics_command, repair_derived_command, validate_command
 from .diagnostics import doctor_command
+from .help import HelpTopicNotFound, topic_check
 from .paths import repo_root
 from .status import status_command
 from .tui.app import run_placeholder_tui
@@ -57,6 +58,21 @@ def build_parser() -> argparse.ArgumentParser:
         description="Print a clone-safe Fortify Lab status summary.",
     )
     status.add_argument("--check", action="store_true", help="run deterministic noninteractive status checks")
+
+
+    help_parser = subparsers.add_parser(
+        "help",
+        help="show offline Fortify Lab help topics",
+        description="Show deterministic offline Fortify Lab help topics.",
+    )
+    help_subparsers = help_parser.add_subparsers(dest="help_command", metavar="HELP_COMMAND")
+    topic = help_subparsers.add_parser(
+        "topic",
+        help="inspect an offline help topic",
+        description="Inspect an offline help topic without network access.",
+    )
+    topic.add_argument("topic_id", help="help topic id or alias, such as ssc or guided/sast")
+    topic.add_argument("--check", action="store_true", help="verify the topic exists and print clone-safe metadata")
 
     config = subparsers.add_parser(
         "config",
@@ -120,6 +136,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "status":
         return status_command(check=bool(args.check))
+
+
+    if args.command == "help":
+        if args.help_command is None:
+            parser.error("help command required")
+        if args.help_command == "topic":
+            try:
+                print(topic_check(str(args.topic_id)))
+            except HelpTopicNotFound as exc:
+                print(f"Unknown help topic: {args.topic_id}", file=sys.stderr)
+                return 1
+            return 0
 
     if args.command == "config":
         if args.config_command is None:

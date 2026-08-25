@@ -842,3 +842,40 @@ Risks:
 
 - Default tests must not execute runbook scripts or probe Kubernetes, Helm, Docker, network, or lab services.
 - Bash wizard retirement and deprecated `src/` cleanup remain M7 work.
+
+### 2026-08-25
+
+Milestone: M6
+
+Workstream: Runbook/Help Implementation
+
+Branch: `agent/runbooks-M6-implementation`
+
+Status: active
+
+Changed:
+
+- Implemented Python-native `fortifylab.runbooks` load, validation, preview, guarded run, command result, and confirmation APIs.
+- Added clone-safe requirement checks through injected lookup/checker functions and injected runbook executor support for tests.
+- Added redacted runbook previews and redacted run results for secret-like parameters.
+- Added `fortifylab.help` offline registry with stable topic lookup, alias preservation, typed lookup errors, and no network dependency.
+- Added deterministic `fortifylab help topic <id> --check` CLI behavior.
+- Preserved existing Runbook Library and Help Center navigation targets.
+
+Verification:
+
+- `python3 -m compileall -q fortifylab` passed.
+- `python3 -m unittest tests.test_m6_runbooks_contract tests.test_m6_runbooks_help -v` passed with 16 tests and no skips.
+- `python3 -m unittest discover -s tests -v` passed with 149 tests.
+
+Next:
+
+- Push `agent/runbooks-M6-implementation` and open a PR against `migration/python-tui`.
+- Let Docs M6 start from the implemented public API and CLI behavior.
+
+Blockers: none.
+
+Risks:
+
+- Run execution remains explicit and environment-dependent; default tests must not execute live lab scripts or probe Kubernetes, Helm, Docker, network, or lab state.
+- Bash wizard retirement and deprecated `src/` cleanup remain M7 work.

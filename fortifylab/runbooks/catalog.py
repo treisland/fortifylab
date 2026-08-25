@@ -7,7 +7,17 @@ import re
 
 from fortifylab.paths import repo_root
 
-from .models import HelpTopic, RunbookMetadata, RunbookParameter, RunbookRisk, source_for_path, source_rank
+from .models import (
+    HelpTopic,
+    RequirementResult,
+    RunbookMetadata,
+    RunbookParameter,
+    RunbookRisk,
+    RunbookValidationReport,
+    check_requirements,
+    source_for_path,
+    source_rank,
+)
 
 
 HELP_TOPICS: tuple[HelpTopic, ...] = (
@@ -67,6 +77,58 @@ def get_help_topic(topic_id: str) -> HelpTopic:
                 return topic
             return HelpTopic(topic_id, topic.label, topic.offline_path, topic.online_route)
     raise KeyError(f"Unknown help topic: {topic_id}")
+
+
+def load_runbook(path: Path, *, runbook_root: Path | None = None) -> RunbookMetadata:
+    metadata = parse_runbook_metadata(path, runbook_root=runbook_root)
+    if metadata is None:
+        raise ValueError(f"Not a FortifyLab runbook: {path}")
+    return metadata
+
+
+def validate_runbook(
+    path: Path,
+    *,
+    runbook_root: Path | None = None,
+    requirement_checker=None,
+) -> RunbookValidationReport:
+    errors: list[str] = []
+    metadata: RunbookMetadata | None = None
+
+    try:
+        metadata = parse_runbook_metadata(path, runbook_root=runbook_root)
+    except KeyError as exc:
+        errors.append(f"missing required metadata field: {exc.args[0]}")
+    except ValueError as exc:
+        errors.append(str(exc))
+
+    if metadata is None:
+        fields = _raw_metadata_fields(path)
+        if fields.get("fortifylab-runbook") != "true":
+            errors.append("missing fortifylab-runbook marker")
+        for field in ("name", "description"):
+            if not fields.get(field):
+                errors.append(f"missing required metadata field: {field}")
+        risk = fields.get("risk")
+        if risk:
+            try:
+                RunbookRisk(risk)
+            except ValueError:
+                errors.append(f"invalid risk: {risk}")
+
+    requires = metadata.requires if metadata is not None else tuple(_split_requires(_raw_metadata_fields(path).get("requires", "")))
+    checker = requirement_checker or (lambda tools: check_requirements(tools))
+    requirement_results = tuple(checker(requires)) if requires else ()
+    for result in requirement_results:
+        available = getattr(result, "available", None)
+        tool = getattr(result, "tool", getattr(result, "name", "requirement"))
+        detail = getattr(result, "detail", "missing")
+        if isinstance(result, RequirementResult):
+            available = result.available
+        if available is False:
+            errors.append(f"missing requirement {tool}: {detail}")
+
+    return RunbookValidationReport(metadata=metadata, errors=tuple(errors), requirement_results=requirement_results)
 
 
 def discover_runbooks(root: Path | None = None) -> tuple[RunbookMetadata, ...]:
@@ -161,3 +223,16 @@ def _split_requires(value: str) -> tuple[str, ...]:
 
 def _trim_value(value: str) -> str:
     return value.strip().strip("\"'")
+
+
+def _raw_metadata_fields(path: Path) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if not stripped.startswith("#"):
+            continue
+        comment = stripped[1:].strip()
+        field_match = re.match(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$", comment)
+        if field_match:
+            fields[field_match.group(1)] = _trim_value(field_match.group(2))
+    return fields
