@@ -6,8 +6,11 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+import os
 import re
 import shlex
+import subprocess
+import time
 
 
 class RunbookRisk(str, Enum):
@@ -92,11 +95,33 @@ class HelpTopic:
     scope: RunbookExecutionScope = RunbookExecutionScope.CLONE_SAFE
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class RequirementCheck:
     name: str
-    description: str = ""
-    scope: RunbookExecutionScope = RunbookExecutionScope.ENVIRONMENT_DEPENDENT
+    description: str
+    scope: RunbookExecutionScope
+    available: bool | None
+    detail: str
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        tool: str | None = None,
+        description: str = "",
+        scope: RunbookExecutionScope = RunbookExecutionScope.ENVIRONMENT_DEPENDENT,
+        available: bool | None = None,
+        detail: str = "",
+    ) -> None:
+        object.__setattr__(self, "name", name or tool or "")
+        object.__setattr__(self, "description", description)
+        object.__setattr__(self, "scope", scope)
+        object.__setattr__(self, "available", available)
+        object.__setattr__(self, "detail", detail)
+
+    @property
+    def tool(self) -> str:
+        return self.name
 
 
 @dataclass(frozen=True)
@@ -131,6 +156,45 @@ class RunbookPreview:
     @property
     def clone_safe(self) -> bool:
         return self.scope is RunbookExecutionScope.CLONE_SAFE
+
+    @property
+    def command_text(self) -> str:
+        parts = [shlex.quote(part) for part in self.command]
+        env_parts = [f"{key}={value}" for key, value in self.environment]
+        return " ".join(env_parts + parts)
+
+    @property
+    def exit_code(self) -> None:
+        return None
+
+
+@dataclass(frozen=True)
+class RunbookValidationReport:
+    metadata: RunbookMetadata | None
+    errors: tuple[str, ...] = ()
+    requirement_results: tuple[object, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        missing = [check for check in self.requirement_results if getattr(check, "available", True) is False]
+        return not self.errors and not missing
+
+
+@dataclass(frozen=True)
+class RunbookCommandResult:
+    command: tuple[str, ...]
+    exit_code: int
+    stdout: str = ""
+    stderr: str = ""
+    duration_seconds: float = 0.0
+
+    @property
+    def ok(self) -> bool:
+        return self.exit_code == 0
+
+
+class RunbookConfirmationRequired(RuntimeError):
+    """Raised when a high-risk runbook is run without explicit confirmation."""
 
 
 def source_for_path(path: Path, runbook_root: Path) -> RunbookSource:
@@ -224,6 +288,63 @@ def run_contract(metadata: RunbookMetadata) -> RunbookPreview:
         command=("bash", str(metadata.path)),
         warnings=_preview_warnings(metadata),
     )
+
+
+def preview_runbook(metadata: RunbookMetadata, parameters: dict[str, str] | None = None) -> RunbookPreview:
+    return command_preview(metadata, parameters)
+
+
+def run_runbook(
+    metadata: RunbookMetadata,
+    *,
+    parameters: dict[str, str] | None = None,
+    confirmed: bool = False,
+    cwd: Path | None = None,
+    executor: Callable[..., RunbookCommandResult] | None = None,
+) -> RunbookCommandResult:
+    if metadata.risk in {RunbookRisk.HIGH, RunbookRisk.DESTRUCTIVE} and not confirmed:
+        raise RunbookConfirmationRequired(f"{metadata.name} requires explicit confirmation")
+
+    command = ("bash", str(metadata.path))
+    run_cwd = cwd or metadata.path.parent
+    env = os.environ.copy()
+    selected = parameters or {}
+    for parameter in metadata.parameters:
+        value = selected.get(parameter.name, parameter.default)
+        if value:
+            env[parameter.env_name] = value
+
+    if executor is None:
+        def default_executor(command: tuple[str, ...], *, cwd: Path, env: dict[str, str]) -> RunbookCommandResult:
+            started = time.monotonic()
+            completed = subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True, check=False)
+            return RunbookCommandResult(
+                command=command,
+                exit_code=completed.returncode,
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                duration_seconds=time.monotonic() - started,
+            )
+
+        executor = default_executor
+
+    result = executor(command, cwd=run_cwd, env=env)
+    return RunbookCommandResult(
+        command=result.command,
+        exit_code=result.exit_code,
+        stdout=_redact_text(result.stdout, metadata, selected),
+        stderr=_redact_text(result.stderr, metadata, selected),
+        duration_seconds=result.duration_seconds,
+    )
+
+
+def _redact_text(text: str, metadata: RunbookMetadata, selected: dict[str, str]) -> str:
+    redacted = text
+    for parameter in metadata.parameters:
+        value = selected.get(parameter.name, parameter.default)
+        if parameter.secret and value:
+            redacted = redacted.replace(value, "<redacted>")
+    return redacted
 
 
 def _preview_warnings(metadata: RunbookMetadata) -> tuple[str, ...]:
