@@ -380,23 +380,23 @@ Workstream: Test
 
 Branch: `agent/test-M2-menu-parity`
 
-Status: active
+Status: complete
 
 Changed:
 
 - Added noninteractive M2 contract tests for menu labels, ordering, action types, number jumps, arrow selection, Enter activation, normalized back/help/quit keys, and disabled reason text.
 - Defined the expected test API around `fortifylab.navigation` and `fortifylab.navigation.controller`.
+- Merged M2 Test PR #453 into `migration/python-tui`.
 
 Next:
 
-- Re-run the M2 tests against the merged navigation model.
-- Adjust tests only if the agreed navigation contract differs deliberately.
+- Carry the same noninteractive testing style into M3 operation adapter tests.
 
 Blockers: none.
 
 Risks:
 
-- The TUI branch must use the tested navigation model rather than duplicating menu state.
+- M3 tests must avoid real Kubernetes, Helm, Docker, or network dependencies.
 
 ### 2026-08-25
 
@@ -406,7 +406,7 @@ Workstream: TUI
 
 Branch: `agent/tui-M2-keybindings`
 
-Status: active
+Status: complete
 
 Changed:
 
@@ -414,11 +414,20 @@ Changed:
 - Activated the M2 keyhandling tests for arrow movement, jump-to-number selection, Enter activation, disabled selections, multi-digit jumps, and normalized back/help/quit keys.
 - Replaced the M1 placeholder shell with a Textual-backed TUI that renders the shared navigation model.
 - Kept `./bin/fortifylab tui --check` deterministic and safe for environments without an interactive terminal.
+- Merged TUI Keybindings PR #455 into `migration/python-tui`.
+
+Acceptance evidence:
+
+- `python3 -m compileall -q fortifylab` passed.
+- `python3 -m unittest tests.test_m2_menu_parity -v` passed with 10 tests.
+- `./bin/fortifylab tui --check` passed and prints the M2 menu.
+- `python3 -m unittest discover -s tests -v` passed with 99 tests.
+- PR #455 `offline-docs` CI passed before merge.
 
 Next:
 
-- Push the feature branch and open the PR against `migration/python-tui`.
-- Watch CI and report the merge recommendation to PM after checks pass.
+- Close M2 in the PM tracker.
+- Open M3 operation adapter workstreams.
 
 Blockers: none.
 
@@ -427,3 +436,34 @@ Risks:
 - Interactive operations remain placeholders until M3 operation adapters land.
 - Full interactive Textual mode requires dependencies from `requirements-python.txt`; noninteractive checks do not.
 
+
+### 2026-08-25
+
+Milestone: M3
+
+Workstream: PM
+
+Branch: `agent/pm-M2-closeout-open-M3`
+
+Status: active
+
+Changed:
+
+- PM gate review accepted M2 as complete.
+- Updated the tracker to set `current_milestone: M3`.
+- Recorded Navigation Model PR #454, M2 Test PR #453, and TUI Keybindings PR #455 as M2 completion evidence.
+- Opened M3 operation adapter work as the next milestone.
+
+Next:
+
+- Merge this closeout branch into `migration/python-tui`.
+- Spawn Operations Adapter on `agent/operations-M3-adapter-catalog`.
+- Spawn M3 Test on `agent/test-M3-operation-adapters`.
+- Spawn Config Design on `agent/config-M4-schema-design` as read-mostly foundation work.
+
+Blockers: none.
+
+Risks:
+
+- M3 must not execute mutating operations without explicit confirmation gates.
+- Config implementation should wait for operation runner boundaries before replacing editor behavior.

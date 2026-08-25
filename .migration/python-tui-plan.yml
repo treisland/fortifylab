@@ -1,7 +1,7 @@
 program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
-current_milestone: M2
+current_milestone: M3
 overall_status: active
 
 goal:
@@ -30,22 +30,25 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-25
-  milestone: M2
-  workstream: tui-M2-keybindings
-  branch: agent/tui-M2-keybindings
+  milestone: M3
+  workstream: pm-M2-closeout-open-M3
+  branch: agent/pm-M2-closeout-open-M3
   status: active
   changed:
-    - Added pure menu key controller with selection, activation, back, help, quit, disabled, and noop results.
-    - Wired the TUI shell to the M2 navigation model with Textual when available.
-    - Kept ./bin/fortifylab tui --check noninteractive and dependency-light.
-    - Activated M2 keyhandling contract tests with no skips.
+    - M2 accepted as complete by PM gate review.
+    - Navigation Model PR #454 merged into migration/python-tui.
+    - M2 Menu Parity Tests PR #453 merged into migration/python-tui.
+    - TUI Keybindings PR #455 merged into migration/python-tui.
+    - Navigation behavior is intentionally defined as jump-highlight plus Enter activation.
+    - M3 operation adapter work opened for the next concurrent wave.
   next:
-    - Push the branch and open the PR against migration/python-tui.
-    - Watch CI and coordinate PM merge after checks pass.
+    - Merge PM closeout into migration/python-tui.
+    - Spawn Operations Adapter and M3 Test agents.
+    - Start Config Design in parallel as read-mostly foundation work.
   blockers: []
   risks:
-    - Interactive operation execution remains intentionally placeholder-only until M3.
-    - Textual must be installed from requirements-python.txt for full interactive mode.
+    - M3 must not execute mutating operations without explicit confirmation gates.
+    - Config implementation should wait for operation runner boundaries before replacing editor behavior.
 
   needs_decision: []
 
@@ -83,12 +86,12 @@ workstreams:
   pm:
     owner: pm-agent
     status: active
-    branch: agent/pm-M1-closeout-open-M2
+    branch: agent/pm-M2-closeout-open-M3
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Close M1 and open M2 coordination.
-    next_task: Spawn Navigation Model and M2 Test agents, then coordinate TUI keybinding work.
+    current_task: Close M2 and open M3 coordination.
+    next_task: Spawn Operations Adapter, M3 Test, and Config Design agents.
     blockers: []
   architecture:
     owner: architecture-agent
@@ -115,27 +118,27 @@ workstreams:
     last_heartbeat: 2026-08-25
   navigation:
     owner: navigation-agent
-    status: active
+    status: complete
     branch: agent/navigation-M2-menu-model
     owns:
       - fortifylab/navigation/
       - tests/test_m2_navigation_model.py
       - docs/development/python-tui-migration.md
       - .migration/python-tui-plan.yml
-    current_task: Encode the documented Bash wizard baseline as deterministic Python menu models.
-    result: Navigation parity baseline captured for M2 implementation.
+    current_task: Completed deterministic Python menu model for the documented Bash wizard baseline.
+    result: Navigation Model PR #454 merged into migration/python-tui.
     blockers: []
     last_heartbeat: 2026-08-25
   tui:
     owner: tui-agent
-    status: active
+    status: complete
     branch: agent/tui-M2-keybindings
     owns:
       - fortifylab/tui/
       - fortifylab/navigation/
       - tests/
-    current_task: Implement Textual screens and keybindings against the M2 menu model.
-    result: M2 keybinding controller and Textual shell are implemented on the feature branch.
+    current_task: Completed Textual shell and keybindings against the M2 menu model.
+    result: TUI Keybindings PR #455 merged into migration/python-tui.
     changed:
       - Pure controller API exists in fortifylab.navigation.controller.
       - Arrow, jump-to-number, Enter activation, back, help, quit, disabled, and multi-digit key paths are covered.
@@ -145,7 +148,7 @@ workstreams:
   operations:
     owner: operations-agent
     status: pending
-    branch: agent/operations-M3-adapters
+    branch: agent/operations-M3-adapter-catalog
     owns:
       - fortifylab/operations/
       - fortifylab/shell_adapters/
@@ -155,7 +158,7 @@ workstreams:
   config:
     owner: config-agent
     status: pending
-    branch: agent/config-M4-engine
+    branch: agent/config-M4-schema-design
     owns:
       - fortifylab/config/
       - tests/
@@ -183,7 +186,7 @@ workstreams:
       - Architecture decisions must be recorded before broad doc rewrites.
   tests:
     owner: test-agent
-    status: active
+    status: complete
     branch: agent/test-M2-menu-parity
     owns:
       - tests/test_m1_entrypoints.py
@@ -192,11 +195,10 @@ workstreams:
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Add M2 menu parity and keybinding-safe contract tests.
-    result: M1 Test PR #450 merged into migration/python-tui.
-    next_task: Re-run M2 contract tests after the navigation model and key controller helpers land.
-    blockers:
-      - Deterministic navigation model and key controller helpers are not merged yet.
+    current_task: Completed M2 menu parity and keybinding-safe contract tests.
+    result: M2 Test PR #453 merged into migration/python-tui.
+    next_task: Start M3 operation adapter tests on agent/test-M3-operation-adapters.
+    blockers: []
     last_heartbeat: 2026-08-25
 
 milestones:
@@ -233,16 +235,31 @@ milestones:
       - ./scripts/validate-docs.sh passed documentation quality gates in CI.
   - id: M2
     name: Navigation parity
-    status: in_progress
+    status: complete
     acceptance:
       - Python menu tree mirrors the current Bash wizard structure.
       - Arrow-key selection works.
       - Jump-to-number selection works.
       - Return, escape, help, and quit behavior are implemented.
       - Menu parity tests cover labels and ordering.
+    completed_at: 2026-08-25
+    pull_requests:
+      - 454
+      - 453
+      - 455
+    evidence:
+      - python3 -m compileall -q fortifylab passed.
+      - python3 -m unittest tests.test_m2_menu_parity -v passed with 10 tests.
+      - ./bin/fortifylab tui --check passed and prints the M2 menu.
+      - python3 -m unittest discover -s tests -v passed with 99 tests.
+      - PR #455 offline-docs CI passed before merge.
+    decisions:
+      - Number keys use jump-highlight behavior and require Enter or Return to activate.
+      - Duplicate number keys are scoped to the current menu id.
+      - Disabled menu items return disabled results with reasons instead of activating.
   - id: M3
     name: Operation adapters
-    status: pending
+    status: in_progress
     acceptance:
       - Existing Bash lifecycle scripts are represented in an operation catalog.
       - Mutating operations show dry-run previews and require confirmation.
