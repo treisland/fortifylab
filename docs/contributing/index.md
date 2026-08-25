@@ -43,11 +43,11 @@ Before every push, run the exact same entry point as CI:
 ```
 
 For Phase 3 Python work, also check the clone-and-run CLI wrapper directly when
-you touch `src/fortifylab/` or `bin/fortifylab`:
+you touch `fortifylab/` or `bin/fortifylab`:
 
 ```bash
 ./bin/fortifylab --help
-python3 -m unittest tests.test_python_cli tests.test_python_command_adapter
+python3 -m unittest tests.test_m1_entrypoints tests.test_m7_entrypoint_compatibility
 ```
 
 The gate does not contact Kubernetes or require a Fortify license. It runs all

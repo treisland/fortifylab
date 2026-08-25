@@ -184,6 +184,32 @@ class M7RetirementCliTests(unittest.TestCase):
 
 
 class M7RetiredInternalsDiscoveryTests(unittest.TestCase):
+    def test_deprecated_preview_artifacts_are_removed(self) -> None:
+        removed_paths = (
+            ROOT / "src" / "fortifylab",
+            ROOT / "tests" / "quarantine" / "python_preview",
+        )
+
+        for path in removed_paths:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertFalse(path.exists())
+
+    def test_bash_wizard_sources_remain_out_of_scope_for_this_branch(self) -> None:
+        wizard_dir = ROOT / "scripts" / "wizard"
+        self.assertTrue(wizard_dir.is_dir())
+        for filename in (
+            "app-registry.sh",
+            "env.sh",
+            "guided.sh",
+            "menu.sh",
+            "operations.sh",
+            "runbooks.sh",
+            "scan-demo.sh",
+            "setup.sh",
+        ):
+            with self.subTest(filename=filename):
+                self.assertTrue((wizard_dir / filename).is_file())
+
     def test_supported_catalogs_do_not_expose_retired_wizard_or_quarantine_paths(self) -> None:
         forbidden_parts = {
             "src",

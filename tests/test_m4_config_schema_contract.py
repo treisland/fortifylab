@@ -23,7 +23,7 @@ class ConfigSchemaContractTests(unittest.TestCase):
         self.assertIn(EnvDocumentCapability.BACKUP_BEFORE_WRITE, capabilities)
         self.assertIn(EnvDocumentCapability.DRY_RUN_DIFFS, capabilities)
         self.assertIn(EnvDocumentCapability.REDACT_SECRETS_IN_DIFFS, capabilities)
-        self.assertEqual(M4_CONFIG_CONTRACT.deprecated_bridge, "src/fortifylab/config")
+        self.assertEqual(M4_CONFIG_CONTRACT.implementation_package, "fortifylab/config")
 
     def test_sections_keep_current_configuration_editor_shape(self) -> None:
         section_ids = {section.id for section in CONFIG_SECTIONS}

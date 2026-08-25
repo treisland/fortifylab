@@ -31,23 +31,23 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M7
-  workstream: test-M7-retirement
-  branch: agent/test-M7-retirement
+  workstream: src-M7-retirement
+  branch: agent/src-M7-retirement
   status: active
   changed:
-    - Entry compatibility PR #470 and retirement audit PR #471 landed before the retirement test integration.
-    - Added clone-safe M7 retirement tests for supported Python CLI and start_wizard.sh shim commands.
-    - Added src import guard tests so supported entrypoints fail if they resolve through the deprecated preview package.
-    - Added discovery guardrails for runbooks, help topics, operation catalog scripts, and default unittest discovery.
+    - Removed deprecated src/fortifylab preview package after supported M1-M7 entrypoints resolved through the root fortifylab/ package.
+    - Removed tests/quarantine/python_preview after active M1-M7 tests covered retained CLI, config, diagnostics, operations, navigation, runbook, and compatibility contracts.
+    - Replaced active src/fortifylab references in contributor and modular Bash architecture docs with root package guidance.
+    - Updated M7 retirement coverage to assert deprecated preview artifacts stay removed while scripts/wizard remains out of scope.
   next:
-    - Merge the M7 test PR against migration/python-tui.
-    - Coordinate with M7 cleanup agents so these contracts stay active while retired internals are removed or quarantined.
+    - Open this cleanup PR against migration/python-tui.
+    - Leave Bash adapter, scripts/wizard, and Bash quarantine cleanup to focused M7 parity/docs branches.
   blockers: []
   risks:
     - Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
     - Keep start_wizard.sh as a minimal compatibility shim unless docs and tests explicitly retire it.
     - Default tests must remain clone-safe and avoid live Kubernetes, Helm, Docker, or network dependencies.
-    - User docs still present the Bash wizard as the long-term guided app and need a focused M7 docs migration.
+    - Do not remove scripts/wizard/* in this source cleanup branch.
 
   needs_decision:
     - Confirm whether start_wizard.sh doctor/status/help topic aliases are long-term compatibility or migration-only affordances.
@@ -262,7 +262,6 @@ workstreams:
       - tests/test_m5_diagnostics.py
       - tests/test_m6_runbooks_help.py
       - tests/test_m7_retirement_contract.py
-      - tests/quarantine/python_preview/
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
