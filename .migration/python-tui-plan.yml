@@ -31,26 +31,26 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M7
-  workstream: src-M7-retirement
-  branch: agent/src-M7-retirement
+  workstream: docs-M7-supported-architecture
+  branch: agent/docs-M7-supported-architecture
   status: active
   changed:
-    - Bash adapter boundary PR #473 landed before source cleanup integration.
-    - Removed deprecated src/fortifylab preview package after supported M1-M7 entrypoints resolved through the root fortifylab/ package.
-    - Removed tests/quarantine/python_preview after active M1-M7 tests covered retained CLI, config, diagnostics, operations, navigation, runbook, and compatibility contracts.
-    - Replaced active src/fortifylab references in contributor and modular Bash architecture docs with root package guidance.
-    - Updated M7 retirement coverage to assert deprecated preview artifacts and retired scripts/wizard internals stay removed.
+    - Updated README and user docs to present ./bin/fortifylab as the supported Python CLI/TUI entrypoint.
+    - Documented ./start_wizard.sh as an M7/M8 compatibility shim for --help, doctor, status, help topic ..., and config-diagnostics instead of the supported interactive app.
+    - Removed current-doc examples for unsupported retired Bash wizard commands such as apply-flight-plan and --accept-lab-use.
+    - Clarified that retained Bash scripts are low-level bootstrap, certificate, secret, and app lifecycle adapters, not the interactive application implementation.
+    - Kept historical migration/ADR context while marking post-M7 Python CLI/TUI ownership explicitly.
   next:
-    - Merge this cleanup PR against migration/python-tui.
-    - Start focused M7 docs migration for supported Python architecture and remaining stale legacy command references.
+    - Run M7 retirement, full unittest, CLI smoke, stale-reference, and diff checks.
+    - Open docs PR against migration/python-tui after verification.
   blockers: []
   risks:
-    - Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
-    - Keep start_wizard.sh as a minimal compatibility shim unless docs and tests explicitly retire it.
+    - Do not document generic start_wizard.sh forwarding as supported automation.
+    - Do not reintroduce scripts/wizard internals or deprecated src/fortifylab preview language as active architecture.
     - Default tests must remain clone-safe and avoid live Kubernetes, Helm, Docker, or network dependencies.
 
   needs_decision:
-    - Confirm whether start_wizard.sh doctor/status/help topic aliases are long-term compatibility or migration-only affordances.
+    - Confirm before M8 whether the start_wizard.sh compatibility shim is removed entirely or retained for a longer deprecation window.
 
 
 open_decisions:

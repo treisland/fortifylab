@@ -17,26 +17,21 @@ this lab automation into a production-ready installation.
 
 ## Acknowledgement
 
-On first launch, and therefore before the first deployment, the wizard displays
-the full notice and requires the operator to type `LAB`. A versioned marker is
+On first guided launch, and therefore before the first deployment, Fortify Lab
+displays the full notice and requires the operator to type `LAB`. A versioned marker is
 stored in `${XDG_CONFIG_HOME}/fortify-lab/acknowledged-lab-use`, or in
 `${HOME}/.config/fortify-lab/acknowledged-lab-use` when `XDG_CONFIG_HOME` is
 unset. The marker contains no secret or environment configuration. It is never
 stored in `.env` or elsewhere in the repository.
 
-The main menu continues to identify the environment as lab/demo only. The
-wizard repeats focused warnings before generating an administrator token and
-before destructive actions. Help should expose a reset action; after reset, the
-full acknowledgement is required at the next launch.
+The guided interface continues to identify the environment as lab/demo only.
+Fortify Lab repeats focused warnings before generating an administrator token
+and before destructive actions. Help should expose a reset action; after reset,
+the full acknowledgement is required at the next guided launch.
 
-For deliberate unattended lab automation, pass `--accept-lab-use`:
-
-```bash
-./start_wizard.sh --accept-lab-use
-```
-
-This explicit flag records the same marker. It must not be inferred from a
-generic `--yes`, an environment variable, redirected input, or the presence of
-`.env`. Unknown arguments must still be rejected by the wizard. The flag only
-acknowledges the lab-use boundary; it does not waive other confirmations,
-including destructive-action confirmation.
+The retired Bash wizard `--accept-lab-use` flag is not part of the supported M7
+compatibility shim. Unattended acknowledgement should be restored only through
+a deliberate Python CLI/TUI command with tests that preserve the same safety
+boundary: it must not be inferred from a generic `--yes`, an environment
+variable, redirected input, or the presence of `.env`, and it must not waive
+other confirmations, including destructive-action confirmation.

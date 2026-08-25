@@ -1,8 +1,10 @@
 # Deployment, resume, and lifecycle safety
 
-Use `./start_wizard.sh` as your normal user. Guided deployment lets the operator
-choose a deployment profile, expands required dependencies, previews the active
-plan, and resumes at the first missing layer:
+Use `./bin/fortifylab` as your normal user. Fortify Lab is now a Python
+CLI/TUI-first operator tool; `./start_wizard.sh` remains only as a compatibility
+shim for the supported legacy aliases through M8. Guided deployment lets the
+operator choose a deployment profile, expands required dependencies, previews
+the active plan, and resumes at the first missing layer:
 
 1. host prerequisites and MicroK8s;
 2. lab TLS certificates;
@@ -79,9 +81,10 @@ rotates trust and requires dedicated clients to import the new public CA.
 
 ## Guided deployment orchestration contract
 
-Guided deployment should behave like a small orchestrator around the component
-scripts. A script returning success means the operation was launched or applied;
-the guided step is not complete until its lifecycle verification passes.
+Guided deployment should behave like a small Python orchestrator around retained
+low-level component scripts. A script returning success means the operation was
+launched or applied; the guided step is not complete until its lifecycle
+verification passes.
 
 Each guided step has these lifecycle states:
 
@@ -126,17 +129,12 @@ fails or times out, the wizard should name the failed probe, show live
 diagnostics, offer contextual pod logs, keep sanitized diagnostics bundle export
 separate, and offer Retry, Help, interactive control, or safe quit.
 
-The shell implementation exposes stable hooks for this contract:
-
-- `guided_apply_deployment_profile`
-- `guided_step_probe`
-- `guided_step_timeout`
-- `guided_step_in_progress`
-- `guided_wait_for_step`
-- `guided_run_and_verify`
-- `guided_countdown`
-- `guided_live_diagnostics`
-- `guided_diagnostics_bundle`
+The retired Bash wizard internals are no longer the supported application
+implementation. Keep new menu, guided workflow, configuration, runbook, status,
+and diagnostics behavior in the Python package. Retained Bash remains at the
+adapter boundary: host bootstrap scripts, certificate and secret generation,
+and `apps/**/{start,stop,destroy}.sh` lifecycle scripts that Python can preview
+and invoke deliberately.
 
 ## Uninstall versus data deletion
 

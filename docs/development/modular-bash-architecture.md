@@ -1,6 +1,6 @@
 # Retired Bash Wizard Architecture
 
-This page is historical M7 migration context. The interactive Bash wizard modules under `scripts/wizard/` have been removed on the Python TUI migration branch. `start_wizard.sh` remains only as a compatibility shim that delegates to `./bin/fortifylab`.
+This page is historical M7 migration context. The interactive Bash wizard modules under `scripts/wizard/` have been removed on the Python TUI migration branch. `start_wizard.sh` remains only as a compatibility shim for `--help`, `doctor`, `status`, `help topic ...`, and `config-diagnostics` through M8.
 
 Retained Bash is limited to low-level operation adapters and host bootstrap helpers:
 
