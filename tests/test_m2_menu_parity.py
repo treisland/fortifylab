@@ -173,6 +173,27 @@ class M2KeyHandlingTests(unittest.TestCase):
         self.assertEqual(value(up, "kind"), "select")
         self.assertEqual(value(value(controller, "selected_item"), "key"), "0")
 
+    def test_disabled_selection_returns_reason_without_activation(self) -> None:
+        controller = key_controller.MenuController(navigation.get_menu("main"))
+
+        controller.handle_key("5")
+        result = controller.handle_key("enter")
+
+        self.assertEqual(value(result, "kind"), "disabled")
+        self.assertIsNone(value(result, "activated_item"))
+        self.assertEqual(value(value(result, "selected_item"), "key"), "5")
+        self.assertIsInstance(value(result, "disabled_reason"), str)
+        self.assertIn("deploy SSC", value(result, "disabled_reason"))
+
+    def test_multi_digit_number_keys_are_scoped_to_current_menu(self) -> None:
+        controller = key_controller.MenuController(navigation.get_menu("more_tools"))
+
+        result = controller.handle_key("10")
+
+        self.assertEqual(value(result, "kind"), "select")
+        self.assertEqual(value(value(controller, "selected_item"), "key"), "10")
+        self.assertIsNone(value(result, "activated_item"))
+
     def test_back_help_and_quit_keys_are_normalized(self) -> None:
         expected = {
             "r": "back",

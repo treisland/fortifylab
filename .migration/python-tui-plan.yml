@@ -31,24 +31,21 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M2
-  workstream: pm-M1-closeout-open-M2
-  branch: agent/pm-M1-closeout-open-M2
+  workstream: tui-M2-keybindings
+  branch: agent/tui-M2-keybindings
   status: active
   changed:
-    - M1 accepted as complete by PM gate review.
-    - Architecture PR #451 merged into migration/python-tui.
-    - Test PR #450 merged into migration/python-tui.
-    - Entry point, import, compile, unittest, and docs acceptance evidence recorded.
-    - M2 navigation parity opened for the next concurrent wave.
+    - Added pure menu key controller with selection, activation, back, help, quit, disabled, and noop results.
+    - Wired the TUI shell to the M2 navigation model with Textual when available.
+    - Kept ./bin/fortifylab tui --check noninteractive and dependency-light.
+    - Activated M2 keyhandling contract tests with no skips.
   next:
-    - Merge PM closeout into migration/python-tui.
-    - Spawn Navigation Model and M2 Test agents.
-    - Start TUI keybinding work after the menu model contract is visible or with close coordination.
+    - Push the branch and open the PR against migration/python-tui.
+    - Watch CI and coordinate PM merge after checks pass.
   blockers: []
   risks:
-    - Behavior-level coverage from quarantined tests must be reintroduced milestone by milestone.
-    - Deprecated src/ preview concepts need milestone-by-milestone recovery or deletion.
-    - M2 must preserve navigation before improving product flow.
+    - Interactive operation execution remains intentionally placeholder-only until M3.
+    - Textual must be installed from requirements-python.txt for full interactive mode.
 
   needs_decision: []
 
@@ -131,15 +128,20 @@ workstreams:
     last_heartbeat: 2026-08-25
   tui:
     owner: tui-agent
-    status: pending
+    status: active
     branch: agent/tui-M2-keybindings
     owns:
       - fortifylab/tui/
       - fortifylab/navigation/
       - tests/
     current_task: Implement Textual screens and keybindings against the M2 menu model.
-    blockers:
-      - Initial M2 menu model contract not visible yet
+    result: M2 keybinding controller and Textual shell are implemented on the feature branch.
+    changed:
+      - Pure controller API exists in fortifylab.navigation.controller.
+      - Arrow, jump-to-number, Enter activation, back, help, quit, disabled, and multi-digit key paths are covered.
+      - TUI shell renders the shared navigation model and avoids real operation wiring in M2.
+    blockers: []
+    last_heartbeat: 2026-08-25
   operations:
     owner: operations-agent
     status: pending
