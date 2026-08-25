@@ -31,25 +31,26 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M7
-  workstream: pm-M6-closeout-open-M7
-  branch: agent/pm-M6-closeout-open-M7
+  workstream: entrypoint-compatibility
+  branch: agent/entrypoints-M7-compatibility
   status: active
   changed:
-    - M6 accepted as complete by PM gate review.
-    - Runbook/help contract PR #466, tests PR #465, implementation PR #467, and docs PR #468 merged into migration/python-tui.
-    - M6 verification passed with 149 default tests and 16 active M6 tests.
-    - M7 Bash wizard retirement and deprecated source cleanup opened for the next milestone.
+    - Defined M7 start_wizard.sh compatibility behavior as a minimal shim over ./bin/fortifylab.
+    - Added clone-safe tests for --help, tui --check, config-diagnostics, doctor, status, and help topic compatibility.
+    - Preserved scripts/wizard and deprecated src preview files for the separate M7 cleanup decisions.
   next:
-    - Merge PM closeout into migration/python-tui.
-    - Spawn M7 retirement audit and compatibility/test agents.
-    - Defer destructive removals until the audit classifies keep, migrate, remove, or adapter boundaries.
+    - Run M7 entrypoint compatibility tests and the default unittest suite.
+    - Open PR against migration/python-tui.
+    - Ask PM whether legacy doctor/status/help topic shims should remain after M8 or only through migration.
   blockers: []
   risks:
     - Do not remove Bash lifecycle scripts still used by the M3 operation catalog.
     - Keep start_wizard.sh as a minimal compatibility shim unless docs and tests explicitly retire it.
     - Default tests must remain clone-safe and avoid live Kubernetes, Helm, Docker, or network dependencies.
+    - User docs still present the Bash wizard as the long-term guided app and need a focused M7 docs migration.
 
-  needs_decision: []
+  needs_decision:
+    - Confirm whether start_wizard.sh doctor/status/help topic aliases are long-term compatibility or migration-only affordances.
 
 
 open_decisions:
