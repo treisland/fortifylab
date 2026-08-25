@@ -1,7 +1,7 @@
 program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
-current_milestone: M7
+current_milestone: M8
 overall_status: active
 
 goal:
@@ -30,24 +30,24 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-25
-  milestone: M7
-  workstream: docs-M7-supported-architecture
-  branch: agent/docs-M7-supported-architecture
+  milestone: M8
+  workstream: pm-M7-closeout-open-M8
+  branch: agent/pm-M7-closeout-open-M8
   status: active
   changed:
-    - Updated README and user docs to present ./bin/fortifylab as the supported Python CLI/TUI entrypoint.
-    - Documented ./start_wizard.sh as an M7/M8 compatibility shim for --help, doctor, status, help topic ..., and config-diagnostics instead of the supported interactive app.
-    - Removed current-doc examples for unsupported retired Bash wizard commands such as apply-flight-plan and --accept-lab-use.
-    - Clarified that retained Bash scripts are low-level bootstrap, certificate, secret, and app lifecycle adapters, not the interactive application implementation.
-    - Kept historical migration/ADR context while marking post-M7 Python CLI/TUI ownership explicitly.
+    - Closed M7 after final retirement, docs alignment, and regression evidence landed in migration/python-tui.
+    - Recorded M7 merged PRs #470, #471, #472, #473, #474, #475, and #476.
+    - Confirmed retired paths remain absent: src/fortifylab, tests/quarantine/python_preview, and scripts/wizard.
+    - Opened M8 for merge-back readiness from migration/python-tui to dev.
   next:
-    - Run M7 retirement, full unittest, CLI smoke, stale-reference, and diff checks.
-    - Open docs PR against migration/python-tui after verification.
+    - Run M8 release readiness audit.
+    - Run M8 final verification.
+    - Prepare merge-back PR summary and conflict strategy for dev.
   blockers: []
   risks:
-    - Do not document generic start_wizard.sh forwarding as supported automation.
-    - Do not reintroduce scripts/wizard internals or deprecated src/fortifylab preview language as active architecture.
-    - Default tests must remain clone-safe and avoid live Kubernetes, Helm, Docker, or network dependencies.
+    - Keep start_wizard.sh documented as a compatibility shim, not a primary command surface.
+    - Do not remove retained Bash operation adapters still referenced by the Python operation catalog.
+    - Local full docs site build depends on mkdocs; use CI docs evidence if mkdocs is absent locally.
 
   needs_decision:
     - Confirm before M8 whether the start_wizard.sh compatibility shim is removed entirely or retained for a longer deprecation window.
@@ -86,12 +86,12 @@ workstreams:
   pm:
     owner: pm-agent
     status: active
-    branch: agent/pm-M5-closeout-open-M6
+    branch: agent/pm-M7-closeout-open-M8
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Close M5 and open M6 coordination.
-    next_task: Spawn Runbook/Help Contract and M6 Test agents, then coordinate implementation/docs work.
+    current_task: Close M7 and open M8 merge-back coordination.
+    next_task: Spawn M8 release readiness, final verification, and merge-back prep agents.
     blockers: []
   architecture:
     owner: architecture-agent
@@ -452,7 +452,24 @@ milestones:
       - Local ./scripts/validate-docs.sh passed Markdown and unittest gates, then stopped because local mkdocs is not installed; remote offline-docs passed.
   - id: M7
     name: Bash wizard retirement
-    status: in_progress
+    status: complete
+    completed_at: 2026-08-25
+    merged_prs:
+      - 470
+      - 471
+      - 472
+      - 473
+      - 474
+      - 475
+      - 476
+    merge_commits:
+      - ecd88585b2d0784f6a89032e9b1b13e138ea969a
+      - 815acf74895ba8fc9c33002c9c9e38d8044caf08
+      - 86c383d99531a0f9d2bb96efa07745ff3cd1dfc3
+      - 0e09c0b3a307037a9fb69f468e4517e03a232e0a
+      - 365f8ce6994b6fe3e459a0352d1d66617d03e95a
+      - ea43c07c5026cdc5efe15837e39111ea157dce48
+      - aca5774bb6a41588bdd76db013b132c89b167f04
     acceptance:
       - start_wizard.sh no longer contains the application wizard.
       - Deprecated src preview references are removed or intentionally migrated.
@@ -478,9 +495,20 @@ milestones:
       - start_wizard.sh remains a minimal compatibility shim for M7 unless a focused compatibility PR retires it explicitly.
   - id: M8
     name: Merge back to dev
-    status: pending
+    status: in_progress
+    opened_at: 2026-08-25
     acceptance:
       - All milestone acceptance tests pass.
       - Migration tracker is complete.
       - Maintainer docs explain the final architecture.
       - migration/python-tui is ready for integration into dev.
+    planned_agents:
+      - branch: agent/release-M8-readiness
+        scope: Audit tracker and docs consistency, verify M0-M7 complete, and prepare final merge-back checklist.
+      - branch: agent/test-M8-final-verification
+        scope: Rerun full tests, CLI compatibility checks, retired-path scans, adapter-reference checks, and docs gates.
+      - branch: agent/merge-M8-dev-prep
+        scope: Prepare PR summary from migration/python-tui to dev, collect milestone evidence, identify conflicts, and recommend merge strategy.
+    notes:
+      - M8 is governance and integration quality only; no new product features should be added.
+      - M7 local docs validation passed Markdown and unittest gates but did not complete a full local docs site build because mkdocs is not installed locally.
