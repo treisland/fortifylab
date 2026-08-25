@@ -458,6 +458,18 @@ milestones:
       - Deprecated src preview references are removed or intentionally migrated.
       - Docs and tests reflect the Python TUI as the supported path.
       - Bash remains only for low-level adapters that are still intentionally retained.
+    evidence:
+      - Final regression branch agent/test-M7-final-retirement-regression verified PR #475 base ea43c07.
+      - Fixed stale scripts/tools/flight-plans.py help text that advertised retired start_wizard.sh apply-flight-plan examples as current workflow.
+      - Retired paths remain absent: src/fortifylab, tests/quarantine/python_preview, and scripts/wizard.
+      - Retired-reference scan found no active supported runtime/docs examples pointing users to deleted paths or retired commands; remaining hits are retirement guidance, contract tests, or quarantined historical Bash tests.
+      - python3 -m compileall -q fortifylab passed.
+      - python3 -m unittest discover -s tests passed with 165 tests.
+      - ./bin/fortifylab doctor --check, status --check, tui --check, and config diagnostics passed.
+      - ./start_wizard.sh --help, doctor, status, help topic guided/sast, and config-diagnostics passed.
+      - ./scripts/validate-docs.sh passed Markdown and unittest gates, then stopped because local mkdocs is not installed.
+      - ./scripts/tools/flight-plans.py --help passed and no longer advertises retired start_wizard.sh apply-flight-plan examples.
+      - git diff --check passed.
     notes:
       - Audit branch agent/retirement-M7-audit found scripts/wizard internals are not M3 catalog dependencies and should not be kept as operation adapters.
       - Bash boundary branch agent/bash-M7-adapter-boundary removed scripts/wizard/*.sh after supported compatibility tests confirmed shim/config/doctor/status/help/tui paths no longer source them.
