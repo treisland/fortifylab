@@ -335,3 +335,31 @@ Risks:
 
 - M2 must preserve the documented Bash wizard navigation before improving flow design.
 - No mutating operation wiring belongs in M2; that is M3.
+
+### 2026-08-25
+
+Milestone: M2
+
+Workstream: Test
+
+Branch: `agent/test-M2-menu-parity`
+
+Status: active
+
+Changed:
+
+- Added noninteractive M2 contract tests for menu labels, ordering, action types, number jumps, arrow selection, Enter activation, normalized back/help/quit keys, and disabled reason text.
+- Defined the expected test API around `fortifylab.navigation` and `fortifylab.navigation.controller`.
+
+Next:
+
+- Re-run the M2 tests after the deterministic Python menu model and key controller helpers land.
+
+Blockers:
+
+- The deterministic navigation model and key controller helpers are not merged yet; the contract tests skip until those dependencies exist.
+
+Risks:
+
+- The Navigation Model branch must match the documented contract or coordinate a deliberate test update before TUI keybinding work depends on it.
+
