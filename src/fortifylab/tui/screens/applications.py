@@ -226,9 +226,14 @@ class ApplicationsScreen(Armable, Screen):
             f"Type '{phrase}' to confirm:",
             "",
             f"  {self.confirm_field.render()}",
-            "",
-            self.style.muted("enter to confirm, escape to cancel"),
         ]
+        if self.is_executing:
+            # A previous submission (this app's rejected confirmation, or
+            # another app's destroy) hasn't been polled/cleared yet --
+            # without this, pressing enter here is a silent no-op with no
+            # visible feedback for why nothing happened.
+            lines.extend(("", self.style.warn("Still processing a previous request -- try again in a moment.")))
+        lines.extend(("", self.style.muted("enter to confirm, escape to cancel")))
         return "\n".join(lines) + "\n"
 
     def _current_url(self, url_key: str) -> str:

@@ -279,6 +279,34 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         self.assertTrue(screen.last_execution.ok)
         self.assertEqual(screen.last_execution.operation_id, "app.ssc.destroy")
 
+    def test_confirm_destroy_shows_a_busy_message_while_a_previous_submission_is_still_in_flight(self) -> None:
+        # Regression test (code review finding): pressing enter on a
+        # confirm-destroy screen while a previous submission (this app's
+        # rejected phrase, or another app's destroy) is still executing
+        # used to be a silent no-op -- nothing told the operator why
+        # nothing happened.
+        release = threading.Event()
+
+        def slow_runner(command):
+            release.wait(timeout=2.0)
+            return CommandResult(args=command, returncode=0, stdout="destroyed", stderr="", duration_seconds=0.0)
+
+        screen = _plain_screen(catalog=OperationCatalog(), runner=OperationRunner(slow_runner))
+        _enter_app_menu(screen, "ssc")
+        _select_action(screen, "destroy")
+        screen.handle_event(KeyEvent("enter"))
+        for char in "DESTROY ssc":
+            screen.handle_event(KeyEvent(char))
+        screen.handle_event(KeyEvent("enter"))  # dispatches in the background, is_executing=True
+
+        # Re-open the confirm screen for the same app while still executing.
+        screen.stage = _Stage.CONFIRM_DESTROY
+        rendered = screen.render()
+        self.assertIn("Still processing a previous request", rendered)
+
+        release.set()
+        _wait_for_execution(screen)
+
     def test_destroy_row_is_styled_as_a_warning_in_the_app_menu(self) -> None:
         screen = _plain_screen(style=TerminalStyle(color=True, symbols=True))
         _enter_app_menu(screen, "ssc")

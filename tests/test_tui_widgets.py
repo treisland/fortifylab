@@ -52,6 +52,16 @@ class TextFieldTests(unittest.TestCase):
         field = TextField()
         self.assertFalse(field.handle_key(TickEvent(0.0)))
 
+    def test_control_characters_are_not_appended(self) -> None:
+        # A raw tab or newline delivered as a single-char KeyEvent.key
+        # (isprintable() returns False for both) must not slip into the
+        # buffer -- this is the one edge case explicitly worth locking in,
+        # since a naive len(key) == 1 check alone wouldn't catch it.
+        field = TextField()
+        for key in ("\t", "\n"):
+            self.assertFalse(field.handle_key(KeyEvent(key)))
+        self.assertEqual(field.value, "")
+
     def test_handle_key_reports_whether_it_consumed_the_event(self) -> None:
         field = TextField()
         self.assertTrue(field.handle_key(KeyEvent("D")))
