@@ -1,72 +1,15 @@
-# Modular Bash Architecture
+# Retired Bash Wizard Architecture
 
-`start_wizard.sh` is the compatibility entrypoint for the interactive lab
-wizard. It owns process setup, colors, shared marks, cluster CLI detection, and
-argument dispatch. Feature logic lives in modules under `scripts/wizard/`.
+This page is historical M7 migration context. The interactive Bash wizard modules under `scripts/wizard/` have been removed on the Python TUI migration branch. `start_wizard.sh` remains only as a compatibility shim that delegates to `./bin/fortifylab`.
 
-## Module Ownership
+Retained Bash is limited to low-level operation adapters and host bootstrap helpers:
 
-- `env.sh` loads `.env` and creates it from `.env.example` on first run.
-- `app-registry.sh` owns component registry metadata and URL display helpers.
-- `operations.sh` owns status rendering, app lifecycle, logs, credentials,
-  configuration, diagnostics, FCLI, and prerequisite helpers.
-- `guided.sh` owns deployment profiles, guided step state, probes, wait screens,
-  deployment orchestration, and preflight checks.
-- `menu.sh` owns the first-time welcome flow and main menu.
-- `runbooks.sh` owns Runbook Library discovery, metadata parsing, validation, parameter prompts, previews, and execution.
+- app lifecycle adapters under `apps/**/start.sh`, `apps/**/stop.sh`, and `apps/**/destroy.sh`, which are referenced by `fortifylab.operations.catalog`;
+- host/lab bootstrap scripts such as `scripts/create-certs.sh`, `scripts/create-secrets.sh`, and `scripts/install_microk8s.sh`;
+- shared `scripts/lib/*.sh` helpers when they are used by retained lifecycle, bootstrap, or runbook scripts.
 
-## Loading Contract
+Do not add new menu, guided workflow, config editor, runbook browser, or status behavior under `scripts/wizard/`. New user-facing application behavior belongs in the root `fortifylab/` Python package and should expose clone-safe tests that avoid live Kubernetes, Helm, Docker, network, or lab requirements by default.
 
-All wizard modules are sourced from `start_wizard.sh` through
-`source_wizard_module`. Do not source wizard modules from each other. Shared
-functions should be available after the entrypoint has loaded every module.
+The old Bash wizard modules are intentionally not operation adapters. Lifecycle behavior that remains available to Python is represented by the operation catalog and executes existing app scripts directly, with previews and confirmation metadata in Python.
 
-Keep dependency direction simple:
-
-- entrypoint -> `scripts/lib/*` and `scripts/wizard/*`
-- menus -> wizard/lib functions
-- wizard modules -> shared globals and sourced library helpers
-- app scripts -> app-specific deployment work
-
-## Naming
-
-Use prefixes for new functions so future modules do not collide:
-
-- `ui_` for reusable user-interface helpers
-- `env_` for `.env` parsing, edits, backups, and repair
-- `k8s_` for Kubernetes and Helm helpers
-- `guided_` for guided deployment state and orchestration
-- `lab_lifecycle_` for start, shutdown, and destroy workflows
-- `credential_` for credential handoff helpers
-
-Avoid generic function names such as `run`, `status`, `render`, or `check`.
-
-## Error Handling
-
-Helper functions should return `0` for success and nonzero for failure. Prefer
-`error` for user-facing failures and `wizard_log_event` for operational detail.
-Avoid `exit` inside helpers unless the current process cannot continue.
-
-## Python Migration Boundary
-
-Phase 3 keeps this modular Bash layout as reference material and a temporary
-compatibility surface while supported application behavior moves into Python.
-`start_wizard.sh` should stay small and delegate supported commands through
-`./bin/fortifylab`; do not add new user-facing behavior to the retired preview
-package or old wizard dispatcher path.
-
-New application logic belongs in the root `fortifylab/` package. Bash modules
-may call Python commands only when the Python behavior has tests and preserves
-the operator-facing exit behavior, messages, and safety boundaries.
-
-## Validation
-
-Before opening a PR for wizard changes, run:
-
-```bash
-bash -n start_wizard.sh scripts/wizard/*.sh scripts/lib/*.sh
-python3 -m unittest tests.test_guided_wizard tests.test_wizard_contract
-```
-
-Run the broader test suite when a change touches docs, lifecycle behavior,
-Kubernetes object contracts, or user-facing help.
+The deprecated Python preview package under `src/fortifylab` has also been removed on the migration branch. New application logic belongs in the root `fortifylab/` package; new compatibility behavior should be covered by clone-safe tests before it is documented.

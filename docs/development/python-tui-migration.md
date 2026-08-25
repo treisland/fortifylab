@@ -297,27 +297,27 @@ follow-up branches with compatibility tests.
 | `./start_wizard.sh` | Keep as compatibility shim | Already delegates to `./bin/fortifylab` and preserves `config-diagnostics`. Do not break it during M7 cleanup unless a focused compatibility PR explicitly retires it. |
 | `./start_wizard.sh config-diagnostics` | Keep as compatibility shim | Supported alias for `./bin/fortifylab config diagnostics`; keep until docs/tests decide to remove the legacy alias. |
 | `./start_wizard.sh --help` and generic argument forwarding | Keep as compatibility shim | Current shim forwards to the Python CLI; lock this with compatibility coverage before deleting any old Bash internals. |
-| `./start_wizard.sh --accept-lab-use` | Migrate or document | Still appears in lab-use/user docs, but the shim now forwards to Python. Either implement/verify Python behavior or update docs to the supported acknowledgement path. |
+| `./start_wizard.sh --accept-lab-use` | Not supported by M7 shim | Still appears in some user docs, but the shim now forwards to Python and no Python command owns this behavior yet. Do not keep retired wizard internals solely for this stale path; migrate or update docs in a focused follow-up. |
 | `./start_wizard.sh doctor` | Migrate/document | Python `./bin/fortifylab doctor --check` is supported; legacy docs should stop presenting the Bash wizard as the long-term owner. |
-| `./start_wizard.sh apply-flight-plan <id> [--yes]` | Migrate or compatibility-shim | Still documented and implemented only in old wizard internals. Needs a Python CLI decision before `scripts/wizard/operations.sh` removal. |
+| `./start_wizard.sh apply-flight-plan <id> [--yes]` | Not supported by M7 shim | Still documented in legacy docs, but no supported shim/config/doctor/status/help/tui path invokes it. Flight Plan behavior should move to a Python command or be explicitly retired; the retired wizard module is removed. |
 | `src/fortifylab/` | Removed by `agent/src-M7-retirement` | Deprecated preview package retired after supported entrypoints and tests resolved through the root `fortifylab/` package. |
 | `tests/quarantine/python_preview/` | Removed by `agent/src-M7-retirement` | Preview contracts retired after retained concepts were covered by active M1-M7 tests. |
 | `tests/quarantine/bash_wizard_internal/` | Quarantine, then remove/archive intentionally | Reference-only contracts for retired internals. Useful for parity archaeology, but should not block default tests or imply supported Bash module behavior. |
-| `scripts/wizard/app-registry.sh` | Migrate | Registry/url metadata should move behind Python models or config/help registries before deletion. |
-| `scripts/wizard/env.sh` | Migrate | Bootstrap `.env` loading/copy behavior must be represented by Python config/startup behavior before removal. |
-| `scripts/wizard/guided.sh` | Migrate | Guided deployment workflow/state remains the largest parity target and should move into Python workflow screens. |
-| `scripts/wizard/menu.sh` | Remove after docs/tests migrate | Menu structure is already modeled in `fortifylab.navigation`; old Bash menu internals are not a low-level adapter. |
-| `scripts/wizard/operations.sh` | Split: migrate/remove | Config, diagnostics, runbook, help, lifecycle, Flight Plan, credentials, and logs behavior should be replaced by Python surfaces or retained lower-level scripts before deleting this module. |
-| `scripts/wizard/runbooks.sh` | Migrate/remove | Python M6 owns runbook discovery, validation, preview, guarded run, and help lookup. Keep only as reference until docs and any missing CLI/TUI views are reconciled. |
-| `scripts/wizard/scan-demo.sh` | Migrate | First-scan demo remains user-facing behavior; port or intentionally defer it before deleting the Bash module. |
-| `scripts/wizard/setup.sh` | Migrate | Setup/readiness/reset flows remain user-facing behavior; port or intentionally defer before deletion. |
+| `scripts/wizard/app-registry.sh` | Removed | Retired Bash wizard internal; not a Python operation catalog adapter and not reachable through supported M7 shim/config/doctor/status/help/tui paths. |
+| `scripts/wizard/env.sh` | Removed | Retired Bash wizard internal; Python config commands now own clone-safe validation/diagnostics. Host bootstrap scripts remain outside this directory. |
+| `scripts/wizard/guided.sh` | Removed | Retired Bash wizard internal; future guided workflow parity belongs in Python TUI/CLI code, not in re-exposed wizard modules. |
+| `scripts/wizard/menu.sh` | Removed | Menu structure is modeled in `fortifylab.navigation`; old Bash menu internals are not low-level adapters. |
+| `scripts/wizard/operations.sh` | Removed | Retired orchestration/menu module. Lifecycle behavior remains through `apps/**/{start,stop,destroy}.sh` as operation catalog adapters; unsupported legacy Flight Plan/menu behavior must be ported deliberately if needed. |
+| `scripts/wizard/runbooks.sh` | Removed | Python M6 owns runbook discovery, validation, preview, guarded run, and help lookup. |
+| `scripts/wizard/scan-demo.sh` | Removed | Retired Bash wizard internal. First-scan demo behavior should return only through a Python surface or explicit runbook, not by preserving the old module. |
+| `scripts/wizard/setup.sh` | Removed | Retired Bash wizard internal. Host/lab bootstrap scripts remain retained separately as low-level adapters. |
 | `scripts/lib/*.sh` | Keep or migrate case by case | Shared shell libraries are not automatically retired; some are still useful to retained lifecycle scripts and runbooks. |
 | App lifecycle scripts under `apps/**/start.sh`, `apps/**/stop.sh`, `apps/**/destroy.sh` | Keep as low-level adapters | M3 operation catalog references these directly for component and all-lab lifecycle operations. Do not remove in M7 cleanup. |
 | Other app utility scripts, for example `scale_scanners.sh`, `shutdown.sh`, `create-lim-secrets.sh`, dashboard deploy scripts | Document/keep case by case | Not in the current M3 catalog, but may still be operational helpers. Audit separately before deletion. |
 | `scripts/create-certs.sh`, `scripts/create-secrets.sh`, `scripts/install_microk8s.sh` | Keep as low-level adapters | Host/lab bootstrap scripts are outside old wizard menu internals and remain useful execution adapters until Python ports exist. |
 | `scripts/tools/flight-plans.py` and `scripts/lib/flight-plans.sh` | Migrate/keep temporarily | Flight Plan behavior is still documented through legacy wizard commands; preserve until Python CLI/TUI parity exists. |
 | User docs that say Bash remains the production guided wizard | Document/migrate | `README.md`, getting-started, deployment/lifecycle, lab-use, versions/compatibility, phase-3 docs, ADR wording, help contributor docs, and modular Bash architecture need a focused M7 docs sweep. |
-| `docs/development/modular-bash-architecture.md` | Updated by `agent/src-M7-retirement` | Now points new Python work at root `fortifylab/` while leaving Bash adapter cleanup out of this source branch. |
+| `docs/development/modular-bash-architecture.md` | Updated | Now documents the retired Bash wizard, removed deprecated preview package, and retained low-level Bash adapter boundary. |
 
 Supported compatibility entrypoints to preserve before deletion:
 
@@ -336,7 +336,7 @@ Implementation agents can proceed in this order:
 1. Compatibility/test agent: add M7 tests for the supported entrypoints above and stale legacy commands that need an explicit decision.
 2. Docs agent: update user-facing docs so the Python CLI/TUI is the supported path and legacy Bash wizard language is historical or compatibility-only.
 3. Deprecated source cleanup agent: completed on `agent/src-M7-retirement`; keep its removal contract active through M8.
-4. Bash internals cleanup agent: remove or archive `tests/quarantine/*` and `scripts/wizard/*` only after Python parity or explicit deferral exists for guided setup, Flight Plans, scan demo, and lab-use acknowledgement.
+4. Bash internals cleanup agent: `scripts/wizard/*` has been removed after supported entrypoint tests confirmed no shim/config/doctor/status/help/tui path depends on it. Remaining quarantine cleanup and stale user-doc command migration stay separate follow-up work.
 5. Operations agent: keep M3 adapter scripts under `apps/**` stable and only expand Python operation coverage with clone-safe previews/tests.
 
 ## Decision Log
@@ -360,6 +360,35 @@ Implementation agents can proceed in this order:
 | Branch upstream | Push `migration/python-tui` and track `origin/migration/python-tui` | M0 - accepted |
 
 ## Heartbeat Log
+
+### 2026-08-25
+
+Milestone: M7
+
+Workstream: Bash Wizard Boundary
+
+Branch: `agent/bash-M7-adapter-boundary`
+
+Status: active
+
+Changed:
+
+- Removed retired `scripts/wizard/*.sh` internals after auditing supported shim/config/doctor/status/help/tui paths and confirming they are not referenced by the Python operation catalog.
+- Preserved `./start_wizard.sh` as a minimal compatibility shim over `./bin/fortifylab`, including `config-diagnostics`.
+- Preserved low-level Bash operation adapters under `apps/**/start.sh`, `apps/**/stop.sh`, and `apps/**/destroy.sh`, plus host bootstrap scripts outside the retired wizard directory.
+- Added active tests that operation catalog commands remain existing `apps/**` lifecycle adapters and that retired wizard internals are absent from Git-tracked sources.
+
+Next:
+
+- Open the branch PR against `migration/python-tui`.
+- Keep stale docs for unsupported `apply-flight-plan` and lab-use wizard commands on the M7 docs migration list unless a Python command intentionally restores them.
+
+Blockers: none.
+
+Risks:
+
+- Do not remove `src/` or `tests/quarantine/python_preview` in this branch; Pauli owns source cleanup.
+- Do not remove app lifecycle scripts used by `fortifylab.operations.catalog`.
 
 ### 2026-08-25
 
