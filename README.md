@@ -207,11 +207,16 @@ automatically, no separate implementation to keep in sync. ScanCentral
 SAST and DAST are in the Applications app list too, each as one combined
 row over Bash's controller+sensor/core+scanner pair (DAST's start/stop
 chains its two scripts the same way Bash's `run_app_scripts()` does,
-aborting on the first failure). Scale workers, Lab Lifecycle's own
-destroy/reset quarter, credential `REVEAL`, Dashboard's `PERSISTENT`
-tokens, and per-key `.env` editing all still need their own screen-
-specific wiring onto the new text-entry widget -- each needs its own
-validation shape (a numeric range, a different confirmation phrase, an
+aborting on the first failure). Scale workers is wired up too, for
+SAST/DAST only, matching Bash's `scale_workers()`: offered in the same
+per-app menu for every app, showing the current replica count and a
+`TextField` prompt for a new one -- empty cancels, a non-digit value is
+rejected with "Not a number" and no `kubectl scale` call, and any other
+app gets the same "Scaling not supported" result Bash's own case
+statement produces. Lab Lifecycle's own destroy/reset quarter, credential
+`REVEAL`, Dashboard's `PERSISTENT` tokens, and per-key `.env` editing all
+still need their own screen-specific wiring onto the text-entry widget --
+each needs its own validation shape (a different confirmation phrase, an
 arbitrary value), not just a `TextField`.
 
 `./start_wizard.sh` also has an opt-in hook: set `FORTIFY_PYTHON_TUI_PREVIEW=1`

@@ -22,11 +22,13 @@ same as Bash -- ``OperationRunner.run()`` already rejects a real
 execution whose ``confirmation`` doesn't match, so this screen only adds
 a place to type one in.
 
-Not wired here still: **Scale workers** (SAST/DAST only) -- Bash's
-``scale_workers`` reads a free-typed replica count; unlike a fixed
-confirmation phrase, that's arbitrary numeric input with its own
-validation, a separate small piece of work from wiring up ``TextField``
-itself.
+**Scale workers** (SAST/DAST only) also uses ``TextField``, this time for
+a free-typed replica count instead of a fixed phrase: the menu option is
+offered to every app (matching Bash, which doesn't hide it either), but
+selecting it for an app other than SAST/DAST -- or typing anything that
+isn't all-digits -- is rejected the same way Bash's own
+``scale_workers()`` case statement and ``[[ "$replicas" =~ ^[0-9]+$ ]]``
+check reject it, without ever calling ``kubectl scale``.
 
 A real (``execute=True``) start/stop/destroy runs on a background
 thread, the same mechanism ``GuidedDeployScreen``/``DeployService`` use:
@@ -46,6 +48,7 @@ from fortifylab.config.store import ConfigStore
 from fortifylab.operations import OperationCatalog, OperationExecution, OperationRunner
 from fortifylab.operations.catalog import OperationSpec
 from fortifylab.services.app_status_service import AppStatus, AppStatusService
+from fortifylab.services.scale_workers_service import ScaleWorkersService
 
 from ..events import Event, KeyEvent, TickEvent
 from ..theme import TerminalStyle
@@ -97,6 +100,7 @@ _APP_ACTIONS: tuple[tuple[str, str], ...] = (
     ("logs", "Logs"),
     ("credentials", "Show URL & credentials"),
     ("destroy", "Destroy"),
+    ("scale", "Scale workers"),
 )
 
 
@@ -104,6 +108,7 @@ class _Stage(str, Enum):
     LIST = "list"
     APP_MENU = "app_menu"
     CONFIRM_DESTROY = "confirm_destroy"
+    SCALE_WORKERS = "scale_workers"
 
 
 @dataclass
@@ -112,6 +117,7 @@ class ApplicationsScreen(Armable, Screen):
     catalog: OperationCatalog = field(default_factory=OperationCatalog)
     runner: OperationRunner = field(default_factory=OperationRunner)
     status_service: AppStatusService = field(default_factory=AppStatusService)
+    scale_service: ScaleWorkersService = field(default_factory=ScaleWorkersService)
     env_file: Path = field(default_factory=lambda: Path(".env"))
     apps: tuple[tuple[str, str, str, str, str, str], ...] = _APPS
     stage: _Stage = _Stage.LIST
@@ -120,6 +126,8 @@ class ApplicationsScreen(Armable, Screen):
     statuses: dict[str, AppStatus] = field(default_factory=dict)
     show_credentials: bool = False
     confirm_field: TextField = field(default_factory=TextField)
+    scale_field: TextField = field(default_factory=TextField)
+    scale_current: str = "?"
     last_execution: OperationExecution | None = None
     running: bool = False
     _execution_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
@@ -131,6 +139,7 @@ class ApplicationsScreen(Armable, Screen):
             namespace = ConfigStore(self.env_file).load().values().get("NAMESPACE")
             if namespace:
                 self.status_service.namespace = namespace
+                self.scale_service.namespace = namespace
         self._refresh_statuses()
 
     @property
@@ -156,6 +165,8 @@ class ApplicationsScreen(Armable, Screen):
     def render(self) -> str:
         if self.stage is _Stage.CONFIRM_DESTROY:
             return self._render_confirm_destroy()
+        if self.stage is _Stage.SCALE_WORKERS:
+            return self._render_scale_workers()
         if self.stage is _Stage.APP_MENU:
             return self._render_app_menu()
         return self._render_list()
@@ -236,6 +247,21 @@ class ApplicationsScreen(Armable, Screen):
         lines.extend(("", self.style.muted("enter to confirm, escape to cancel")))
         return "\n".join(lines) + "\n"
 
+    def _render_scale_workers(self) -> str:
+        _app_id, label, *_rest = self.apps[self.selected_app_index]
+        lines = [
+            self.style.heading(f"Scale workers -- {label}"),
+            "",
+            f"Current replicas: {self.scale_current}",
+            "",
+            "New replica count (leave empty to cancel):",
+            "",
+            f"  {self.scale_field.render()}",
+            "",
+            self.style.muted("enter to confirm, escape to cancel"),
+        ]
+        return "\n".join(lines) + "\n"
+
     def _current_url(self, url_key: str) -> str:
         if not url_key or not self.env_file.exists():
             return ""
@@ -256,6 +282,8 @@ class ApplicationsScreen(Armable, Screen):
             return self._handle_list(event)
         if self.stage is _Stage.CONFIRM_DESTROY:
             return self._handle_confirm_destroy(event)
+        if self.stage is _Stage.SCALE_WORKERS:
+            return self._handle_scale_workers(event)
         return self._handle_app_menu(event)
 
     def _handle_list(self, event: KeyEvent) -> NavigationCommand:
@@ -315,6 +343,16 @@ class ApplicationsScreen(Armable, Screen):
         self.confirm_field.handle_key(event)
         return NavigationCommand.stay()
 
+    def _handle_scale_workers(self, event: KeyEvent) -> NavigationCommand:
+        if event.key == "escape":
+            self.stage = _Stage.APP_MENU
+            return NavigationCommand.stay()
+        if event.key == "enter":
+            self._submit_scale_workers()
+            return NavigationCommand.stay()
+        self.scale_field.handle_key(event)
+        return NavigationCommand.stay()
+
     def _select_action(self) -> NavigationCommand | None:
         action_id, _label = _APP_ACTIONS[self.selected_action_index]
         if action_id == "logs":
@@ -331,7 +369,27 @@ class ApplicationsScreen(Armable, Screen):
             self.confirm_field = TextField()
             self.stage = _Stage.CONFIRM_DESTROY
             return None
+        if action_id == "scale":
+            return self._select_scale_workers()
         self._run_selected(action_id)
+        return None
+
+    def _select_scale_workers(self) -> None:
+        if self.is_executing:
+            return None
+        app_id, label, *_rest = self.apps[self.selected_app_index]
+        if self.scale_service.statefulset_for(app_id) is None:
+            # Matches Bash's own scale_workers(): the option is offered in
+            # the same menu for every app, and it's the function itself
+            # that rejects an app it doesn't support -- not a hidden menu
+            # entry.
+            self.last_execution = OperationExecution(
+                f"app.{app_id}.scale", (), False, False, f"Scaling not supported for {label}"
+            )
+            return None
+        self.scale_current = self.scale_service.current_replicas(app_id)
+        self.scale_field = TextField()
+        self.stage = _Stage.SCALE_WORKERS
         return None
 
     def _submit_destroy_confirmation(self) -> None:
@@ -355,6 +413,25 @@ class ApplicationsScreen(Armable, Screen):
             )
             self._running_thread = thread
         thread.start()
+
+    def _submit_scale_workers(self) -> None:
+        app_id, _label, _prefix, _step_id, _log_prefix, _url = self.apps[self.selected_app_index]
+        value = self.scale_field.value
+        self.stage = _Stage.APP_MENU
+        if value == "":
+            # Matches Bash's `[ -z "$replicas" ] && return` -- empty input
+            # cancels silently, no error message.
+            return
+        if not value.isdigit():
+            # Matches Bash's `[[ "$replicas" =~ ^[0-9]+$ ]] || { error "Not
+            # a number"; return; }` -- kubectl scale is never called.
+            self.last_execution = OperationExecution(f"app.{app_id}.scale", (), False, False, "Not a number")
+            return
+        result = self.scale_service.scale(app_id, value)
+        self.last_execution = OperationExecution(
+            f"app.{app_id}.scale", (), True, result.ok, result.stdout or result.stderr or "scaled"
+        )
+        self._refresh_statuses()
 
     def _run_selected(self, action: str) -> None:
         if self.is_executing:

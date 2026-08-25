@@ -19,6 +19,7 @@ sys.path.insert(0, str(SRC))
 from fortifylab.core.command import CommandResult  # noqa: E402
 from fortifylab.operations import OperationCatalog, OperationRunner  # noqa: E402
 from fortifylab.services.app_status_service import AppStatusService  # noqa: E402
+from fortifylab.services.scale_workers_service import ScaleWorkersService  # noqa: E402
 from fortifylab.tui.events import KeyEvent, TickEvent  # noqa: E402
 from fortifylab.tui.screens.applications import ApplicationsScreen, _Stage  # noqa: E402
 from fortifylab.tui.screens.base import NavigationKind  # noqa: E402
@@ -142,7 +143,10 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         rendered = screen.render()
         self.assertNotIn("URL:", rendered)
 
-    def test_offers_start_stop_logs_credentials_and_destroy_but_not_scale(self) -> None:
+    def test_offers_start_stop_logs_credentials_destroy_and_scale(self) -> None:
+        # Scale workers is offered in the menu for every app, matching
+        # Bash -- it's scale_workers() itself that rejects an app it
+        # doesn't support, not a hidden menu entry.
         screen = _plain_screen()
         _enter_app_menu(screen, "ssc")
         rendered = screen.render()
@@ -151,7 +155,7 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         self.assertIn("Logs", rendered)
         self.assertIn("Show URL & credentials", rendered)
         self.assertIn("Destroy", rendered)
-        self.assertNotIn("Scale", rendered)
+        self.assertIn("Scale workers", rendered)
 
     def test_credentials_toggle_shows_login_hint_for_ssc(self) -> None:
         screen = _plain_screen()
@@ -306,6 +310,99 @@ class ApplicationsAppMenuTests(unittest.TestCase):
 
         release.set()
         _wait_for_execution(screen)
+
+    def test_scale_workers_shows_not_supported_for_a_non_scancentral_app(self) -> None:
+        # Bash's scale_workers() offers this option in the same menu for
+        # every app and lets the function itself reject one it doesn't
+        # support (SSC, LIM, MySQL, PostgreSQL, and every sample app all
+        # fall through its case statement's default branch).
+        calls: list[tuple[str, ...]] = []
+        screen = _plain_screen(scale_service=ScaleWorkersService(runner=lambda args: calls.append(args) or CommandResult(args, 0, "", "", 0.0)))
+        _enter_app_menu(screen, "ssc")
+        _select_action(screen, "scale")
+        screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(screen.stage, _Stage.APP_MENU)
+        self.assertIn("Scaling not supported", screen.last_execution.detail)
+        self.assertEqual(calls, [])
+
+    def test_scale_workers_enters_a_stage_showing_current_replicas_for_sast(self) -> None:
+        screen = _plain_screen(scale_service=ScaleWorkersService(runner=lambda args: CommandResult(args, 0, "3", "", 0.0)))
+        _enter_app_menu(screen, "sast")
+        _select_action(screen, "scale")
+        screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(screen.stage, _Stage.SCALE_WORKERS)
+        rendered = screen.render()
+        self.assertIn("Scale workers -- ScanCentral SAST", rendered)
+        self.assertIn("Current replicas: 3", rendered)
+
+    def test_empty_replica_count_cancels_silently(self) -> None:
+        calls: list[tuple[str, ...]] = []
+        screen = _plain_screen(scale_service=ScaleWorkersService(runner=lambda args: calls.append(args) or CommandResult(args, 0, "1", "", 0.0)))
+        _enter_app_menu(screen, "sast")
+        _select_action(screen, "scale")
+        screen.handle_event(KeyEvent("enter"))  # -> SCALE_WORKERS, current_replicas call
+        calls.clear()
+
+        screen.handle_event(KeyEvent("enter"))  # empty value -> cancel
+
+        self.assertEqual(screen.stage, _Stage.APP_MENU)
+        self.assertIsNone(screen.last_execution)
+        self.assertEqual(calls, [])
+
+    def test_non_numeric_replica_count_is_rejected_without_scaling(self) -> None:
+        calls: list[tuple[str, ...]] = []
+        screen = _plain_screen(scale_service=ScaleWorkersService(runner=lambda args: calls.append(args) or CommandResult(args, 0, "1", "", 0.0)))
+        _enter_app_menu(screen, "sast")
+        _select_action(screen, "scale")
+        screen.handle_event(KeyEvent("enter"))
+        calls.clear()
+        for char in "abc":
+            screen.handle_event(KeyEvent(char))
+
+        screen.handle_event(KeyEvent("enter"))
+
+        self.assertEqual(screen.stage, _Stage.APP_MENU)
+        self.assertIn("Not a number", screen.last_execution.detail)
+        self.assertEqual(calls, [])
+
+    def test_valid_replica_count_scales_the_statefulset(self) -> None:
+        calls: list[tuple[str, ...]] = []
+
+        def runner(args):
+            calls.append(args)
+            return CommandResult(args, 0, "1", "", 0.0) if "get" in args else CommandResult(args, 0, "scaled", "", 0.0)
+
+        screen = _plain_screen(scale_service=ScaleWorkersService(runner=runner))
+        _enter_app_menu(screen, "dast")
+        _select_action(screen, "scale")
+        screen.handle_event(KeyEvent("enter"))
+        for char in "4":
+            screen.handle_event(KeyEvent(char))
+
+        screen.handle_event(KeyEvent("enter"))
+
+        self.assertEqual(screen.stage, _Stage.APP_MENU)
+        self.assertTrue(screen.last_execution.executed)
+        self.assertTrue(screen.last_execution.ok)
+        scale_calls = [c for c in calls if "scale" in c]
+        self.assertEqual(
+            scale_calls[0],
+            ("-n", "fortify", "scale", "statefulset", "sdast-scanner-scancentral-dast-scanner", "--replicas=4"),
+        )
+
+    def test_escape_from_scale_workers_cancels_without_scaling(self) -> None:
+        calls: list[tuple[str, ...]] = []
+        screen = _plain_screen(scale_service=ScaleWorkersService(runner=lambda args: calls.append(args) or CommandResult(args, 0, "1", "", 0.0)))
+        _enter_app_menu(screen, "sast")
+        _select_action(screen, "scale")
+        screen.handle_event(KeyEvent("enter"))
+        calls.clear()
+        screen.handle_event(KeyEvent("5"))
+
+        screen.handle_event(KeyEvent("escape"))
+
+        self.assertEqual(screen.stage, _Stage.APP_MENU)
+        self.assertEqual(calls, [])
 
     def test_destroy_row_is_styled_as_a_warning_in_the_app_menu(self) -> None:
         screen = _plain_screen(style=TerminalStyle(color=True, symbols=True))

@@ -872,6 +872,45 @@ manages, gated by the same exact typed confirmation phrase Bash requires,
 with no way to trigger a real destroy without typing it correctly. Met in
 this pass.
 
+## M16 — Scale workers
+
+The first of M15's listed follow-ups: `scale_workers()` (SAST/DAST only),
+gated by numeric free-text input rather than a fixed confirmation phrase
+-- a second, different shape for the same `TextField` widget to prove out.
+
+- `src/fortifylab/services/scale_workers_service.py` (new) —
+  `ScaleWorkersService`, a structural port of `scale_workers()`'s
+  StatefulSet lookup (`scancentral-sast-worker-linux` for SAST,
+  `sdast-scanner-scancentral-dast-scanner` for DAST -- every other app id
+  returns `None`), `current_replicas()` (`kubectl get statefulset -o
+  jsonpath={.spec.replicas}`, falling back to `"?"` on failure or blank
+  output, matching Bash's `|| echo "?"`), and `scale()` (`kubectl scale
+  statefulset --replicas=N`). Built on the same `KubectlBackedService`
+  base `AppStatusService`/`DashboardAccessService`/`UrlsCredentialsService`/
+  `LabStatusService` already share.
+- `src/fortifylab/tui/screens/applications.py` — `ApplicationsScreen`
+  gained a `Scale workers` action (offered in the same per-app menu for
+  *every* app, matching Bash -- it's `scale_workers()`'s own case
+  statement that rejects an unsupported app, not a hidden menu entry) and
+  a `SCALE_WORKERS` stage. Selecting it for SAST/DAST shows the current
+  replica count and a `TextField` prompt ("New replica count (leave empty
+  to cancel):"); Enter on an empty value cancels silently
+  (`[ -z "$replicas" ] && return`), a non-digit value is rejected with
+  "Not a number" and no `kubectl scale` call
+  (`[[ "$replicas" =~ ^[0-9]+$ ]] || { error ...; return; }`), and a valid
+  count calls `ScaleWorkersService.scale()` synchronously (unlike
+  start/stop/destroy, a `kubectl scale` call is near-instant, so this
+  doesn't need the background-thread/poll machinery those use) and
+  refreshes the live status list. Selecting it for any other app sets the
+  same "Scaling not supported for `<label>`" result Bash's own error
+  produces, without ever calling `kubectl`.
+
+**Done when:** Scale workers works for SAST and DAST exactly like Bash's
+`scale_workers()` -- same StatefulSet targets, same empty-cancels/
+non-digit-rejects/valid-scales behavior -- and is a visible, matching
+"not supported" result everywhere else, never a hidden menu entry. Met in
+this pass.
+
 ## What this PR actually delivers
 
 M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
@@ -879,12 +918,13 @@ M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
 (Certificates & Trust), M12 (Lab Status Dashboard), the Guided Deploy bug
 fixes, the feature-parity audit fixes, M13 (deployment & individual
 component management: live per-app status, per-app menu, Lab Lifecycle
-bulk shutdown/start), M14 (SAST/DAST in the app list), and M15 (the
-`TextField` text-entry widget, and Applications' Destroy action) above,
-as the first six milestone picks from the post-M6 follow-up plus a
-hardening pass and a deep parity pass on the one area specifically
-called out -- M6 delivered as an opt-in preview hook, not a default
-cutover, because the parity that cutover depends on doesn't exist yet.
+bulk shutdown/start), M14 (SAST/DAST in the app list), M15 (the
+`TextField` text-entry widget, and Applications' Destroy action), and
+M16 (Scale workers for SAST/DAST) above, as the first six milestone
+picks from the post-M6 follow-up plus a hardening pass and a deep parity
+pass on the one area specifically called out -- M6 delivered as an
+opt-in preview hook, not a default cutover, because the parity that
+cutover depends on doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked
 here rather than claimed. This keeps the claim in this document honest:
