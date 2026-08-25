@@ -35,12 +35,14 @@ heartbeat:
   branch: agent/test-M6-runbooks-help
   status: active
   changed:
+    - Runbook/help contract PR #466 landed in migration/python-tui.
     - Added M6 runbook/help contract tests for discovery, metadata validation, requirement checks, preview, guarded execution, help lookup, CLI help topic behavior, and navigation target preservation.
     - Kept all implementation-dependent checks clone-safe and skipped until public M6 symbols land.
     - Used fixture scripts, injected requirement checkers, and injected executors only; no Kubernetes, Helm, Docker, network, or live lab calls are required.
   next:
-    - Open the M6 test PR against migration/python-tui.
-    - Coordinate with agent/runbooks-M6-contract and implementation so fortifylab.runbooks and fortifylab.help activate these contracts.
+    - Merge the M6 test PR against migration/python-tui.
+    - Start M6 implementation from the merged runbook/help contract and skipped tests.
+    - Wire Runbook Library and Help Center views without changing navigation ids.
   blockers:
     - Waiting on M6 public runbook/help implementation symbols.
   risks:
@@ -206,6 +208,25 @@ workstreams:
     risks:
       - Diagnostics docs cleanup is deferred into M6 docs or M7 final docs sweep.
     last_heartbeat: 2026-08-25
+  runbooks:
+    owner: runbooks-agent
+    status: active
+    branch: agent/runbooks-M6-contract
+    owns:
+      - fortifylab/runbooks/
+      - tests/test_m6_runbooks_contract.py
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Define the Python-native M6 runbook/help contract.
+    changed:
+      - Added runbook metadata, help topic, requirement result, preview, and run scope models.
+      - Added default help topic catalog and Bash-compatible runbook metadata parser contract.
+      - Added clone-safe tests for discovery ordering, previews, requirement checks, and help aliases.
+    next_task: Open PR and hand off to implementation/test agents for TUI wiring.
+    blockers: []
+    risks:
+      - Run execution must remain explicit and environment-dependent; default tests must not invoke lab scripts or live services.
+    last_heartbeat: 2026-08-25
   docs:
     owner: docs-agent
     status: pending
@@ -368,6 +389,14 @@ milestones:
       - Runbook discovery and metadata validation are Python-native.
       - Help Center topics are reachable from the TUI.
       - Requirement checks and run previews work.
+    evidence:
+      - python3 -m compileall -q fortifylab passed on agent/runbooks-M6-contract.
+      - python3 -m unittest tests.test_m6_runbooks_contract -v passed with 6 tests.
+      - python3 -m unittest discover -s tests -v passed with 139 tests.
+    notes:
+      - fortifylab.runbooks defines validation, script preview, and command preview as clone-safe.
+      - fortifylab.runbooks defines run actions and live requirement checks as environment-dependent.
+      - Navigation ids for Runbook Library, Help Center, and Operational guidance are preserved for implementation wiring.
   - id: M7
     name: Bash wizard retirement
     status: pending

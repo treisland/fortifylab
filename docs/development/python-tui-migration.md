@@ -813,3 +813,32 @@ Risks:
 - M6 previews and tests must stay clone-safe unless live lab execution is explicitly requested.
 - Final Bash wizard retirement and `src/` deletion remain M7, not M6.
 - Diagnostics docs cleanup is deferred into M6 docs or the M7 final docs sweep.
+
+### 2026-08-25
+
+Milestone: M6
+
+Workstream: Runbook/Help Contract
+
+Branch: `agent/runbooks-M6-contract`
+
+Status: active
+
+Changed:
+
+- Added `fortifylab.runbooks` contract models for Python-native runbook metadata, help topics, requirement checks, previews, and run actions.
+- Classified runbook validation, script preview, command preview, and help topic lookup as clone-safe by default.
+- Classified actual runbook execution and live requirement checks as environment-dependent and explicit.
+- Added focused M6 tests that use temporary fixtures and injected availability checks only.
+
+Next:
+
+- Open the contract PR against `migration/python-tui`.
+- Let implementation agents wire Runbook Library, Help Center, and Operational guidance views against `fortifylab.runbooks` without changing navigation ids.
+
+Blockers: none.
+
+Risks:
+
+- Default tests must not execute runbook scripts or probe Kubernetes, Helm, Docker, network, or lab services.
+- Bash wizard retirement and deprecated `src/` cleanup remain M7 work.
