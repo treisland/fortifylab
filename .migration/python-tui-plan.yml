@@ -31,19 +31,20 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M6
-  workstream: runbooks-M6-contract
-  branch: agent/runbooks-M6-contract
+  workstream: test-M6-runbooks-help
+  branch: agent/test-M6-runbooks-help
   status: active
   changed:
-    - Added Python-native runbook/help contract models for M6.
-    - Defined runbook metadata, help topic, requirement check, preview, and run boundaries.
-    - Classified validation and previews as clone-safe and run actions as environment-dependent.
-    - Covered the contract with focused clone-safe tests.
+    - Runbook/help contract PR #466 landed in migration/python-tui.
+    - Added M6 runbook/help contract tests for discovery, metadata validation, requirement checks, preview, guarded execution, help lookup, CLI help topic behavior, and navigation target preservation.
+    - Kept all implementation-dependent checks clone-safe and skipped until public M6 symbols land.
+    - Used fixture scripts, injected requirement checkers, and injected executors only; no Kubernetes, Helm, Docker, network, or live lab calls are required.
   next:
-    - Open PR against migration/python-tui.
-    - Start M6 implementation from fortifylab.runbooks once the contract lands.
-    - Wire TUI Runbook Library and Help Center views without changing navigation ids.
-  blockers: []
+    - Merge the M6 test PR against migration/python-tui.
+    - Start M6 implementation from the merged runbook/help contract and skipped tests.
+    - Wire Runbook Library and Help Center views without changing navigation ids.
+  blockers:
+    - Waiting on M6 public runbook/help implementation symbols.
   risks:
     - M6 previews and tests must stay clone-safe unless live lab execution is explicitly requested.
     - Final Bash wizard retirement and src deletion remain M7, not M6.
@@ -238,21 +239,23 @@ workstreams:
       - Architecture decisions must be recorded before broad doc rewrites.
   tests:
     owner: test-agent
-    status: complete
-    branch: agent/test-M5-diagnostics
+    status: active
+    branch: agent/test-M6-runbooks-help
     owns:
       - tests/test_m1_entrypoints.py
       - tests/test_m2_menu_parity.py
       - tests/test_m4_config_engine.py
       - tests/test_m5_diagnostics.py
+      - tests/test_m6_runbooks_help.py
       - tests/quarantine/python_preview/
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Completed M5 diagnostics/status contract tests without live cluster, network, Kubernetes, Helm, or Docker dependencies.
-    result: M5 diagnostics/status tests merged through PR #463.
-    next_task: Open M6 runbook/help contract tests.
-    blockers: []
+    current_task: Added M6 runbook/help contract tests without live cluster, network, Kubernetes, Helm, or Docker dependencies.
+    result: Pending PR from agent/test-M6-runbooks-help.
+    next_task: Coordinate implementation activation of fortifylab.runbooks and fortifylab.help public symbols.
+    blockers:
+      - Waiting on M6 public runbook/help implementation symbols.
     last_heartbeat: 2026-08-25
 
 milestones:
