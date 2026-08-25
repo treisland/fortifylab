@@ -213,19 +213,20 @@ workstreams:
       - Architecture decisions must be recorded before broad doc rewrites.
   tests:
     owner: test-agent
-    status: complete
-    branch: agent/test-M4-config-engine
+    status: active
+    branch: agent/test-M5-diagnostics
     owns:
       - tests/test_m1_entrypoints.py
       - tests/test_m2_menu_parity.py
       - tests/test_m4_config_engine.py
+      - tests/test_m5_diagnostics.py
       - tests/quarantine/python_preview/
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Completed M4 config engine and CLI bridge tests.
+    current_task: Add M5 diagnostics/status contract tests without live cluster, network, Kubernetes, Helm, or Docker dependencies.
     result: M4 config tests merged through PR #460 and PR #461.
-    next_task: Start M5 diagnostics tests on agent/test-M5-diagnostics.
+    next_task: Open PR for M5 diagnostics tests and coordinate activation with Diagnostics implementation.
     blockers: []
     last_heartbeat: 2026-08-25
 
