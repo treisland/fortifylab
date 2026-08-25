@@ -1,7 +1,8 @@
-# Fortify Lab Python runtime dependencies for Phase 3 CLI/TUI migration.
-# The clone-and-run preview commands still work from source with the Python
-# standard library. Install this file when developing or previewing richer
-# Python CLI/TUI workflows.
+# FortifyLab Python runtime dependencies for the CLI/TUI migration.
+#
+# M1 uses only the Python standard library so ./bin/fortifylab --help and
+# ./bin/fortifylab tui --smoke-test work from a clean clone. Textual is the
+# accepted framework for the interactive TUI that starts in M2.
 typer>=0.12,<1
 rich>=13.7,<14
 pydantic>=2.7,<3
