@@ -95,9 +95,10 @@ Common workflows:
     flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status candidate
     flight-plans.py promote tmp/flight-plan-candidates/fortify-26.2.toml --status recommended --yes
 
-  Apply a Flight Plan to .env without the interactive wizard menu:
-    ./start_wizard.sh apply-flight-plan fortify-26.2
-    ./start_wizard.sh apply-flight-plan fortify-26.2 --yes
+  Apply a Flight Plan to .env:
+    The retired Bash wizard apply-flight-plan command is not part of the
+    supported M7 compatibility shim. Review with show, then update .env
+    deliberately until a Python command restores this write path.
 
 Safety model:
   Read-only:  default, list, show, compare-env, discover-releases without write flags, curate
