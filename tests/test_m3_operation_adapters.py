@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from pathlib import Path
 
 from fortifylab.operations import (
     CommandPlan,
@@ -22,6 +23,9 @@ from fortifylab.operations import (
     preview_operation,
     run_operation,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class M3OperationCatalogTests(unittest.TestCase):
@@ -50,6 +54,19 @@ class M3OperationCatalogTests(unittest.TestCase):
                 ("bash", "apps/scdast/scanner/start.sh"),
             ),
         )
+
+    def test_catalog_scripts_are_retained_low_level_app_adapters(self) -> None:
+        for operation in list_operations():
+            for command in operation.command_plan:
+                with self.subTest(operation_id=operation.id, argv=command.argv):
+                    self.assertEqual(command.argv[0], "bash")
+                    script = command.argv[1]
+                    self.assertTrue(
+                        script.startswith("apps/"),
+                        f"{operation.id} should use apps/** lifecycle adapters, got {script}",
+                    )
+                    self.assertRegex(script, r"/(?:start|stop|destroy)\.sh$")
+                    self.assertTrue((ROOT / script).is_file(), script)
 
     def test_mutating_operations_require_confirmation_metadata(self) -> None:
         for operation in list_operations():
