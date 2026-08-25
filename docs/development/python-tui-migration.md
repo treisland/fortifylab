@@ -225,6 +225,36 @@ Risks:
 
 - M5 implementation must keep live probes behind explicit commands or test-mode fixtures so default CI remains offline-safe.
 
+### 2026-08-25
+
+Milestone: M6
+
+Workstream: Test
+
+Branch: `agent/test-M6-runbooks-help`
+
+Status: active
+
+Changed:
+
+- Added clone-safe M6 contract tests for Python-native runbook discovery, metadata validation, requirement checks with injected fakes, preview redaction, guarded execution, offline help topic lookup, CLI help topic behavior, and existing runbook/help navigation targets.
+- Kept implementation-dependent checks skipped until `fortifylab.runbooks` and `fortifylab.help` public symbols land.
+- Used fixture runbooks, harmless commands, injected requirement checkers, and injected executors only.
+
+Next:
+
+- Open the test PR against `migration/python-tui`.
+- Coordinate with `agent/runbooks-M6-contract` and implementation so the expected public API activates these tests without introducing live lab requirements.
+
+Blockers:
+
+- Waiting on M6 runbook/help implementation symbols.
+
+Risks:
+
+- Implementation must keep previews non-executing and require confirmation for high-risk or destructive runbooks.
+- Default tests must stay free of Kubernetes, Helm, Docker, network, and live lab dependencies.
+
 ## Decision Log
 
 | Date | Decision | Status |
