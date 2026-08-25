@@ -467,3 +467,44 @@ Risks:
 
 - M3 must not execute mutating operations without explicit confirmation gates.
 - Config implementation should wait for operation runner boundaries before replacing editor behavior.
+
+### 2026-08-25
+
+Milestone: M4 prep
+
+Workstream: Config Design
+
+Branch: `agent/config-M4-schema-design`
+
+Status: active
+
+Changed:
+
+- Audited active `.env` behavior without targeting deprecated `src/` for implementation.
+- Confirmed active bootstrap still copies `.env.example` to `.env` and sources it through `scripts/wizard/env.sh`.
+- Confirmed active config editor behavior lives in `scripts/wizard/operations.sh`, including staged edits, preview, apply-with-backup, rollback, selected backup restore, raw editor backup, domain/URL repair, and validation.
+- Identified old preview bridge references under `src/fortifylab/config` for parser, store, repair, and CLI behavior; these remain reference-only and should be removed or replaced deliberately later.
+- Added a root-package read-only config schema contract under `fortifylab/config/` for future M4 work.
+
+Parser/writer contract proposed for M4:
+
+- Preserve comments, blank lines, field order, `export` prefixes, and expression-style values such as `ssc.$DOMAIN`.
+- Stage changes as an in-memory update set before writes, with dry-run diffs available from the TUI and CLI.
+- Redact secrets in previews, diagnostics, logs, and diffs using both schema metadata and sensitive key patterns.
+- Create `.env.backups` entries and update `.env.rollback` before every mutating write.
+- Validate domain, hostname, URL, enum, path, version, and secret-required fields before mutation.
+- Repair derived host and URL values from `DOMAIN` deterministically while preserving comments and ordering where practical.
+
+Verification:
+
+- `python3 -m compileall -q fortifylab` passed.
+- `python3 -m unittest tests.test_m4_config_schema_contract -v` passed with 5 tests.
+- `python3 -m unittest discover -s tests -v` passed with 104 tests.
+- `./scripts/validate-docs.sh` passed Markdown and unittest gates locally, then stopped because local `mkdocs` is missing.
+
+Blockers: none.
+
+Risks:
+
+- This branch intentionally does not replace the config editor, does not wire config writes into the CLI/TUI, and does not delete `src/`.
+- M4 implementation should wait for M3 operation boundaries before config mutation is wired into operator flows.

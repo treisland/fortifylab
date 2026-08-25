@@ -157,13 +157,22 @@ workstreams:
     blockers: []
   config:
     owner: config-agent
-    status: pending
+    status: active
     branch: agent/config-M4-schema-design
     owns:
       - fortifylab/config/
       - tests/
-    current_task: Port .env parsing, validation, backups, diffs, and derived URL repair.
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Prepare read-only M4 .env schema and parser/writer contracts without replacing Bash behavior.
+    changed:
+      - Audited active Bash .env bootstrap, editor, validation, repair, backup, and rollback behavior.
+      - Identified deprecated src/fortifylab/config bridge as reference-only code to remove or replace intentionally in M7.
+      - Added root fortifylab.config read-only schema metadata and parser/writer capability contract.
     blockers: []
+    risks:
+      - Config editor replacement must wait for M3 operation boundaries and explicit M4 implementation work.
+    last_heartbeat: 2026-08-25
   diagnostics:
     owner: diagnostics-agent
     status: pending
