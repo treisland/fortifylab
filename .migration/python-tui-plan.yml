@@ -31,23 +31,25 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M1
-  workstream: architecture-M1-skeleton
-  branch: agent/architecture-M1-skeleton
+  workstream: test-M1-entrypoints
+  branch: agent/test-M1-entrypoints
   status: active
   changed:
-    - Root-level fortifylab package skeleton added.
-    - ./bin/fortifylab now imports from the new package instead of src/.
-    - start_wizard.sh converted to a compatibility shim.
-    - TUI smoke/check contract implemented for noninteractive tests.
-    - Textual accepted for M2 while M1 remains standard-library only.
+    - Architecture skeleton merged into migration/python-tui.
+    - Test branch merged the M1 skeleton contract.
+    - M1 entrypoint acceptance tests added.
+    - Deprecated Python preview tests quarantined outside default discovery.
+    - Retired Bash wizard internal tests quarantined outside default discovery.
+    - Python preview and Bash wizard quarantine notes documented.
   next:
-    - Commit and push Architecture branch.
-    - Merge Architecture into migration/python-tui.
-    - Update Test PR #450 against the merged skeleton.
+    - Run M1 entrypoint tests and default unittest discovery.
+    - Push updated Test PR #450.
+    - Request PM review for the M1 test gate.
   blockers: []
   risks:
-    - Legacy start_wizard.sh subcommands are not implemented in M1.
-    - Deprecated src/ preview code remains until cleanup is handled deliberately.
+    - Behavior-level coverage from quarantined tests must be reintroduced milestone by milestone.
+    - Deprecated src/ preview concepts need milestone-by-milestone recovery or deletion.
+
   needs_decision: []
 
 
@@ -93,7 +95,7 @@ workstreams:
     blockers: []
   architecture:
     owner: architecture-agent
-    status: active
+    status: complete
     branch: agent/architecture-M1-skeleton
     owns:
       - fortifylab/
@@ -103,7 +105,7 @@ workstreams:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
     current_task: Implement target Python package layout and entrypoint transition for M1.
-    next_task: Merge the skeleton after M1 entrypoint tests pass and PM review clears it.
+    result: M1 skeleton merged into migration/python-tui via PR #451.
     changed:
       - Root-level fortifylab package skeleton added.
       - ./bin/fortifylab now imports from the new package instead of src/.
@@ -177,6 +179,19 @@ workstreams:
     current_task: Identify stale Python preview and web UI migration language.
     blockers:
       - Architecture decisions must be recorded before broad doc rewrites.
+  tests:
+    owner: test-agent
+    status: active
+    branch: agent/test-M1-entrypoints
+    owns:
+      - tests/test_m1_entrypoints.py
+      - tests/quarantine/python_preview/
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Prepare M1 entrypoint acceptance tests and quarantine deprecated preview/internal tests.
+    next_task: Request PM review after M1 tests and default discovery pass.
+    blockers: []
+    last_heartbeat: 2026-08-25
 
 milestones:
   - id: M0

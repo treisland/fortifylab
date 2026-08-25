@@ -111,6 +111,7 @@ nav:
       - Overview: contributing/index.md
       - Modular Bash architecture: development/modular-bash-architecture.md
       - Phase 3 Python migration: development/phase-3-python-migration.md
+      - Python TUI migration: development/python-tui-migration.md
       - Publishing: contributing/publishing.md
   - Architecture decisions:
       - Overview: adr/README.md

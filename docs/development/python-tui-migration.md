@@ -1,11 +1,11 @@
 # Python TUI Migration
 
-FortifyLab is migrating from the current Bash wizard to a maintainable Python
+Fortify Lab is migrating from the current Bash wizard to a maintainable Python
 CLI/TUI application. The new application must preserve the existing navigation
 structure and lab operation behavior while making the repo easier for future
 maintainers to understand, test, and extend.
 
-This is not a web UI effort. FortifyLab remains a CLI-first lab management tool,
+This is not a web UI effort. Fortify Lab remains a CLI-first lab management tool,
 with a terminal user interface as the target interactive experience.
 
 ## Objective
@@ -165,12 +165,33 @@ Cadence:
 - The first TUI release should avoid rewriting every Helm/Kubernetes operation.
   Keep Bash operation adapters until Python ports have clear value and tests.
 
+## Test Strategy
+
+M1 tests live in `tests/test_m1_entrypoints.py` and cover only clone-safe
+entrypoint behavior:
+
+- `./bin/fortifylab --help`;
+- `./bin/fortifylab tui --smoke-test`;
+- import sanity from the repo root Python package;
+- `start_wizard.sh` removed or reduced to a deliberate shim.
+
+The noninteractive TUI launch contract for Architecture is
+`./bin/fortifylab tui --smoke-test`. It should print deterministic placeholder
+output identifying the Fortify Lab TUI and M1 placeholder/skeleton state, then
+exit `0` without reading terminal input.
+
+Deprecated `tests/test_python_*.py` files have been moved to
+`tests/quarantine/python_preview/` with default-discovery-safe filenames. The
+quarantine README classifies each file as keep, rewrite, quarantine, or delete
+for later milestones. These old preview contracts should not block M1 unless
+Architecture intentionally adopts the behavior.
+
 ## Decision Log
 
 | Date | Decision | Status |
 | --- | --- | --- |
 | 2026-08-25 | Use `migration/python-tui` as the migration integration branch created from current `dev`. | Accepted |
-| 2026-08-25 | FortifyLab remains CLI/TUI focused; no web UI will be built. | Accepted |
+| 2026-08-25 | Fortify Lab remains CLI/TUI focused; no web UI will be built. | Accepted |
 | 2026-08-25 | Preserve current navigation structure before improving interaction design. | Accepted |
 | 2026-08-25 | Treat current `src/` as deprecated preview code to replace intentionally. | Accepted |
 | 2026-08-25 | Keep Bash deployment scripts as temporary operation adapters in early milestones. | Accepted |
@@ -218,9 +239,9 @@ Milestone: M1
 
 Workstream: Architecture
 
-Branch: agent/architecture-M1-skeleton
+Branch: `agent/architecture-M1-skeleton`
 
-Status: active
+Status: complete
 
 Changed:
 
@@ -229,11 +250,11 @@ Changed:
 - Converted `./start_wizard.sh` into a deliberate compatibility shim.
 - Accepted Textual as the M2 TUI framework while keeping M1 standard-library only.
 - Defined the noninteractive TUI test contract: `./bin/fortifylab tui --smoke-test`, `./bin/fortifylab tui --check`, or `FORTIFYLAB_TUI_TEST_MODE=1`.
+- Merged Architecture PR #451 into `migration/python-tui`.
 
 Next:
 
-- Coordinate entrypoint smoke tests with the Test Agent.
-- Merge the M1 Architecture skeleton after acceptance checks pass.
+- Update Test PR #450 against the merged skeleton.
 
 Blockers: none.
 
@@ -241,3 +262,35 @@ Risks:
 
 - Deprecated `src/` preview code remains in-tree until references, tests, and docs are migrated or removed intentionally.
 - Legacy Bash wizard subcommands are not reimplemented in M1.
+
+### 2026-08-25
+
+Milestone: M1
+
+Workstream: Tests
+
+Branch: `agent/test-M1-entrypoints`
+
+Status: active
+
+Changed:
+
+- Merged the Architecture skeleton into the Test branch.
+- Added clone-safe M1 entrypoint acceptance tests.
+- Defined the noninteractive TUI launch contract as `./bin/fortifylab tui --smoke-test`.
+- Quarantined deprecated Python preview tests outside default discovery.
+- Quarantined retired Bash wizard internal tests outside default discovery.
+- Documented quarantine rationale in `tests/quarantine/python_preview/README.md` and `tests/quarantine/bash_wizard_internal/README.md`.
+
+Next:
+
+- Re-run M1 tests and default unittest discovery against the merged skeleton.
+- Push the updated Test PR #450.
+- Request PM review for the M1 test gate.
+
+Blockers: none.
+
+Risks:
+
+- Behavior-level coverage from quarantined tests must be reintroduced milestone by milestone as supported Python CLI/TUI behavior lands.
+
