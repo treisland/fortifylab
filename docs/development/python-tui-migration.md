@@ -738,3 +738,48 @@ Risks:
 
 - M5 checks must stay read-only and keep default tests free of cluster/network dependencies.
 - Broader runbook/help migration remains M6, not M5.
+
+
+### 2026-08-25
+
+Milestone: M6
+
+Workstream: PM
+
+Branch: `agent/pm-M5-closeout-open-M6`
+
+Status: active
+
+Changed:
+
+- PM gate review accepted M5 as complete.
+- Merged Diagnostics/status PR #463 into `migration/python-tui` at merge commit `3964779fad3d13b5085c51f83c6b9fc3e0e4244f`.
+- Recorded Python-native `doctor` and `status` commands as available without the Bash wizard.
+- Recorded clone-safe diagnostics/status tests and smoke checks as M5 acceptance evidence.
+- Opened M6 runbook/help work as the next milestone.
+
+Verification:
+
+- `python3 -m compileall -q fortifylab` passed.
+- `python3 -m unittest tests.test_m5_diagnostics -v` passed with 8 tests.
+- `python3 -m unittest discover -s tests -v` passed with 133 tests.
+- `./bin/fortifylab doctor --check` passed.
+- `./bin/fortifylab status --check` passed.
+- `./bin/fortifylab tui --check` passed.
+- `git diff --check` passed.
+
+Next:
+
+- Merge this closeout branch into `migration/python-tui`.
+- Spawn Runbook/Help Contract on `agent/runbooks-M6-contract`.
+- Spawn M6 Test on `agent/test-M6-runbooks-help`.
+- Start Runbook/Help Implementation on `agent/runbooks-M6-implementation` after the contract is visible.
+- Start Docs M6 help/runbooks on `agent/docs-M6-help-runbooks` after implementation shape settles.
+
+Blockers: none.
+
+Risks:
+
+- M6 previews and tests must stay clone-safe unless live lab execution is explicitly requested.
+- Final Bash wizard retirement and `src/` deletion remain M7, not M6.
+- Diagnostics docs cleanup is deferred into M6 docs or the M7 final docs sweep.
