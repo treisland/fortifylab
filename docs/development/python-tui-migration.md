@@ -271,7 +271,7 @@ Workstream: Tests
 
 Branch: `agent/test-M1-entrypoints`
 
-Status: active
+Status: complete
 
 Changed:
 
@@ -281,12 +281,22 @@ Changed:
 - Quarantined deprecated Python preview tests outside default discovery.
 - Quarantined retired Bash wizard internal tests outside default discovery.
 - Documented quarantine rationale in `tests/quarantine/python_preview/README.md` and `tests/quarantine/bash_wizard_internal/README.md`.
+- Merged Test PR #450 into `migration/python-tui`.
+
+Acceptance evidence:
+
+- `./bin/fortifylab --help` passed during Architecture review.
+- `./bin/fortifylab tui --smoke-test` passed during Architecture review.
+- `./bin/fortifylab tui --check` passed during Architecture and Test review.
+- `python3 -m compileall -q fortifylab` passed during Architecture and Test review.
+- `python3 -m unittest tests.test_m1_entrypoints -v` passed.
+- `python3 -m unittest discover -s tests -v` passed with 81 tests.
+- `./scripts/validate-docs.sh` passed documentation quality gates in CI.
 
 Next:
 
-- Re-run M1 tests and default unittest discovery against the merged skeleton.
-- Push the updated Test PR #450.
-- Request PM review for the M1 test gate.
+- Close M1 in the PM tracker.
+- Open M2 navigation parity workstreams.
 
 Blockers: none.
 
@@ -294,3 +304,34 @@ Risks:
 
 - Behavior-level coverage from quarantined tests must be reintroduced milestone by milestone as supported Python CLI/TUI behavior lands.
 
+
+### 2026-08-25
+
+Milestone: M2
+
+Workstream: PM
+
+Branch: `agent/pm-M1-closeout-open-M2`
+
+Status: active
+
+Changed:
+
+- PM gate review accepted M1 as complete.
+- Updated the tracker to set `current_milestone: M2`.
+- Cleared obsolete M1 skeleton blockers.
+- Opened M2 navigation parity as the next milestone.
+
+Next:
+
+- Merge this closeout branch into `migration/python-tui`.
+- Spawn Navigation Model on `agent/navigation-M2-menu-model`.
+- Spawn M2 Test on `agent/test-M2-menu-parity`.
+- Start TUI keybinding implementation on `agent/tui-M2-keybindings` after the menu model contract is visible, or with close coordination.
+
+Blockers: none.
+
+Risks:
+
+- M2 must preserve the documented Bash wizard navigation before improving flow design.
+- No mutating operation wiring belongs in M2; that is M3.
