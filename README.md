@@ -176,7 +176,14 @@ can't detect a step that's already deployed from outside this screen (a
 prior session, or the Bash wizard); every step starts `pending` until
 Deploy / Resume itself runs it. Bash's equivalent
 live-state detection (`certs_ready`, `ssc_ready`, etc.) does several
-kubectl probes per step and isn't ported yet (see the roadmap).
+kubectl probes per step and isn't ported yet (see the roadmap). A
+`running` step now also gets its own color (cyan) instead of sharing
+`pending`'s yellow -- the two used to look identical at a glance, which
+read as "is this stuck?" -- and once armed, Deploy / Resume drives the
+*whole* remaining plan forward automatically (one confirmation, then
+unattended until done or a step fails, matching Bash's own guided
+auto-advance) instead of needing `a` pressed again before every single
+step.
 Applications got the same two fixes: starting SSC/LIM/MySQL/PostgreSQL
 used to fail every time with a permission error (scripts invoked
 directly instead of via `bash`), and a real start/stop now shows

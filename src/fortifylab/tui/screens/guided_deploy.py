@@ -6,6 +6,14 @@ Dry-run is the default and stays repeatable; execution requires explicitly
 arming the screen first ("a"), the same dry-run-unless-told-otherwise
 posture every other operation in this codebase takes (see
 ``OperationCatalog``/``OperationRunner``'s ``execute`` flag).
+
+Once armed, though, arming stays on and drives the *whole remaining plan*
+step by step -- unlike ``Armable.consume_arm()``'s one-shot-then-disarm
+posture elsewhere (``ApplicationsScreen``'s start/stop/destroy, where
+arming is a decision about one action), matching Bash's own guided
+auto-advance ("stopping only for required manual input or a failure").
+A failed step disarms automatically; the operator can also disarm ("a")
+at any time to pause after the step currently running finishes.
 """
 
 from __future__ import annotations
@@ -37,7 +45,13 @@ _STATUS_COLORS = {
     StepStatus.COMPLETE: "ok",
     StepStatus.FAILED: "fail",
     StepStatus.CANCELLED: "fail",
-    StepStatus.RUNNING: "warn",
+    # RUNNING used to share PENDING's color (warn/yellow) -- the "●"
+    # symbol still differed, but at a glance a step that had actually
+    # started looked the same shade as every step still waiting behind
+    # it, which read as "is this stuck?" (bug report). RUNNING now gets
+    # its own color (cyan) so an in-progress step is visually distinct
+    # from steps not yet reached.
+    StepStatus.RUNNING: "running",
     StepStatus.PENDING: "warn",
     StepStatus.READY: "muted",
     StepStatus.SKIPPED: "muted",
@@ -76,7 +90,7 @@ class GuidedDeployScreen(Armable, Screen):
         lines.extend(
             (
                 "",
-                self.style.muted("enter: run next step   a: toggle execute/dry-run   q: back"),
+                self.style.muted("enter: run next step   a: arm auto-advance (runs until done or failed)   q: back"),
             )
         )
         return "\n".join(lines) + "\n"
@@ -90,6 +104,21 @@ class GuidedDeployScreen(Armable, Screen):
             result = self.service.poll_execute()
             if result is not None:
                 self.last_result = result
+                if result.status in (StepStatus.FAILED, StepStatus.CANCELLED):
+                    # Matches Bash's own guided auto-advance: "stopping
+                    # only for required manual input or a failure" -- a
+                    # failed step must not silently keep going into the
+                    # next one.
+                    self.armed = False
+                elif self.armed:
+                    # Once armed, keep driving the plan forward step by
+                    # step without needing "a" pressed again before every
+                    # single enter -- this is the same "one confirmation,
+                    # then unattended until done or failed" flow Bash's
+                    # guided_deployment_menu()'s auto-advance offers (bug
+                    # report: "why not automatic"). start_execute() is a
+                    # no-op once nothing is left runnable.
+                    self.service.start_execute()
             return NavigationCommand.stay()
         if not isinstance(event, KeyEvent):
             return NavigationCommand.stay()
@@ -101,12 +130,17 @@ class GuidedDeployScreen(Armable, Screen):
         if event.key == "enter":
             if self.service.is_executing:
                 return NavigationCommand.stay()
-            if self.consume_arm():
+            if self.armed:
                 # Real execution runs on a background thread so this
                 # screen can show "running" on the very next render
                 # instead of freezing until the (possibly minutes-long)
                 # subprocess returns -- see the bug report. The result
-                # arrives via a TickEvent and poll_execute() above.
+                # arrives via a TickEvent above, which also keeps driving
+                # the remaining steps forward automatically while armed
+                # stays True (see the TickEvent branch) -- unlike
+                # Armable.consume_arm()'s one-shot-then-disarm posture
+                # elsewhere (start/stop/destroy), arming here means "run
+                # this whole plan," not "run one action," matching Bash.
                 self.service.start_execute()
                 return NavigationCommand.stay()
             result = self.service.run_next(execute=False)

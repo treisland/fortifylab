@@ -202,10 +202,18 @@ class ApplicationsScreen(Armable, Screen):
             marker = self.style.paint(">", "1;36") if index == self.selected_action_index else " "
             suffix = "  (running...)" if self.running and index == self.selected_action_index else ""
             row = f" {marker} {action_label}{suffix}"
-            # Destroy is destructive and irreversible -- flag it the same
-            # warn color as an in-progress row, so it never reads as just
-            # another equally-safe menu choice.
-            lines.append(self.style.warn(row) if (suffix or action_id == "destroy") else row)
+            if suffix:
+                # A distinct color from Destroy's warn/yellow (see below):
+                # conflating "this is running" with "this is dangerous"
+                # is the same color-coding bug already fixed once for
+                # Guided Deploy's running/pending rows.
+                lines.append(self.style.running(row))
+            elif action_id == "destroy":
+                # Destroy is destructive and irreversible -- flag it warn
+                # so it never reads as just another equally-safe choice.
+                lines.append(self.style.warn(row))
+            else:
+                lines.append(row)
         if self.show_credentials:
             lines.extend(("", "Login guidance"))
             hints = _LOGIN_HINTS.get(app_id)

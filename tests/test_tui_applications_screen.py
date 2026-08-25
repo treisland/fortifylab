@@ -467,6 +467,35 @@ class ApplicationsAppMenuTests(unittest.TestCase):
         destroy_line = next(line for line in rendered.splitlines() if "Destroy" in line)
         self.assertIn("[33m", destroy_line)
 
+    def test_running_action_row_is_colored_differently_from_destroys_warn(self) -> None:
+        # Regression test (same color-coding bug class as Guided Deploy's
+        # running/pending fix): a running action used to share Destroy's
+        # warn/yellow color, so an in-progress action read as "dangerous"
+        # rather than "in progress" -- and if the running row happened to
+        # be a different action than Destroy, the two were indistinguishable.
+        release = threading.Event()
+
+        def slow_runner(command):
+            release.wait(timeout=2.0)
+            return CommandResult(args=command, returncode=0, stdout="ok", stderr="", duration_seconds=0.0)
+
+        screen = _plain_screen(
+            style=TerminalStyle(color=True, symbols=True),
+            catalog=OperationCatalog(),
+            runner=OperationRunner(slow_runner),
+        )
+        _enter_app_menu(screen, "ssc")
+        _select_action(screen, "start")
+        screen.toggle_armed()
+        screen.handle_event(KeyEvent("enter"))
+
+        rendered = screen.render()
+        running_line = next(line for line in rendered.splitlines() if "running..." in line)
+        self.assertIn("[36m", running_line)
+
+        release.set()
+        _wait_for_execution(screen)
+
     def test_sast_start_uses_the_real_start_script_via_bash(self) -> None:
         screen = _plain_screen(catalog=OperationCatalog(), runner=OperationRunner(lambda c: CommandResult(c, 0, "ok", "", 0.0)))
         _enter_app_menu(screen, "sast")

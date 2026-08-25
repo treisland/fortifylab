@@ -38,6 +38,22 @@ def _wait_for_execution(screen: GuidedDeployScreen, *, timeout: float = 2.0) -> 
         time.sleep(0.01)
 
 
+def _wait_for_auto_advance(screen: GuidedDeployScreen, *, timeout: float = 2.0) -> None:
+    """Like ``_wait_for_execution``, but drives through however many
+    steps auto-advance chains while ``screen.armed`` stays True -- each
+    finished step's TickEvent immediately starts the next runnable one,
+    so this must keep polling until the whole run stops advancing
+    (complete, failed, or disarmed), not just until one background
+    thread finishes."""
+
+    deadline = time.monotonic() + timeout
+    while screen.service.is_executing or (screen.armed and not screen.service.is_complete and not screen.service.has_failed):
+        if time.monotonic() > deadline:
+            raise AssertionError("auto-advance did not finish within the test timeout")
+        screen.handle_event(TickEvent(0.0))
+        time.sleep(0.01)
+
+
 class GuidedDeployScreenTests(unittest.TestCase):
     def test_renders_every_plan_step(self) -> None:
         screen = _plain_screen()
@@ -89,6 +105,23 @@ class GuidedDeployScreenTests(unittest.TestCase):
         self.assertIn("[32m", rendered)  # green, complete
         self.assertIn("[31m", rendered)  # red, failed
 
+    def test_running_step_is_colored_differently_from_pending_steps(self) -> None:
+        # Regression test (bug report): RUNNING used to share PENDING's
+        # color (warn/yellow), so a step that had actually started looked
+        # the same shade as every step still waiting behind it -- read as
+        # "is this stuck?". RUNNING must render with its own color.
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("sleep", "0.2"))
+        screen = GuidedDeployScreen(style=TerminalStyle(color=True, symbols=True), service=service, armed=True)
+
+        screen.handle_event(KeyEvent("enter"))
+
+        rendered = screen.render()
+        self.assertIn("[36m", rendered)  # cyan, running
+        self.assertIn("[33m", rendered)  # yellow, still-pending steps
+        _wait_for_execution(screen)
+
     def test_enter_when_armed_starts_running_immediately(self) -> None:
         # The core fix for "no way to tell tasks are currently running":
         # a real execution must show as RUNNING on the very next render,
@@ -114,28 +147,57 @@ class GuidedDeployScreenTests(unittest.TestCase):
         screen = GuidedDeployScreen(style=TerminalStyle(color=False, symbols=False), service=service, armed=True)
 
         screen.handle_event(KeyEvent("enter"))
+        # Disarm before waiting: only steps[0] has a safe, fake command --
+        # armed staying True after it completes would auto-advance into
+        # steps[1]'s real (unpatched) script next, which this test isn't
+        # set up for. Auto-advance itself is covered by
+        # test_arming_stays_on_and_auto_advances_through_every_step.
+        screen.armed = False
         _wait_for_execution(screen)
 
         self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
         self.assertIn("Operation completed", screen.render())
 
-    def test_arming_auto_disarms_after_one_real_execution(self) -> None:
-        # Security review finding: arming was session-sticky, so a stray
-        # extra "enter" after arming would silently execute the *next*
-        # step for real too. Arming must be a one-shot, per-step decision.
+    def test_arming_stays_on_and_auto_advances_through_every_step(self) -> None:
+        # Bug report ("why not automatic"): Bash's own guided auto-advance
+        # runs the whole remaining plan unattended after one confirmation,
+        # stopping only for a failure -- arming one step and needing to
+        # re-arm before every single subsequent step (the original,
+        # stricter posture here) read as the deploy being stuck.
         controller = OperationController(RetryPolicy(max_attempts=1))
         service = DeployService("ssc_only", controller=controller)
-        object.__setattr__(service.plan.steps[0], "command", ("true",))
+        for step in service.plan.steps:
+            object.__setattr__(step, "command", ("true",))
         screen = GuidedDeployScreen(style=TerminalStyle(color=False, symbols=False), service=service, armed=True)
 
         screen.handle_event(KeyEvent("enter"))
-        self.assertFalse(screen.armed)
-        _wait_for_execution(screen)
-        self.assertEqual(service.states["certs"].status, StepStatus.COMPLETE)
+        _wait_for_auto_advance(screen)
 
-        # A follow-up "enter" without re-arming must stay a dry-run preview.
+        self.assertTrue(screen.armed)
+        self.assertTrue(service.is_complete)
+        for step in service.plan.steps:
+            self.assertEqual(service.states[step.step_id].status, StepStatus.COMPLETE)
+
+    def test_a_failed_step_auto_disarms_and_stops_the_auto_advance(self) -> None:
+        # Matches Bash's own auto-advance: "stopping only for required
+        # manual input or a failure" -- a failed step must not silently
+        # let the next one start.
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        object.__setattr__(service.plan.steps[0], "command", ("false",))
+        object.__setattr__(service.plan.steps[1], "command", ("true",))
+        screen = GuidedDeployScreen(style=TerminalStyle(color=False, symbols=False), service=service, armed=True)
+
         screen.handle_event(KeyEvent("enter"))
-        self.assertEqual(service.states["secrets"].status, StepStatus.PENDING)
+        _wait_for_auto_advance(screen)
+
+        self.assertFalse(screen.armed)
+        self.assertEqual(service.states[service.plan.steps[0].step_id].status, StepStatus.FAILED)
+        self.assertEqual(service.states[service.plan.steps[1].step_id].status, StepStatus.PENDING)
+
+        # A follow-up "enter" without re-arming stays a dry-run preview.
+        screen.handle_event(KeyEvent("enter"))
+        self.assertEqual(service.states[service.plan.steps[1].step_id].status, StepStatus.PENDING)
 
     def test_enter_while_already_executing_does_not_start_a_second_step(self) -> None:
         controller = OperationController(RetryPolicy(max_attempts=1))

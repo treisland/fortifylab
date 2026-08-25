@@ -32,6 +32,9 @@ class TerminalStyle:
     def warn(self, text: str) -> str:
         return self.paint(text, "33")
 
+    def running(self, text: str) -> str:
+        return self.paint(text, "36")
+
     def fail(self, text: str) -> str:
         return self.paint(text, "31")
 

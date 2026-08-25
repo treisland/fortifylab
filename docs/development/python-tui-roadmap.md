@@ -920,6 +920,43 @@ digit characters Bash's regex wouldn't, and ran the actual scale
 synchronously rather than through the shared background-thread path --
 both fixed before finalizing).
 
+## Guided Deploy bug fixes, round 2 (post-M16)
+
+More live user testing, two more real bugs found and fixed (both with
+regression tests):
+
+- **`RUNNING` shared `PENDING`'s color.** `GuidedDeployScreen`'s
+  `_STATUS_COLORS` colored both `RUNNING` and `PENDING` `warn` (yellow) --
+  the `●`/`→` symbols still differed, but a step that had actually
+  started looked the same shade as every step still waiting behind it.
+  From the user's seat, hitting `enter` once for a multi-step plan and
+  watching every step but the first stay yellow read as "did this get
+  stuck?" (bug report screenshot: Certs green/complete, every other step
+  identically orange whether running or merely queued). Fixed by giving
+  `TerminalStyle` a new `running()` color (cyan) and using it for
+  `RUNNING` instead of `warn`. `ApplicationsScreen` had the same
+  conflation in its per-app menu (a running action and Destroy's
+  always-warn row were visually identical), fixed the same way.
+- **No way to run a whole plan without re-arming before every single
+  step.** `GuidedDeployScreen` used `Armable.consume_arm()`'s
+  one-shot-then-disarm posture (correct for `ApplicationsScreen`'s
+  start/stop/destroy, where arming is a decision about *one* action) --
+  but for a multi-step plan, that meant pressing `a` then `enter` *before
+  every step*, which is also what the screenshot above was actually
+  showing (only the first step had ever been armed and run for real; the
+  rest were legitimately still `PENDING`, waiting on the operator, not
+  stuck). Bash's own `guided_deployment_menu()` auto-advance asks one
+  confirmation up front and then runs the whole remaining plan
+  unattended, "stopping only for required manual input or a failure."
+  `GuidedDeployScreen` now matches that: arming stays on and each
+  completed step's `TickEvent` immediately starts the next runnable one
+  while `armed` is still `True`; a failed step auto-disarms (stopping the
+  run, matching Bash); the operator can still disarm ("a") at any time to
+  pause after the step currently running finishes. `Armable.consume_arm()`
+  itself is untouched -- `ApplicationsScreen`'s per-action arming keeps
+  its one-shot posture, since a stray extra keypress there really
+  shouldn't silently start a second destroy or start/stop.
+
 ## What this PR actually delivers
 
 M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
@@ -928,12 +965,14 @@ M1 through M6, plus M7 (Flight Plans screen), M8 (sample apps), M9
 fixes, the feature-parity audit fixes, M13 (deployment & individual
 component management: live per-app status, per-app menu, Lab Lifecycle
 bulk shutdown/start), M14 (SAST/DAST in the app list), M15 (the
-`TextField` text-entry widget, and Applications' Destroy action), and
-M16 (Scale workers for SAST/DAST) above, as the first six milestone
-picks from the post-M6 follow-up plus a hardening pass and a deep parity
-pass on the one area specifically called out -- M6 delivered as an
-opt-in preview hook, not a default cutover, because the parity that
-cutover depends on doesn't exist yet.
+`TextField` text-entry widget, and Applications' Destroy action), M16
+(Scale workers for SAST/DAST), and the Guided Deploy bug fixes round 2
+(RUNNING/PENDING and running/Destroy color collisions, and auto-advance
+so arming a multi-step plan doesn't need re-arming before every step)
+above, as the first six milestone picks from the post-M6 follow-up plus
+a hardening pass and a deep parity pass on the one area specifically
+called out -- M6 delivered as an opt-in preview hook, not a default
+cutover, because the parity that cutover depends on doesn't exist yet.
 Full menu parity (M7 is one of ~15 remaining actions), the fcli lifecycle,
 and the actual default flip are real, sizeable follow-on work, tracked
 here rather than claimed. This keeps the claim in this document honest:
