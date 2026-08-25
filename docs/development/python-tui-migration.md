@@ -397,3 +397,33 @@ Blockers: none.
 Risks:
 
 - The TUI branch must use the tested navigation model rather than duplicating menu state.
+
+### 2026-08-25
+
+Milestone: M2
+
+Workstream: TUI
+
+Branch: `agent/tui-M2-keybindings`
+
+Status: active
+
+Changed:
+
+- Added `fortifylab.navigation.controller` with pure, noninteractive key handling.
+- Activated the M2 keyhandling tests for arrow movement, jump-to-number selection, Enter activation, disabled selections, multi-digit jumps, and normalized back/help/quit keys.
+- Replaced the M1 placeholder shell with a Textual-backed TUI that renders the shared navigation model.
+- Kept `./bin/fortifylab tui --check` deterministic and safe for environments without an interactive terminal.
+
+Next:
+
+- Push the feature branch and open the PR against `migration/python-tui`.
+- Watch CI and report the merge recommendation to PM after checks pass.
+
+Blockers: none.
+
+Risks:
+
+- Interactive operations remain placeholders until M3 operation adapters land.
+- Full interactive Textual mode requires dependencies from `requirements-python.txt`; noninteractive checks do not.
+
