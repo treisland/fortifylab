@@ -1,7 +1,7 @@
 program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
-current_milestone: M3
+current_milestone: M4
 overall_status: active
 
 goal:
@@ -30,25 +30,25 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-25
-  milestone: M3
-  workstream: pm-M2-closeout-open-M3
-  branch: agent/pm-M2-closeout-open-M3
+  milestone: M4
+  workstream: pm-M3-closeout-open-M4
+  branch: agent/pm-M3-closeout-open-M4
   status: active
   changed:
-    - M2 accepted as complete by PM gate review.
-    - Navigation Model PR #454 merged into migration/python-tui.
-    - M2 Menu Parity Tests PR #453 merged into migration/python-tui.
-    - TUI Keybindings PR #455 merged into migration/python-tui.
-    - Navigation behavior is intentionally defined as jump-highlight plus Enter activation.
-    - M3 operation adapter work opened for the next concurrent wave.
+    - M3 accepted as complete by PM gate review.
+    - Operations Adapter PR #458 merged into migration/python-tui.
+    - M4 Config Schema Design PR #457 merged into migration/python-tui as bounded prep.
+    - Helmholtz test branch closed as superseded because active M3 tests landed in PR #458.
+    - M4 config engine work opened for the next concurrent wave.
   next:
     - Merge PM closeout into migration/python-tui.
-    - Spawn Operations Adapter and M3 Test agents.
-    - Start Config Design in parallel as read-mostly foundation work.
+    - Spawn Config Implementation and M4 Test agents.
+    - Start Config CLI/TUI Bridge after the engine contract is visible.
+    - Start Docs M4 config surface after implementation shape settles.
   blockers: []
   risks:
-    - M3 must not execute mutating operations without explicit confirmation gates.
-    - Config implementation should wait for operation runner boundaries before replacing editor behavior.
+    - M4 must preserve comments/order and create backups before mutation.
+    - Config writes must stay local-file only in tests and avoid real cluster/network dependencies.
 
   needs_decision: []
 
@@ -86,12 +86,12 @@ workstreams:
   pm:
     owner: pm-agent
     status: active
-    branch: agent/pm-M2-closeout-open-M3
+    branch: agent/pm-M3-closeout-open-M4
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Close M2 and open M3 coordination.
-    next_task: Spawn Operations Adapter, M3 Test, and Config Design agents.
+    current_task: Close M3 and open M4 coordination.
+    next_task: Spawn Config Implementation and M4 Test agents, then coordinate bridge/docs work.
     blockers: []
   architecture:
     owner: architecture-agent
@@ -147,14 +147,15 @@ workstreams:
     last_heartbeat: 2026-08-25
   operations:
     owner: operations-agent
-    status: active
+    status: complete
     branch: agent/operations-M3-adapter-catalog
     owns:
       - fortifylab/operations/
       - tests/test_m3_operation_adapters.py
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Implement M3 Bash lifecycle operation catalog and safe runner.
+    current_task: Completed M3 Bash lifecycle operation catalog and safe runner.
+    result: Operations Adapter PR #458 merged into migration/python-tui.
     changed:
       - Added typed operation, command plan, preview, command result, and operation result models.
       - Added catalog entries for core component, sample app, and all-lab lifecycle scripts.
@@ -167,14 +168,15 @@ workstreams:
     last_heartbeat: 2026-08-25
   config:
     owner: config-agent
-    status: active
+    status: complete
     branch: agent/config-M4-schema-design
     owns:
       - fortifylab/config/
       - tests/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Prepare read-only M4 .env schema and parser/writer contracts without replacing Bash behavior.
+    current_task: Completed read-only M4 .env schema and parser/writer contracts without replacing Bash behavior.
+    result: M4 Config Schema Design PR #457 merged into migration/python-tui.
     changed:
       - Audited active Bash .env bootstrap, editor, validation, repair, backup, and rollback behavior.
       - Identified deprecated src/fortifylab/config bridge as reference-only code to remove or replace intentionally in M7.
@@ -206,7 +208,7 @@ workstreams:
   tests:
     owner: test-agent
     status: complete
-    branch: agent/test-M2-menu-parity
+    branch: agent/test-M3-operation-adapters
     owns:
       - tests/test_m1_entrypoints.py
       - tests/test_m2_menu_parity.py
@@ -214,9 +216,9 @@ workstreams:
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Completed M2 menu parity and keybinding-safe contract tests.
-    result: M2 Test PR #453 merged into migration/python-tui.
-    next_task: Start M3 operation adapter tests on agent/test-M3-operation-adapters.
+    current_task: M3 operation adapter tests superseded by active tests merged with PR #458.
+    result: Helmholtz branch closed as superseded; PR #458 includes the active M3 operation adapter tests.
+    next_task: Start M4 config engine tests on agent/test-M4-config-engine.
     blockers: []
     last_heartbeat: 2026-08-25
 
@@ -278,16 +280,28 @@ milestones:
       - Disabled menu items return disabled results with reasons instead of activating.
   - id: M3
     name: Operation adapters
-    status: in_progress
+    status: complete
     acceptance:
       - Existing Bash lifecycle scripts are represented in an operation catalog.
       - Mutating operations show dry-run previews and require confirmation.
       - Output streams into the TUI/log layer.
       - Exit codes and failures are surfaced clearly.
       - Secrets are redacted in logs.
+    completed_at: 2026-08-25
+    pull_requests:
+      - 458
+    evidence:
+      - python3 -m compileall -q fortifylab passed.
+      - python3 -m unittest tests.test_m3_operation_adapters -v passed with 8 tests.
+      - python3 -m unittest discover -s tests -v passed with 112 tests after config design merge.
+      - PR #458 offline-docs CI passed before merge.
+      - Tests do not use Kubernetes, Helm, Docker, network, or real lifecycle scripts.
+    notes:
+      - M3 returns captured command output; future TUI work may add incremental streaming.
+      - Helmholtz branch agent/test-M3-operation-adapters was superseded by active tests in PR #458.
   - id: M4
     name: Python-native config editor
-    status: pending
+    status: in_progress
     acceptance:
       - .env parser preserves comments and ordering where practical.
       - Config updates create backups.
