@@ -181,18 +181,20 @@ workstreams:
       - Architecture decisions must be recorded before broad doc rewrites.
   tests:
     owner: test-agent
-    status: complete
-    branch: agent/test-M1-entrypoints
+    status: active
+    branch: agent/test-M2-menu-parity
     owns:
       - tests/test_m1_entrypoints.py
+      - tests/test_m2_menu_parity.py
       - tests/quarantine/python_preview/
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Completed M1 entrypoint acceptance tests and quarantine cleanup.
+    current_task: Add M2 menu parity and keybinding-safe contract tests.
     result: M1 Test PR #450 merged into migration/python-tui.
-    next_task: Start M2 menu parity tests on agent/test-M2-menu-parity.
-    blockers: []
+    next_task: Re-run M2 contract tests after the navigation model and key controller helpers land.
+    blockers:
+      - Deterministic navigation model and key controller helpers are not merged yet.
     last_heartbeat: 2026-08-25
 
 milestones:

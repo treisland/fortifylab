@@ -354,17 +354,46 @@ Workstream: Navigation
 
 Branch: `agent/navigation-M2-menu-model`
 
-Status: active
+Status: complete
 
 Changed:
 
 - Added the first Python menu model contract for the documented Bash wizard baseline.
 - Exposed deterministic helpers for menu keys, labels, lookup, disabled reasons, aliases, and workflow boundaries.
+- Merged Navigation Model PR #454 into `migration/python-tui`.
 
 Next:
 
-- Coordinate with TUI and Test agents after this branch lands on `migration/python-tui`.
+- Coordinate with Test and TUI agents now that the model contract is available.
 
-Blockers:
+Blockers: none.
 
-- None.
+Risks:
+
+- This is intentionally a model contract only; no operation execution, config editor, diagnostics, or runbook behavior is wired yet.
+
+### 2026-08-25
+
+Milestone: M2
+
+Workstream: Test
+
+Branch: `agent/test-M2-menu-parity`
+
+Status: active
+
+Changed:
+
+- Added noninteractive M2 contract tests for menu labels, ordering, action types, number jumps, arrow selection, Enter activation, normalized back/help/quit keys, and disabled reason text.
+- Defined the expected test API around `fortifylab.navigation` and `fortifylab.navigation.controller`.
+
+Next:
+
+- Re-run the M2 tests against the merged navigation model.
+- Adjust tests only if the agreed navigation contract differs deliberately.
+
+Blockers: none.
+
+Risks:
+
+- The TUI branch must use the tested navigation model rather than duplicating menu state.
