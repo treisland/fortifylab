@@ -184,6 +184,29 @@ class M7RetirementCliTests(unittest.TestCase):
 
 
 class M7RetiredInternalsDiscoveryTests(unittest.TestCase):
+    def test_retired_wizard_sources_are_removed_from_git(self) -> None:
+        result = subprocess.run(
+            ["git", "ls-files", "scripts/wizard"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "")
+
+    def test_source_cleanup_lanes_remain_out_of_scope_for_this_branch(self) -> None:
+        retained_paths = (
+            ROOT / "src",
+            ROOT / "tests" / "quarantine" / "python_preview",
+        )
+
+        for path in retained_paths:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertTrue(path.exists())
+
     def test_supported_catalogs_do_not_expose_retired_wizard_or_quarantine_paths(self) -> None:
         forbidden_parts = {
             "src",
