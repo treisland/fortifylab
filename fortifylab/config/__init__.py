@@ -1,5 +1,21 @@
-"""Configuration contracts for the Python TUI migration."""
+"""Configuration APIs for the Python TUI migration."""
 
+from .envfile import (
+    ConfigChange,
+    ConfigDiffEntry,
+    ConfigIssue,
+    ConfigValidationError,
+    ConfigWriteResult,
+    EnvBackup,
+    EnvDocument,
+    EnvLine,
+    EnvValue,
+    create_env_backup,
+    diff_preview,
+    repair_domain_changes,
+    validate_env_file,
+    write_env_file,
+)
 from .schema import (
     CONFIG_SECTIONS,
     DERIVED_URL_REPAIRS,
@@ -18,16 +34,30 @@ from .schema import (
 
 __all__ = [
     "CONFIG_SECTIONS",
+    "ConfigChange",
+    "ConfigDiffEntry",
     "DERIVED_URL_REPAIRS",
     "M4_CONFIG_CONTRACT",
     "ConfigField",
     "ConfigFieldKind",
+    "ConfigIssue",
     "ConfigSection",
+    "ConfigValidationError",
+    "ConfigWriteResult",
     "DerivedValue",
+    "EnvBackup",
+    "EnvDocument",
     "EnvDocumentCapability",
+    "EnvLine",
+    "EnvValue",
     "ParserWriterContract",
+    "create_env_backup",
+    "diff_preview",
     "field_by_key",
     "fields_for_section",
     "is_secret_key",
+    "repair_domain_changes",
     "redacted_value",
+    "validate_env_file",
+    "write_env_file",
 ]
