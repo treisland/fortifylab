@@ -147,14 +147,24 @@ workstreams:
     last_heartbeat: 2026-08-25
   operations:
     owner: operations-agent
-    status: pending
+    status: active
     branch: agent/operations-M3-adapter-catalog
     owns:
       - fortifylab/operations/
-      - fortifylab/shell_adapters/
-      - tests/
-    current_task: Wrap existing Bash scripts as operation adapters with dry-run and confirmation support.
+      - tests/test_m3_operation_adapters.py
+      - .migration/python-tui-plan.yml
+      - docs/development/python-tui-migration.md
+    current_task: Implement M3 Bash lifecycle operation catalog and safe runner.
+    changed:
+      - Added typed operation, command plan, preview, command result, and operation result models.
+      - Added catalog entries for core component, sample app, and all-lab lifecycle scripts.
+      - Added dry-run previews, confirmation-required metadata, and a redacting execution wrapper.
+      - Added harmless command tests that do not invoke Kubernetes, Helm, Docker, or real lifecycle scripts.
     blockers: []
+    risks:
+      - Selected-profile lifecycle execution still depends on future guided workflow state wiring.
+      - M3 runner captures command output; future TUI work may stream incrementally instead.
+    last_heartbeat: 2026-08-25
   config:
     owner: config-agent
     status: pending

@@ -467,3 +467,35 @@ Risks:
 
 - M3 must not execute mutating operations without explicit confirmation gates.
 - Config implementation should wait for operation runner boundaries before replacing editor behavior.
+
+
+### 2026-08-25
+
+Milestone: M3
+
+Workstream: Operations
+
+Branch: `agent/operations-M3-adapter-catalog`
+
+Status: active
+
+Changed:
+
+- Added a typed operation adapter model for Bash-backed lifecycle commands.
+- Added a deterministic catalog for MySQL, PostgreSQL, SSC, LIM, ScanCentral SAST, ScanCentral DAST, Juice Shop, WebGoat, DVWA, and all-lab lifecycle operations.
+- Added dry-run preview support and confirmation-required metadata for mutating operations.
+- Added a safe command runner with command, exit code, stdout, stderr, and duration result fields.
+- Added a redaction boundary for token/password/secret/license/API-key text, bearer tokens, sensitive paths, home paths, repo paths, and caller-provided sensitive values.
+- Added M3 tests that use harmless Python commands and do not execute Kubernetes, Helm, Docker, or repository lifecycle scripts.
+
+Next:
+
+- Complete full-suite verification.
+- Push `agent/operations-M3-adapter-catalog` and open a PR to `migration/python-tui`.
+
+Blockers: none.
+
+Risks:
+
+- Selected-profile lifecycle execution still needs later guided workflow state integration.
+- M3 returns captured command output; future TUI work may add incremental streaming.
