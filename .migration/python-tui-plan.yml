@@ -1,7 +1,7 @@
 program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
-current_milestone: M5
+current_milestone: M6
 overall_status: active
 
 goal:
@@ -30,26 +30,25 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-25
-  milestone: M5
-  workstream: pm-M4-closeout-open-M5
-  branch: agent/pm-M4-closeout-open-M5
+  milestone: M6
+  workstream: pm-M5-closeout-open-M6
+  branch: agent/pm-M5-closeout-open-M6
   status: active
   changed:
-    - M4 accepted as complete by PM gate review.
-    - Config Schema Design PR #457 merged into migration/python-tui.
-    - Python Config Engine PR #460 merged into migration/python-tui.
-    - Config CLI Bridge PR #461 merged into migration/python-tui.
-    - Python-native config behavior is reachable from supported CLI paths.
-    - M5 diagnostics and status work opened for the next concurrent wave.
+    - M5 accepted as complete by PM gate review.
+    - Diagnostics/status PR #463 merged into migration/python-tui.
+    - Python-native doctor and status commands are available without the Bash wizard.
+    - Diagnostics/status behavior is covered by clone-safe, read-only tests.
+    - M6 runbook/help work opened for the next concurrent wave.
   next:
     - Merge PM closeout into migration/python-tui.
-    - Spawn Diagnostics Contract and M5 Test agents.
-    - Start Diagnostics Implementation after the contract is visible.
-    - Start Docs M5 diagnostics surface after implementation shape settles.
+    - Spawn Runbook/Help Contract and M6 Test agents.
+    - Start Runbook/Help Implementation after the contract is visible.
+    - Start Docs M6 help/runbooks after implementation shape settles.
   blockers: []
   risks:
-    - M5 checks must stay read-only and keep default tests free of cluster/network dependencies.
-    - Broader runbook/help migration remains M6, not M5.
+    - M6 previews and tests must stay clone-safe unless live lab execution is explicitly requested.
+    - Final Bash wizard retirement and src deletion remain M7, not M6.
 
   needs_decision: []
 
@@ -87,12 +86,12 @@ workstreams:
   pm:
     owner: pm-agent
     status: active
-    branch: agent/pm-M4-closeout-open-M5
+    branch: agent/pm-M5-closeout-open-M6
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Close M4 and open M5 coordination.
-    next_task: Spawn Diagnostics Contract and M5 Test agents, then coordinate implementation/docs work.
+    current_task: Close M5 and open M6 coordination.
+    next_task: Spawn Runbook/Help Contract and M6 Test agents, then coordinate implementation/docs work.
     blockers: []
   architecture:
     owner: architecture-agent
@@ -193,14 +192,23 @@ workstreams:
 
   diagnostics:
     owner: diagnostics-agent
-    status: pending
-    branch: agent/diagnostics-M5-contract
+    status: complete
+    branch: agent/test-M5-diagnostics
     owns:
       - fortifylab/status/
       - fortifylab/diagnostics/
       - tests/
-    current_task: Define and implement read-only diagnostic/status contracts and doctor command behavior.
+    current_task: Completed read-only diagnostic/status contracts and doctor/status command behavior.
+    result: Diagnostics/status PR #463 merged into migration/python-tui.
+    changed:
+      - Added root fortifylab.diagnostics and fortifylab.status contracts.
+      - Added clone-safe doctor and status command behavior.
+      - Added diagnostic redaction and injected-runner contracts.
+      - Kept default tests free of cluster, network, Kubernetes, Helm, and Docker dependencies.
     blockers: []
+    risks:
+      - Diagnostics docs cleanup is deferred into M6 docs or M7 final docs sweep.
+    last_heartbeat: 2026-08-25
   docs:
     owner: docs-agent
     status: pending
@@ -213,7 +221,7 @@ workstreams:
       - Architecture decisions must be recorded before broad doc rewrites.
   tests:
     owner: test-agent
-    status: active
+    status: complete
     branch: agent/test-M5-diagnostics
     owns:
       - tests/test_m1_entrypoints.py
@@ -224,9 +232,9 @@ workstreams:
       - tests/quarantine/bash_wizard_internal/
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Add M5 diagnostics/status contract tests without live cluster, network, Kubernetes, Helm, or Docker dependencies.
-    result: M4 config tests merged through PR #460 and PR #461.
-    next_task: Open PR for M5 diagnostics tests and coordinate activation with Diagnostics implementation.
+    current_task: Completed M5 diagnostics/status contract tests without live cluster, network, Kubernetes, Helm, or Docker dependencies.
+    result: M5 diagnostics/status tests merged through PR #463.
+    next_task: Open M6 runbook/help contract tests.
     blockers: []
     last_heartbeat: 2026-08-25
 
@@ -333,14 +341,30 @@ milestones:
       - Full-screen TUI config editor remains future work.
   - id: M5
     name: Status and diagnostics
-    status: in_progress
+    status: complete
     acceptance:
       - Prerequisite, license, cluster, pod, registry, and TLS checks are available.
       - doctor command works without the Bash wizard.
       - Sanitized diagnostics bundle behavior is covered by tests.
+    completed_at: 2026-08-25
+    pull_requests:
+      - 463
+    merge_commit: 3964779fad3d13b5085c51f83c6b9fc3e0e4244f
+    evidence:
+      - python3 -m compileall -q fortifylab passed.
+      - python3 -m unittest tests.test_m5_diagnostics -v passed with 8 tests.
+      - python3 -m unittest discover -s tests -v passed with 133 tests.
+      - ./bin/fortifylab doctor --check passed.
+      - ./bin/fortifylab status --check passed.
+      - ./bin/fortifylab tui --check passed.
+      - git diff --check passed.
+    notes:
+      - Doctor/status checks are clone-safe and read-only by default.
+      - Live cluster, pod, registry, and TLS checks remain explicit environment-dependent behavior.
+      - Diagnostics docs cleanup is deferred into M6 docs or the M7 final docs sweep.
   - id: M6
     name: Runbooks and help
-    status: pending
+    status: in_progress
     acceptance:
       - Runbook discovery and metadata validation are Python-native.
       - Help Center topics are reachable from the TUI.
