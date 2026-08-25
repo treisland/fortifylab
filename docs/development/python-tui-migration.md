@@ -105,6 +105,16 @@ Architecture and TUI decisions from the audit:
 - Preserve pending-change guards for Config and Flight Plan screens.
 - Remove or replace the current `bin/fortifylab` Python config bridge intentionally during M1-M4.
 
+M2 menu model contract:
+
+- Menu data lives in `fortifylab/navigation/models.py`, `baseline.py`, and `registry.py`.
+- Number keys are modeled as jump-highlight selection; Enter/Return activates the selected item.
+- Duplicate numbers are scoped by `MenuNode.id`, so `main:1`, `more_tools:1`, and `guided_deployment:1` can point to different targets.
+- Back and return aliases are metadata on screens and return items: `r`, `b`, Escape, and empty Enter are preserved where the Bash baseline accepted them.
+- Disabled entries keep `disabled_reason` text on the item; the first-scan demo is unavailable until prerequisites are ready.
+- Placeholder targets use stable `ActionRef` values until M3-M6 replace them with real operations, config, diagnostics, and runbook views.
+- Guided deployment is represented as a `workflow_boundary` screen for profile selection, deployment mode selection, per-step controls, and completion handoff.
+
 ## Workstreams
 
 The PM workstream owns coordination, milestone gates, heartbeats, branch rules,
@@ -340,6 +350,32 @@ Risks:
 
 Milestone: M2
 
+Workstream: Navigation
+
+Branch: `agent/navigation-M2-menu-model`
+
+Status: complete
+
+Changed:
+
+- Added the first Python menu model contract for the documented Bash wizard baseline.
+- Exposed deterministic helpers for menu keys, labels, lookup, disabled reasons, aliases, and workflow boundaries.
+- Merged Navigation Model PR #454 into `migration/python-tui`.
+
+Next:
+
+- Coordinate with Test and TUI agents now that the model contract is available.
+
+Blockers: none.
+
+Risks:
+
+- This is intentionally a model contract only; no operation execution, config editor, diagnostics, or runbook behavior is wired yet.
+
+### 2026-08-25
+
+Milestone: M2
+
 Workstream: Test
 
 Branch: `agent/test-M2-menu-parity`
@@ -353,13 +389,11 @@ Changed:
 
 Next:
 
-- Re-run the M2 tests after the deterministic Python menu model and key controller helpers land.
+- Re-run the M2 tests against the merged navigation model.
+- Adjust tests only if the agreed navigation contract differs deliberately.
 
-Blockers:
-
-- The deterministic navigation model and key controller helpers are not merged yet; the contract tests skip until those dependencies exist.
+Blockers: none.
 
 Risks:
 
-- The Navigation Model branch must match the documented contract or coordinate a deliberate test update before TUI keybinding work depends on it.
-
+- The TUI branch must use the tested navigation model rather than duplicating menu state.
