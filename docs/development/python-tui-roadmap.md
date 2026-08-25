@@ -951,11 +951,15 @@ regression tests):
   `GuidedDeployScreen` now matches that: arming stays on and each
   completed step's `TickEvent` immediately starts the next runnable one
   while `armed` is still `True`; a failed step auto-disarms (stopping the
-  run, matching Bash); the operator can still disarm ("a") at any time to
-  pause after the step currently running finishes. `Armable.consume_arm()`
-  itself is untouched -- `ApplicationsScreen`'s per-action arming keeps
-  its one-shot posture, since a stray extra keypress there really
-  shouldn't silently start a second destroy or start/stop.
+  run, matching Bash), and so does the plan actually finishing -- a code
+  review finding caught that completion alone didn't clear `armed`, which
+  would have left "Mode: EXECUTE (armed)" displayed forever right next to
+  "All steps complete." with nothing left to arm for. The operator can
+  still disarm ("a") at any time to pause after the step currently
+  running finishes. `Armable.consume_arm()` itself is untouched --
+  `ApplicationsScreen`'s per-action arming keeps its one-shot posture,
+  since a stray extra keypress there really shouldn't silently start a
+  second destroy or start/stop.
 
 ## What this PR actually delivers
 

@@ -173,10 +173,29 @@ class GuidedDeployScreenTests(unittest.TestCase):
         screen.handle_event(KeyEvent("enter"))
         _wait_for_auto_advance(screen)
 
-        self.assertTrue(screen.armed)
+        # Disarms once the plan is actually done (code review finding):
+        # otherwise "Mode: EXECUTE (armed)" would stay displayed forever
+        # alongside "All steps complete." with nothing left to arm for.
+        self.assertFalse(screen.armed)
         self.assertTrue(service.is_complete)
         for step in service.plan.steps:
             self.assertEqual(service.states[step.step_id].status, StepStatus.COMPLETE)
+
+    def test_completing_the_plan_disarms_so_the_mode_line_does_not_lie(self) -> None:
+        # Regression test (code review finding): armed used to only clear
+        # on failure, so "Mode: EXECUTE (armed)" stayed shown forever
+        # right next to "All steps complete." with nothing left to arm.
+        controller = OperationController(RetryPolicy(max_attempts=1))
+        service = DeployService("ssc_only", controller=controller)
+        for step in service.plan.steps:
+            object.__setattr__(step, "command", ("true",))
+        screen = GuidedDeployScreen(style=TerminalStyle(color=False, symbols=False), service=service, armed=True)
+
+        screen.handle_event(KeyEvent("enter"))
+        _wait_for_auto_advance(screen)
+
+        self.assertNotIn("EXECUTE (armed)", screen.render())
+        self.assertIn("All steps complete.", screen.render())
 
     def test_a_failed_step_auto_disarms_and_stops_the_auto_advance(self) -> None:
         # Matches Bash's own auto-advance: "stopping only for required

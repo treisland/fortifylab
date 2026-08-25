@@ -28,10 +28,13 @@ from ..theme import TerminalStyle
 from .base import Armable, NavigationCommand, Screen
 
 # Symbol + color per status, matching scripts/wizard/guided.sh's own
-# guided_status_render() convention (complete=green, in_progress=yellow,
-# failed=red, pending=yellow, manual/skipped=dim). STEP_STATUS.READY only
-# exists on the Python side (a dry-run preview marker, not a real Bash
-# status) and is styled as muted rather than borrowing any of those.
+# guided_status_render() convention (complete=green, failed=red,
+# pending=yellow, manual/skipped=dim) -- with one deliberate departure:
+# Bash doesn't distinguish in_progress from pending (both yellow), but a
+# step that's actually running needs its own color here (cyan) or it's
+# indistinguishable from one just waiting its turn (bug report). STEP_STATUS.READY
+# only exists on the Python side (a dry-run preview marker, not a real
+# Bash status) and is styled as muted rather than borrowing any of those.
 _STATUS_SYMBOLS = {
     StepStatus.COMPLETE: "ok",
     StepStatus.FAILED: "fail",
@@ -104,11 +107,14 @@ class GuidedDeployScreen(Armable, Screen):
             result = self.service.poll_execute()
             if result is not None:
                 self.last_result = result
-                if result.status in (StepStatus.FAILED, StepStatus.CANCELLED):
+                if result.status in (StepStatus.FAILED, StepStatus.CANCELLED) or self.service.is_complete:
                     # Matches Bash's own guided auto-advance: "stopping
                     # only for required manual input or a failure" -- a
                     # failed step must not silently keep going into the
-                    # next one.
+                    # next one. Also disarm once the plan is actually
+                    # done (code review finding): without this, "Mode:
+                    # EXECUTE (armed)" stayed displayed forever alongside
+                    # "All steps complete." with nothing left to arm for.
                     self.armed = False
                 elif self.armed:
                     # Once armed, keep driving the plan forward step by

@@ -166,8 +166,9 @@ password), and it offers no repair action -- same as Bash, fixing a
 `warn` item happens elsewhere in the wizard. The fcli
 activation/trust-import lifecycle also stays Bash-wizard-only,
 deliberately not yet ported (see the roadmap). Deploy / Resume's step
-statuses are color-coded (green/yellow/red, matching Bash's own status
-board), dry-run now visibly walks through each pending step's preview
+statuses are color-coded (green/yellow/red/cyan, matching Bash's own
+status board with one addition -- see below), dry-run now visibly walks
+through each pending step's preview
 in turn, and a real step shows `running` immediately instead of freezing
 the whole screen until it finishes (it runs on a background thread; the
 TUI's event loop now wakes up periodically even with no keypress, so the
