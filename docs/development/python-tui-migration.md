@@ -333,6 +333,33 @@ Implementation agents can proceed in this order:
 
 ### 2026-08-25
 
+Milestone: M7
+
+Workstream: Entrypoint Compatibility
+
+Branch: `agent/entrypoints-M7-compatibility`
+
+Status: active
+
+Changed:
+
+- Defined `start_wizard.sh` as a minimal compatibility shim over `./bin/fortifylab`.
+- Added clone-safe M7 tests for `--help`, `tui --check`, `config-diagnostics`, `doctor`, `status`, and `help topic` compatibility behavior.
+- Preserved `scripts/wizard/` and deprecated `src/` preview files for the separate M7 cleanup decisions.
+
+Next:
+
+- Run the M7 compatibility tests and default unittest suite.
+- Open the compatibility PR against `migration/python-tui`.
+
+Blockers: none.
+
+Risks:
+
+- PM should confirm whether `start_wizard.sh doctor`, `status`, and `help topic` aliases are long-term compatibility or migration-only affordances.
+
+### 2026-08-25
+
 Milestone: M0
 
 Status: active
