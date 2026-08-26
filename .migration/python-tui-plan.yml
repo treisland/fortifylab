@@ -664,12 +664,18 @@ milestones:
           - git diff --check passed.
       - id: M9.5
         name: Logs and wizard log workflow
-        status: in_progress
+        status: complete
+        completed_at: 2026-08-26
+        merged_prs:
+          - 496
+          - 497
+        merge_commits:
+          - 0d9218232a778ad7e9ed8748df81ba4eae45cc6a
+          - 67752f0a858a04ee6620d5404a8384fbded9e69a
         branches:
-          - agent/logs-M9.5-contract
-          - agent/tui-M9.5-logs-workflow
+          - agent/pm-open-M9.5-logs-workflow
           - agent/test-M9.5-logs-workflow
-          - agent/docs-M9.5-logs-workflow
+          - agent/close-M9.5-logs-workflow
         acceptance:
           - Logs menu actions open functional TUI workflow screens.
           - Wizard log view opens a functional log view or clear unavailable state.
@@ -679,6 +685,14 @@ milestones:
           - Tests use temp fixture logs only and require no live lab state.
         evidence:
           - M9.5 opened after PM recommendation as the read-only workflow bridge after lifecycle operations.
+          - fortifylab.logging now defines read-only log source discovery, wizard log path resolution, bounded tail/detail reads, missing/unavailable/unsafe states, and log redaction.
+          - Logs and Wizard Log menu actions dispatch to TUI workflow screens with arrow/number source selection, refresh, and back behavior.
+          - Wizard log discovery mirrors the legacy XDG state layout without creating files or directories.
+          - Log workflow tests use temporary fixture logs only and do not require Kubernetes, Helm, Docker, network, credentials, or live lab state.
+          - python3 -m compileall -q fortifylab passed.
+          - python3 -m unittest discover -s tests -q passed with 229 tests.
+          - ./bin/fortifylab tui --check, doctor --check, and status --check passed.
+          - git diff --check passed.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v

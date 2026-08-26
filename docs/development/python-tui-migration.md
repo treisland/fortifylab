@@ -450,10 +450,21 @@ Default tests remain clone-safe. M9.4 lifecycle tests use injected or mocked
 runners and do not run live Kubernetes, Helm, Docker, network, or repository
 lifecycle scripts.
 
-M9.5 is now the active slice and owns Logs and Wizard Log workflow parity. It is
-read-only by default and should provide log listing/detail, refresh/back
-behavior, redacted bounded content, and clear unavailable states without requiring
-live Kubernetes, Helm, Docker, network, credentials, or lab logs in default tests.
+### M9.5 Closeout
+
+M9.5 landed through PRs #496 and #497. Logs and Wizard Log menu paths now open
+read-only Python TUI screens instead of placeholder text. Operators can select
+available sources with arrow keys or number keys, refresh the selected log tail,
+return with Back, and see clear missing, unavailable, or unsafe path states.
+
+The Python log contract resolves the wizard log using the legacy XDG state layout
+without creating files or directories. Log reads are bounded, fixture-testable,
+and redacted before display, including passwords, tokens, bearer credentials,
+local sensitive paths, and token-like file paths.
+
+Default tests remain clone-safe. M9.5 tests use temporary fixture logs only and
+do not run Kubernetes, Helm, Docker, network calls, credentials, live lab checks,
+or repository lifecycle scripts.
 
 ## Decision Log
 
