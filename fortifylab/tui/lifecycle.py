@@ -12,6 +12,7 @@ from fortifylab.operations import (
     OperationRunResult,
     SensitiveRedactor,
     dry_run,
+    run_operation,
 )
 from fortifylab.tui.workflows import WorkflowKeyResult
 
@@ -188,7 +189,7 @@ def build_lifecycle_workflow(selected, runner: LifecycleRunner | None = None):  
 
 
 class LifecycleWorkflowScreen:
-    """Minimal lifecycle screen contract with dry-run, confirmation, and injection hooks."""
+    """Lifecycle screen with dry-run, confirmation, and operation runner hooks."""
 
     def __init__(
         self,
@@ -198,7 +199,7 @@ class LifecycleWorkflowScreen:
         runner: LifecycleRunner | None = None,
     ) -> None:
         self.contract = resolve_lifecycle_action(action_target)
-        self.runner = runner or _contract_only_runner
+        self.runner = runner or _confirmed_operation_runner
         self.selected_operation_id = self.contract.default_operation_id
         self.awaiting_confirmation = False
         self.last_preview: DryRunPreviewScreenModel | None = None
@@ -214,6 +215,7 @@ class LifecycleWorkflowScreen:
             lines.append(f"Unsupported: {self.contract.unsupported_reason}")
             return "\n".join(lines)
 
+        lines.append("Use Up/Down or 1-3 to select. p previews, c confirms, y runs, n cancels, b backs out.")
         lines.append("Operations:")
         for index, operation_id in enumerate(self.contract.operation_ids, start=1):
             marker = ">" if operation_id == self.selected_operation_id else " "
@@ -228,6 +230,7 @@ class LifecycleWorkflowScreen:
                 lines.append(f"Confirm: {self.last_preview.confirmation_prompt}")
         if self.last_result is not None:
             lines.append("")
+            lines.append(f"Status: {self.last_result.status}")
             lines.append(self.last_result.message)
             if self.last_result.exit_code is not None:
                 lines.append(f"Exit code: {self.last_result.exit_code}")
@@ -235,6 +238,11 @@ class LifecycleWorkflowScreen:
                 lines.append(f"stdout: {self.last_result.stdout_summary}")
             if self.last_result.stderr_summary:
                 lines.append(f"stderr: {self.last_result.stderr_summary}")
+            if self.last_result.redacted_output:
+                lines.append("Output:")
+                lines.extend(f"  {line}" for line in self.last_result.redacted_output[:12])
+                if len(self.last_result.redacted_output) > 12:
+                    lines.append("  ...")
         return "\n".join(lines)
 
     def handle_key(self, key: str) -> WorkflowKeyResult:
@@ -248,6 +256,7 @@ class LifecycleWorkflowScreen:
                 self.selected_operation_id = self.contract.operation_ids[index]
                 self.awaiting_confirmation = False
                 self.last_result = None
+                self.last_preview = None
                 return WorkflowKeyResult(f"Selected {self.selected_operation_id}.")
         if key in {"p", "d"}:
             self.last_preview = build_dry_run_preview(self.contract.action_target, self.selected_operation_id)
@@ -272,6 +281,15 @@ class LifecycleWorkflowScreen:
             return WorkflowKeyResult(self.last_result.message)
         if key in {"n", "cancel"} and self.awaiting_confirmation:
             self.awaiting_confirmation = False
+            self.last_result = ExecutionResultDisplayModel(
+                status="blocked",
+                operation_id=self.selected_operation_id,
+                exit_code=None,
+                stdout_summary="",
+                stderr_summary="",
+                redacted_output=(),
+                message="Lifecycle execution cancelled.",
+            )
             return WorkflowKeyResult("Lifecycle execution cancelled.")
         return WorkflowKeyResult(f"No lifecycle action is bound to {key!r}.")
 
@@ -314,8 +332,8 @@ def _execute_with_runner(runner: LifecycleRunner, operation_id: str) -> Executio
         )
 
 
-def _contract_only_runner(operation_id: str) -> OperationRunResult:
-    raise RuntimeError(f"No lifecycle runner is configured for {operation_id}.")
+def _confirmed_operation_runner(operation_id: str) -> OperationRunResult:
+    return run_operation(operation_id, confirmed=True)
 
 
 def _summarize_output(output: str, *, limit: int = 160) -> str:
