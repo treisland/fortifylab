@@ -39,6 +39,36 @@ each existing dependency with the layered health gates before continuing.
     destructive and confirm only when loss of that component's lab data is
     intended. Stop is the safe choice when data must remain.
 
+## Python TUI lifecycle workflow
+
+The Python TUI now opens lifecycle screens from the same navigation structure as
+the retired Bash wizard. The main **Lab lifecycle controls** menu, **More tools ->
+App management**, and **More tools -> Sample apps** routes open Python lifecycle
+screens instead of placeholder text. Operators can move with arrow keys, jump to
+a numbered item, and press Enter to open the highlighted lifecycle target.
+
+Inside a lifecycle screen:
+
+1. Press `p` or `d` to preview the selected operation plan and command.
+2. Press `c` or Enter to request confirmation for the selected operation.
+3. Press `y` only after confirmation is pending to execute through the operation
+   catalog.
+4. Press `n` to cancel pending confirmation and return to preview-only state.
+
+The result screen reports status, exit code, and bounded stdout/stderr summaries.
+Commands and output are redacted before display so common secret values do not
+appear in the TUI transcript.
+
+The supported operation catalog targets are `start`, `stop`, and `destroy` for
+MySQL, PostgreSQL, SSC, LIM, ScanCentral SAST, ScanCentral DAST, Juice Shop,
+WebGoat, and DVWA. All-lab `start` and `stop` are also supported. Restart and
+reset are still unsupported placeholders because they need ordered dependency
+sequence and destructive-scope screens before they are safe to expose.
+
+Default tests for this workflow are clone-safe. They use injected or mocked
+runners and do not run live Kubernetes, Helm, Docker, network calls, or
+repository lifecycle scripts.
+
 ## Safe start and resume
 
 1. Preview **Operational guidance → Deployment plan**.
