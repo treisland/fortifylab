@@ -552,6 +552,15 @@ milestones:
           - Users can list, select, view detail, preview, go back, and quit with existing key conventions.
           - Runbook execution remains preview-only or confirmation-gated.
           - Noninteractive tests verify workflow wiring without live lab dependencies.
+        heartbeat:
+          branch: agent/tui-M9-help-runbooks
+          updated_at: 2026-08-26
+          current_task: Implemented Help Center and Runbook Library TUI workflow screens on M6 APIs.
+          status: implementation-ready-for-review
+          notes:
+            - Help Center now lists offline topics, opens details, and returns to list/menu with existing keys.
+            - Runbook Library now lists discovered runbooks, opens metadata, and renders clone-safe command/script previews only.
+            - Textual workflow key handling delegates list/detail/back behavior to workflow screens.
       - id: M9.2
         name: Config workflow
         status: pending

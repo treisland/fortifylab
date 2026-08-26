@@ -208,6 +208,13 @@ def _run_textual_app() -> int:
             if normalized == "quit":
                 self.exit()
                 return
+            if self.workflow_screen is not None:
+                result = self.workflow_screen.handle_key(normalized)
+                self.message = result.message
+                if result.exit_screen:
+                    self.workflow_screen = None
+                self._refresh_menu()
+                return
             if normalized == "back":
                 self._handle_back(None)
                 self._refresh_menu()
