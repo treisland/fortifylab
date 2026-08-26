@@ -137,6 +137,16 @@ def _build_runbook_library_screen() -> WorkflowScreen:
     return build_runbook_workflow()
 
 
+def _build_lifecycle_screen_if_supported(selected: MenuItem) -> WorkflowScreen | None:
+    try:
+        from fortifylab.tui.lifecycle import build_lifecycle_workflow, resolve_lifecycle_action
+
+        resolve_lifecycle_action(selected.action.target)
+    except KeyError:
+        return None
+    return build_lifecycle_workflow(selected)
+
+
 def dispatch_menu_item(
     selected: MenuItem,
     *,
@@ -160,7 +170,12 @@ def dispatch_menu_item(
             )
 
     factory = workflows.get(action.target)
-    if factory is not None and action.kind in {ActionKind.VIEW, ActionKind.WORKFLOW, ActionKind.COMMAND}:
+    if factory is not None and action.kind in {
+        ActionKind.VIEW,
+        ActionKind.WORKFLOW,
+        ActionKind.COMMAND,
+        ActionKind.PLACEHOLDER,
+    }:
         screen = factory(selected)
         return WorkflowDispatchResult(
             "screen",
@@ -168,6 +183,16 @@ def dispatch_menu_item(
             screen=screen,
             selected_item=selected,
         )
+
+    if action.kind in {ActionKind.VIEW, ActionKind.WORKFLOW, ActionKind.COMMAND, ActionKind.PLACEHOLDER}:
+        lifecycle_screen = _build_lifecycle_screen_if_supported(selected)
+        if lifecycle_screen is not None:
+            return WorkflowDispatchResult(
+                "screen",
+                f"Opened {lifecycle_screen.title}.",
+                screen=lifecycle_screen,
+                selected_item=selected,
+            )
 
     if action.placeholder or action.kind == ActionKind.PLACEHOLDER:
         return WorkflowDispatchResult(

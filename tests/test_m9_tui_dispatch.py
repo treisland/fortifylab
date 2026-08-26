@@ -43,16 +43,17 @@ class M9TuiDispatchTests(unittest.TestCase):
                 self.assertEqual(result.screen.title, title)
                 self.assertIn("workflow boundary", result.screen.render())
 
-    def test_placeholder_action_returns_safe_placeholder_message(self) -> None:
+    def test_registered_lifecycle_placeholder_action_opens_contract_screen(self) -> None:
         selected = find_item("lifecycle", "1")
         assert selected is not None
 
         result = dispatch_menu_item(selected)
 
-        self.assertEqual(result.kind, "placeholder")
+        self.assertEqual(result.kind, "screen")
         self.assertIsNone(result.menu)
-        self.assertIsNone(result.screen)
-        self.assertEqual(result.message, "Start lab is a placeholder for lifecycle.start_lab.")
+        self.assertIsNotNone(result.screen)
+        assert result.screen is not None
+        self.assertIn("lab.start.all", result.screen.render())
 
     def test_registered_workflows_can_be_injected_for_future_screens(self) -> None:
         selected = MenuItem(
