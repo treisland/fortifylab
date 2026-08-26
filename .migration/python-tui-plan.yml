@@ -31,18 +31,17 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-25
   milestone: M8
-  workstream: pm-M7-closeout-open-M8
-  branch: agent/pm-M7-closeout-open-M8
+  workstream: release-readiness
+  branch: agent/release-M8-readiness
   status: active
   changed:
-    - Closed M7 after final retirement, docs alignment, and regression evidence landed in migration/python-tui.
-    - Recorded M7 merged PRs #470, #471, #472, #473, #474, #475, and #476.
-    - Confirmed retired paths remain absent: src/fortifylab, tests/quarantine/python_preview, and scripts/wizard.
-    - Opened M8 for merge-back readiness from migration/python-tui to dev.
+    - Audited tracker and development docs for M8 release readiness consistency.
+    - Confirmed M0 through M7 are complete and M8 is in progress.
+    - Tightened active README wording so it names the Python CLI/TUI instead of the retired Bash wizard.
+    - Added a final M8 merge-back checklist for the migration/python-tui to dev handoff.
   next:
-    - Run M8 release readiness audit.
     - Run M8 final verification.
-    - Prepare merge-back PR summary and conflict strategy for dev.
+    - Prepare the migration/python-tui to dev merge-back PR summary and conflict strategy.
   blockers: []
   risks:
     - Keep start_wizard.sh documented as a compatibility shim, not a primary command surface.
@@ -50,7 +49,7 @@ heartbeat:
     - Local full docs site build depends on mkdocs; use CI docs evidence if mkdocs is absent locally.
 
   needs_decision:
-    - Confirm before M8 whether the start_wizard.sh compatibility shim is removed entirely or retained for a longer deprecation window.
+    - Confirm during M8 whether the start_wizard.sh compatibility shim is removed in a later milestone or retained for a longer deprecation window.
 
 
 open_decisions:
@@ -512,3 +511,12 @@ milestones:
     notes:
       - M8 is governance and integration quality only; no new product features should be added.
       - M7 local docs validation passed Markdown and unittest gates but did not complete a full local docs site build because mkdocs is not installed locally.
+    merge_back_checklist:
+      - Verify .migration/python-tui-plan.yml parses as YAML.
+      - Confirm M0 through M7 are marked complete and M8 is marked in_progress.
+      - Confirm README and development docs present ./bin/fortifylab as the primary Python CLI/TUI surface.
+      - Confirm ./start_wizard.sh is documented only as an M7/M8 compatibility shim for supported aliases.
+      - Confirm retained Bash scripts are described as low-level operation adapters, bootstrap helpers, or lifecycle scripts, not the interactive application.
+      - Classify stale-reference scan hits as active guidance, compatibility shim, historical migration log, quarantine/reference material, or stale docs requiring cleanup.
+      - Run full M8 verification on agent/test-M8-final-verification, including unit tests, CLI/shim smoke checks, retired-path scans, adapter-reference checks, docs validation, and git diff --check.
+      - Prepare the migration/python-tui to dev PR with milestone evidence, known mkdocs local limitation, conflict strategy, and rollback guidance.

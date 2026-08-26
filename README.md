@@ -192,8 +192,9 @@ Two steps still need a human after `Deploy from scratch`:
 
 - **SSC access and ControllerToken** — log into SSC as `admin`, create a
   `ScanCentralCtrlToken` under Administration → ScanCentral SAST → Tokens,
-  then run wizard **Configure → Apply SSC ControllerToken** (hidden input;
-  the wizard patches the Secret directly, never writes the token to a file).
+  then use the Python CLI/TUI configuration workflow to apply it with hidden
+  input. The tool patches the Secret directly and never writes the token to a
+  file.
 - **DAST license + pool in LIM** — sign into LIM as `lim_admin`, upload the
   DAST license, create a pool named `Default` (matches `LIM_POOL_NAME`), then
   redeploy ScanCentral DAST so the scanner can authenticate.
@@ -255,7 +256,7 @@ tests/                    Python test suite (unittest); run before opening a PR.
   the chart's image ever ships a newer major (PostgreSQL 18 vs 17), the
   PVC must be wiped to re-init. We pin the image tag to avoid surprise
   upgrades.
-- **Re-running the wizard is safe.** Resume/repair and Start/Upgrade never
+- **Re-running the CLI/TUI is safe.** Resume/repair and Start/Upgrade never
   delete persistent data on their own; only the explicit, confirm-gated
   **Destroy** action under a component's expert menu does.
 
