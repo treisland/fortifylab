@@ -59,6 +59,22 @@ class M9LifecycleWorkflowTests(unittest.TestCase):
         self.assertEqual(screen.last_preview.operation_id, "mysql.destroy")
         self.assertEqual(screen.last_preview.commands, ("bash apps/mysql/destroy.sh",))
 
+    def test_operation_selection_by_arrows_updates_preview_target(self) -> None:
+        screen = LifecycleWorkflowScreen("app_lifecycle.mysql", runner=lambda operation_id: _result(operation_id, 0))
+
+        self.assertEqual(screen.selected_operation_id, "mysql.start")
+        self.assertEqual(screen.handle_key("down").message, "Selected mysql.stop.")
+        self.assertEqual(screen.handle_key("p").message, "Previewed mysql.stop.")
+        assert screen.last_preview is not None
+        self.assertEqual(screen.last_preview.operation_id, "mysql.stop")
+
+        self.assertEqual(screen.handle_key("down").message, "Selected mysql.destroy.")
+        self.assertEqual(screen.handle_key("down").message, "Selected mysql.start.")
+        self.assertEqual(screen.handle_key("up").message, "Selected mysql.destroy.")
+        self.assertEqual(screen.handle_key("p").message, "Previewed mysql.destroy.")
+        assert screen.last_preview is not None
+        self.assertEqual(screen.last_preview.operation_id, "mysql.destroy")
+
     def test_preview_and_direct_yes_are_gated_before_runner_execution(self) -> None:
         calls: list[str] = []
 

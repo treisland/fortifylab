@@ -250,13 +250,13 @@ class LifecycleWorkflowScreen:
             return WorkflowKeyResult("Returned.", exit_screen=True)
         if not self.contract.supported:
             return WorkflowKeyResult(self.contract.unsupported_reason or "Lifecycle action is unsupported.")
+        if key in {"up", "down"}:
+            self._move_selection(-1 if key == "up" else 1)
+            return WorkflowKeyResult(f"Selected {self.selected_operation_id}.")
         if key in {"1", "2", "3"}:
             index = int(key) - 1
             if index < len(self.contract.operation_ids):
-                self.selected_operation_id = self.contract.operation_ids[index]
-                self.awaiting_confirmation = False
-                self.last_result = None
-                self.last_preview = None
+                self._select_operation(index)
                 return WorkflowKeyResult(f"Selected {self.selected_operation_id}.")
         if key in {"p", "d"}:
             self.last_preview = build_dry_run_preview(self.contract.action_target, self.selected_operation_id)
@@ -292,6 +292,22 @@ class LifecycleWorkflowScreen:
             )
             return WorkflowKeyResult("Lifecycle execution cancelled.")
         return WorkflowKeyResult(f"No lifecycle action is bound to {key!r}.")
+
+
+    def _select_operation(self, index: int) -> None:
+        self.selected_operation_id = self.contract.operation_ids[index]
+        self.awaiting_confirmation = False
+        self.last_result = None
+        self.last_preview = None
+
+    def _move_selection(self, delta: int) -> None:
+        if not self.contract.operation_ids:
+            return
+        try:
+            current_index = self.contract.operation_ids.index(self.selected_operation_id or "")
+        except ValueError:
+            current_index = 0
+        self._select_operation((current_index + delta) % len(self.contract.operation_ids))
 
 
 def _preview_model(action_target: str, preview: OperationPreview) -> DryRunPreviewScreenModel:
