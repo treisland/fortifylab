@@ -31,25 +31,25 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-26
   milestone: M9
-  workstream: pm-M9.1-closeout-open-M9.2
-  branch: agent/pm-M9.1-closeout-open-M9.2
+  workstream: pm-M9.2-closeout-open-M9.3
+  branch: agent/pm-M9.2-closeout-open-M9.3
   status: active
   changed:
-    - Closed M9.1 Help/Runbooks after dispatch, implementation, and tests landed in migration/python-tui.
-    - Recorded M9.1 PRs #481, #483, and #482.
-    - Verified Help Center and Runbook Library TUI workflows are functional, clone-safe, and preview-only for runbooks.
-    - Opened M9.2 Config workflow as the next one-submenu parity slice.
+    - Closed M9.2 Config workflow after implementation and tests landed in migration/python-tui.
+    - Recorded M9.2 PRs #486 and #485.
+    - Verified config diagnostics, validation, redacted repair preview, and confirmation-gated repair through temp-file-safe tests.
+    - Opened M9.3 Diagnostics/Status workflow as the next one-submenu parity slice.
   next:
-    - Implement M9.2 config diagnostics, validation, redacted repair preview, and confirmation-gated repair through the TUI.
+    - Implement M9.3 Doctor and Status TUI result screens with PASS/WARN/FAIL/SKIP rendering and refresh/back behavior.
     - Keep PR #479 held out of dev while M9 remains active.
   blockers: []
   risks:
-    - Do not mutate the real .env in tests.
-    - Redact secret values in TUI-facing config output and repair previews.
-    - Keep derived repair confirmation-gated and backed by M4 config APIs.
+    - Keep live Kubernetes, Helm, Docker, network, credentials, and lab state out of default tests.
+    - Preserve redaction in TUI-facing diagnostics and status output.
+    - Environment-dependent checks must degrade to SKIP or clear warnings by default.
 
   needs_decision:
-    - None; M9.2 Config workflow sequencing is approved.
+    - None; M9.3 Diagnostics/Status sequencing is approved.
 
 
 open_decisions:
@@ -85,12 +85,12 @@ workstreams:
   pm:
     owner: pm-agent
     status: active
-    branch: agent/pm-M9.1-closeout-open-M9.2
+    branch: agent/pm-M9.2-closeout-open-M9.3
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Close M9.1 Help/Runbooks and open M9.2 Config workflow coordination.
-    next_task: Spawn M9.2 config workflow implementation, test, and docs agents after closeout lands.
+    current_task: Close M9.2 Config and open M9.3 Diagnostics/Status workflow coordination.
+    next_task: Spawn M9.3 diagnostics/status implementation, test, and docs agents after closeout lands.
     blockers: []
   architecture:
     owner: architecture-agent
@@ -571,7 +571,14 @@ milestones:
           - git diff --check passed.
       - id: M9.2
         name: Config workflow
-        status: in_progress
+        status: complete
+        completed_at: 2026-08-26
+        merged_prs:
+          - 486
+          - 485
+        merge_commits:
+          - fc9b0b3d22e4248e177e0c8d7433c7c8c1aee80a
+          - e28a4c1c35ac11865f6c74c944553832fe98826c
         branches:
           - agent/tui-M9.2-config-workflow
           - agent/test-M9.2-config-workflow
@@ -581,23 +588,21 @@ milestones:
           - Derived URL repair diff preview works.
           - Mutating repair requires confirmation.
           - Tests use temporary .env files only.
-        current_task: Configuration Editor TUI workflow implemented on agent/tui-M9.2-config-workflow; verification passed and PR handoff in progress.
         evidence:
           - Configuration editor menu dispatch opens a real pure TUI workflow screen.
           - Diagnostics and validation render through existing M4 config CLI/engine APIs.
           - Derived repair preview renders redacted diffs without writing.
           - Repair writes are confirmation-gated and tested only against temporary .env fixtures.
           - python3 -m compileall -q fortifylab passed.
-          - python3 -m unittest discover -s tests passed with 181 tests.
-          - ./bin/fortifylab tui --check passed.
-          - ./bin/fortifylab config diagnostics --env-file <temp-fixture> passed.
+          - python3 -m unittest discover -s tests passed with 186 tests.
+          - ./bin/fortifylab tui --check, doctor --check, status --check, and config diagnostics passed.
           - git diff --check passed.
       - id: M9.3
         name: Diagnostics and status workflow
-        status: pending
+        status: in_progress
         branches:
-          - agent/tui-M9-diagnostics-status
-          - agent/test-M9-diagnostics-status
+          - agent/tui-M9.3-diagnostics-status
+          - agent/test-M9.3-diagnostics-status
         acceptance:
           - Doctor and status menu paths show real diagnostic result screens.
           - PASS, WARN, FAIL, and SKIP states render clearly.
