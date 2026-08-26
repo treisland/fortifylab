@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fortifylab.navigation import ActionKind, MenuController, MenuItem, MenuNode, get_menu
+from fortifylab.navigation import MenuController, MenuItem, MenuNode, get_menu, normalize_menu_key
+from fortifylab.tui.workflows import WorkflowScreen, dispatch_menu_item
 
 CHECK_HEADER = (
     "FortifyLab Python TUI",
@@ -101,6 +102,7 @@ def _run_textual_app() -> int:
         def __init__(self) -> None:
             super().__init__()
             self.controller = MenuController(get_menu("main"))
+            self.workflow_screen: WorkflowScreen | None = None
             self.message = "Use arrows to move, number keys to jump, Enter to activate."
             self._digit_buffer = ""
 
@@ -118,6 +120,9 @@ def _run_textual_app() -> int:
         def on_key(self, event) -> None:  # type: ignore[no-untyped-def]
             if event.key.isdigit():
                 event.stop()
+                if self.workflow_screen is not None:
+                    self.action_menu_key(event.key)
+                    return
                 self._handle_digit_key(event.key)
                 return
             if event.character and event.character in {"m", "b", "r", "h", "?"}:
@@ -141,6 +146,9 @@ def _run_textual_app() -> int:
             self.action_menu_key(digit)
 
         def action_menu_key(self, key: str) -> None:
+            if self.workflow_screen is not None:
+                self._handle_workflow_screen_key(key)
+                return
             if not key.isdigit():
                 self._digit_buffer = ""
             result = self.controller.handle_key(key)
@@ -164,21 +172,24 @@ def _run_textual_app() -> int:
 
         def _handle_activation(self, selected: MenuItem) -> None:
             self._digit_buffer = ""
-            action = selected.action
-            if action.kind in {ActionKind.MENU, ActionKind.WORKFLOW}:
-                try:
-                    self.controller = MenuController(get_menu(action.target))
-                    self.message = f"Opened {selected.label}."
-                    return
-                except KeyError:
-                    pass
-            if action.placeholder or action.kind == ActionKind.PLACEHOLDER:
-                self.message = f"{selected.label} is a placeholder for {action.target}."
+            dispatch = dispatch_menu_item(selected)
+            if dispatch.kind == "menu" and dispatch.menu is not None:
+                self.controller = MenuController(dispatch.menu)
+                self.workflow_screen = None
+                self.message = dispatch.message
                 return
-            self.message = f"{selected.label} is modeled; operation wiring starts in M3."
+            if dispatch.kind == "screen" and dispatch.screen is not None:
+                self.workflow_screen = dispatch.screen
+                self.message = dispatch.message
+                return
+            self.message = dispatch.message
 
         def _handle_back(self, target: str | None) -> None:
             self._digit_buffer = ""
+            if self.workflow_screen is not None:
+                self.workflow_screen = None
+                self.message = "Returned."
+                return
             if target:
                 try:
                     self.controller = MenuController(get_menu(target))
@@ -192,9 +203,28 @@ def _run_textual_app() -> int:
             else:
                 self.message = "Already at the top menu."
 
+        def _handle_workflow_screen_key(self, key: str) -> None:
+            normalized = normalize_menu_key(key)
+            if normalized == "quit":
+                self.exit()
+                return
+            if normalized == "back":
+                self._handle_back(None)
+                self._refresh_menu()
+                return
+            if normalized == "help":
+                self.message = "Help is available from the Help Center workflow."
+            else:
+                self.message = f"No workflow screen action is bound to {key!r}."
+            self._refresh_menu()
+
         def _refresh_menu(self) -> None:
-            self.query_one("#menu-title", Static).update(self.controller.menu.title)
-            self.query_one("#menu", Static).update(self._menu_text())
+            if self.workflow_screen is not None:
+                self.query_one("#menu-title", Static).update(self.workflow_screen.title)
+                self.query_one("#menu", Static).update(self.workflow_screen.render())
+            else:
+                self.query_one("#menu-title", Static).update(self.controller.menu.title)
+                self.query_one("#menu", Static).update(self._menu_text())
             self.query_one("#message", Static).update(self.message)
 
         def _menu_text(self) -> str:
