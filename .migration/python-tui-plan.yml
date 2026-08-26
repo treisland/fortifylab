@@ -573,14 +573,25 @@ milestones:
         name: Config workflow
         status: in_progress
         branches:
-          - agent/tui-M9-config-workflow
-          - agent/test-M9-config-workflow
+          - agent/tui-M9.2-config-workflow
+          - agent/test-M9.2-config-workflow
         acceptance:
           - Configuration menu opens a functional config workflow.
           - Diagnostics and validation render in the TUI.
           - Derived URL repair diff preview works.
           - Mutating repair requires confirmation.
           - Tests use temporary .env files only.
+        current_task: Configuration Editor TUI workflow implemented on agent/tui-M9.2-config-workflow; verification passed and PR handoff in progress.
+        evidence:
+          - Configuration editor menu dispatch opens a real pure TUI workflow screen.
+          - Diagnostics and validation render through existing M4 config CLI/engine APIs.
+          - Derived repair preview renders redacted diffs without writing.
+          - Repair writes are confirmation-gated and tested only against temporary .env fixtures.
+          - python3 -m compileall -q fortifylab passed.
+          - python3 -m unittest discover -s tests passed with 181 tests.
+          - ./bin/fortifylab tui --check passed.
+          - ./bin/fortifylab config diagnostics --env-file <temp-fixture> passed.
+          - git diff --check passed.
       - id: M9.3
         name: Diagnostics and status workflow
         status: pending
