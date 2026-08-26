@@ -13,6 +13,14 @@ DispatchKind = Literal["menu", "screen", "placeholder", "modeled"]
 
 
 @dataclass(frozen=True)
+class WorkflowKeyResult:
+    """Result of handling a key inside a workflow screen."""
+
+    message: str
+    exit_screen: bool = False
+
+
+@dataclass
 class WorkflowScreen:
     """Minimal, testable description of a TUI workflow screen."""
 
@@ -24,6 +32,11 @@ class WorkflowScreen:
     def render(self) -> str:
         body = [self.summary, *self.lines]
         return "\n".join(line for line in body if line)
+
+    def handle_key(self, key: str) -> WorkflowKeyResult:
+        """Handle a workflow keypress; rich screens override this."""
+
+        return WorkflowKeyResult(f"No workflow screen action is bound to {key!r}.")
 
 
 @dataclass(frozen=True)
@@ -48,18 +61,8 @@ def _static_screen(screen_id: str, title: str, summary: str, *lines: str) -> Wor
 
 
 DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
-    "help_center": _static_screen(
-        "help_center",
-        "Help Center",
-        "Help topic browser workflow boundary.",
-        "M9.1 dispatch opens this screen; topic listing and detail navigation land in the Help/Runbooks workflow slice.",
-    ),
-    "runbook_library": _static_screen(
-        "runbook_library",
-        "Runbook Library",
-        "Runbook browser workflow boundary.",
-        "M9.1 dispatch opens this screen; runbook listing, detail, preview, and confirmation-gated execution land in the Help/Runbooks workflow slice.",
-    ),
+    "help_center": lambda _selected: _build_help_center_screen(),
+    "runbook_library": lambda _selected: _build_runbook_library_screen(),
     "operational_guidance": _static_screen(
         "operational_guidance",
         "Operational guidance",
@@ -67,6 +70,26 @@ DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
         "M9.1 dispatch opens this screen; guidance browsing lands with the Help/Runbooks workflow slice.",
     ),
 }
+
+
+def build_help_workflow(help_root=None) -> WorkflowScreen:
+    from fortifylab.tui.help_runbooks import HelpCenterScreen
+
+    return HelpCenterScreen(help_root=help_root)
+
+
+def build_runbook_workflow(runbook_root=None) -> WorkflowScreen:
+    from fortifylab.tui.help_runbooks import RunbookLibraryScreen
+
+    return RunbookLibraryScreen(runbook_root=runbook_root)
+
+
+def _build_help_center_screen() -> WorkflowScreen:
+    return build_help_workflow()
+
+
+def _build_runbook_library_screen() -> WorkflowScreen:
+    return build_runbook_workflow()
 
 
 def dispatch_menu_item(
