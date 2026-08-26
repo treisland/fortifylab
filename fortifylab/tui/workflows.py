@@ -60,6 +60,12 @@ def _static_screen(screen_id: str, title: str, summary: str, *lines: str) -> Wor
     return build_screen
 
 
+def _lifecycle_workflow_targets() -> tuple[str, ...]:
+    from fortifylab.tui.lifecycle import lifecycle_workflow_targets
+
+    return lifecycle_workflow_targets()
+
+
 DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
     "configuration_editor": lambda _selected: _build_config_editor_screen(),
     "diagnostics": lambda _selected: _build_diagnostics_screen(),
@@ -74,6 +80,10 @@ DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
         "Operational guidance workflow boundary.",
         "M9.1 dispatch opens this screen; guidance browsing lands with the Help/Runbooks workflow slice.",
     ),
+    **{
+        target: lambda selected: _build_lifecycle_screen(selected)
+        for target in _lifecycle_workflow_targets()
+    },
 }
 
 
@@ -137,6 +147,12 @@ def _build_runbook_library_screen() -> WorkflowScreen:
     return build_runbook_workflow()
 
 
+def _build_lifecycle_screen(selected: MenuItem) -> WorkflowScreen:
+    from fortifylab.tui.lifecycle import build_lifecycle_workflow
+
+    return build_lifecycle_workflow(selected)
+
+
 def dispatch_menu_item(
     selected: MenuItem,
     *,
@@ -160,7 +176,12 @@ def dispatch_menu_item(
             )
 
     factory = workflows.get(action.target)
-    if factory is not None and action.kind in {ActionKind.VIEW, ActionKind.WORKFLOW, ActionKind.COMMAND}:
+    if factory is not None and action.kind in {
+        ActionKind.VIEW,
+        ActionKind.WORKFLOW,
+        ActionKind.COMMAND,
+        ActionKind.PLACEHOLDER,
+    }:
         screen = factory(selected)
         return WorkflowDispatchResult(
             "screen",

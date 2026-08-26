@@ -639,6 +639,11 @@ milestones:
           - Mutating execution requires confirmation.
           - Result and output displays are redacted.
           - Tests use mocked runners or harmless subprocess commands only.
+        evidence:
+          - agent/tui-M9.4-lifecycle-contract defines navigation-target to M3 operation catalog mappings for lab start/stop, component app lifecycle, and sample app lifecycle.
+          - First supported operation set is start, stop, and destroy for MySQL, PostgreSQL, SSC, LIM, ScanCentral SAST, ScanCentral DAST, Juice Shop, WebGoat, and DVWA, plus all-lab start and stop.
+          - Restart lab and reset lab remain unsupported placeholders until ordered sequence and destructive scope screens exist.
+          - Dry-run preview, confirmation gating, result display, and output redaction contracts are covered by clone-safe TUI tests with injected runners only.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
