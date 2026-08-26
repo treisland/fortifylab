@@ -387,6 +387,9 @@ Ordered submilestones:
 4. `M9.4 Lifecycle Operation Workflow` - wire lifecycle menu actions to the M3
    operation catalog with dry-run preview, confirmation before mutating
    execution, and redacted result output.
+5. `M9.5 Logs And Wizard Log Workflow` - wire log and wizard-log menu actions
+   to read-only TUI screens with listing, detail, refresh, unavailable states,
+   and redacted bounded output.
 
 Verification after every M9 slice:
 
@@ -446,6 +449,11 @@ adds ordered sequence and destructive-scope screens.
 Default tests remain clone-safe. M9.4 lifecycle tests use injected or mocked
 runners and do not run live Kubernetes, Helm, Docker, network, or repository
 lifecycle scripts.
+
+M9.5 is now the active slice and owns Logs and Wizard Log workflow parity. It is
+read-only by default and should provide log listing/detail, refresh/back
+behavior, redacted bounded content, and clear unavailable states without requiring
+live Kubernetes, Helm, Docker, network, credentials, or lab logs in default tests.
 
 ## Decision Log
 
