@@ -62,6 +62,10 @@ def _static_screen(screen_id: str, title: str, summary: str, *lines: str) -> Wor
 
 DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
     "configuration_editor": lambda _selected: _build_config_editor_screen(),
+    "diagnostics": lambda _selected: _build_diagnostics_screen(),
+    "cluster_snapshot": lambda _selected: _build_status_screen(),
+    "doctor": lambda _selected: _build_doctor_screen(),
+    "status": lambda _selected: _build_status_screen(),
     "help_center": lambda _selected: _build_help_center_screen(),
     "runbook_library": lambda _selected: _build_runbook_library_screen(),
     "operational_guidance": _static_screen(
@@ -91,8 +95,38 @@ def build_runbook_workflow(runbook_root=None) -> WorkflowScreen:
     return RunbookLibraryScreen(runbook_root=runbook_root)
 
 
+def build_diagnostics_workflow(doctor_report_provider=None, status_provider=None) -> WorkflowScreen:
+    from fortifylab.tui.diagnostics_status import DiagnosticsScreen
+
+    return DiagnosticsScreen(doctor_report_provider=doctor_report_provider, status_provider=status_provider)
+
+
+def build_doctor_workflow(doctor_report_provider=None) -> WorkflowScreen:
+    from fortifylab.tui.diagnostics_status import DoctorScreen
+
+    return DoctorScreen(doctor_report_provider=doctor_report_provider)
+
+
+def build_status_workflow(status_provider=None) -> WorkflowScreen:
+    from fortifylab.tui.diagnostics_status import StatusScreen
+
+    return StatusScreen(status_provider=status_provider)
+
+
 def _build_config_editor_screen() -> WorkflowScreen:
     return build_config_workflow()
+
+
+def _build_diagnostics_screen() -> WorkflowScreen:
+    return build_diagnostics_workflow()
+
+
+def _build_doctor_screen() -> WorkflowScreen:
+    return build_doctor_workflow()
+
+
+def _build_status_screen() -> WorkflowScreen:
+    return build_status_workflow()
 
 
 def _build_help_center_screen() -> WorkflowScreen:

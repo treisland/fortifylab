@@ -608,6 +608,16 @@ milestones:
           - PASS, WARN, FAIL, and SKIP states render clearly.
           - Redaction applies to rendered output.
           - Live checks are mocked or safely skipped in default tests.
+        evidence:
+          - agent/tui-M9.3-diagnostics-status wires the Diagnostics menu to a combined Doctor/Status TUI screen.
+          - Direct doctor and status workflow targets render focused clone-safe result screens through existing M5 APIs.
+          - PASS, WARN, FAIL, and SKIP states are covered by pure TUI tests with injected fixtures.
+          - Rendered detail and output pass through diagnostics redaction before display.
+          - Refresh/back/quit actions are supported without Kubernetes, Helm, Docker, network, credentials, or live lab access.
+          - python3 -m compileall -q fortifylab passed.
+          - python3 -m unittest discover -s tests passed with 191 tests.
+          - ./bin/fortifylab tui --check, doctor --check, and status --check passed.
+          - git diff --check passed.
       - id: M9.4
         name: Lifecycle operation workflow
         status: pending
