@@ -13,12 +13,7 @@ from fortifylab.operations import (
     SensitiveRedactor,
     dry_run,
 )
-
-
-@dataclass(frozen=True)
-class WorkflowKeyResult:
-    message: str
-    exit_screen: bool = False
+from fortifylab.tui.workflows import WorkflowKeyResult
 
 
 LifecycleStatus = Literal["preview", "requires_confirmation", "success", "failure", "blocked", "unsupported"]
