@@ -29,18 +29,18 @@ goal:
 heartbeat:
   cadence: daily
   stale_after_days: 3
-  last_updated: 2026-08-25
+  last_updated: 2026-08-26
   milestone: M9
-  workstream: pm-open-M9-tui-workflow-parity
-  branch: agent/pm-open-M9-tui-workflow-parity
+  workstream: tui-M9-workflow-dispatch-contract
+  branch: agent/tui-M9-workflow-dispatch-contract
   status: active
   changed:
-    - User manual testing confirmed top-level TUI menu organization is retained.
+    - Added a shared TUI workflow dispatch contract for menu ActionRefs.
+    - Wired Help Center, Runbook Library, and Operational guidance actions to minimal workflow screen hooks for M9.1 follow-on implementation.
+    - Added clone-safe noninteractive dispatch tests that do not require Textual or live lab state.
     - PR #479 remains open and mergeable, but is held out of dev while TUI workflow parity continues.
-    - Opened M9 for one-submenu-at-a-time TUI workflow parity on migration/python-tui.
-    - Added ordered submilestones M9.1 Help/Runbooks, M9.2 Config, M9.3 Diagnostics/Status, and M9.4 Lifecycle Operations.
   next:
-    - Implement M9.1 Help/Runbooks workflow dispatch and screens.
+    - Implement the full M9.1 Help/Runbooks workflow screens on top of the dispatch contract.
     - Keep PR #479 updated as a held foundation PR until M9 parity work is complete or deliberately separated.
   blockers: []
   risks:
@@ -541,7 +541,7 @@ milestones:
     submilestones:
       - id: M9.1
         name: Help/Runbooks workflow
-        status: pending
+        status: in_progress
         branches:
           - agent/tui-M9-workflow-dispatch-contract
           - agent/tui-M9-help-runbooks
