@@ -140,7 +140,12 @@ def _run_textual_app() -> int:
                 event.stop()
                 self._handle_digit_key(event.key)
                 return
-            if event.character and event.character in {"m", "b", "r", "h", "?"}:
+            printable_workflow_keys = {"p", "c", "y", "n"}
+            printable_menu_keys = {"m", "b", "r", "h", "?"}
+            if event.character and (
+                event.character in printable_menu_keys
+                or (self.workflow_screen is not None and event.character in printable_workflow_keys)
+            ):
                 event.stop()
                 self.action_menu_key(event.character)
 

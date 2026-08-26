@@ -9,9 +9,11 @@ Kubernetes, Helm, or Docker scripts.
 from __future__ import annotations
 
 import unittest
+import inspect
 
 from fortifylab.navigation import find_item
 from fortifylab.operations import CommandExecutionResult, OperationRunResult
+from fortifylab.tui import app as tui_app
 from fortifylab.tui.lifecycle import LifecycleWorkflowScreen
 from fortifylab.tui.workflows import dispatch_menu_item
 
@@ -74,6 +76,14 @@ class M9LifecycleWorkflowTests(unittest.TestCase):
         self.assertEqual(screen.handle_key("p").message, "Previewed mysql.destroy.")
         assert screen.last_preview is not None
         self.assertEqual(screen.last_preview.operation_id, "mysql.destroy")
+
+    def test_textual_shell_routes_printable_keys_to_active_workflow_screen(self) -> None:
+        source = inspect.getsource(tui_app._run_textual_app)
+
+        self.assertIn("self.workflow_screen is not None", source)
+        for key in ("p", "c", "y", "n"):
+            with self.subTest(key=key):
+                self.assertIn(f'"{key}"', source)
 
     def test_preview_and_direct_yes_are_gated_before_runner_execution(self) -> None:
         calls: list[str] = []

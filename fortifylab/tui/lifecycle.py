@@ -293,7 +293,6 @@ class LifecycleWorkflowScreen:
             return WorkflowKeyResult("Lifecycle execution cancelled.")
         return WorkflowKeyResult(f"No lifecycle action is bound to {key!r}.")
 
-
     def _select_operation(self, index: int) -> None:
         self.selected_operation_id = self.contract.operation_ids[index]
         self.awaiting_confirmation = False
