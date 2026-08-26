@@ -428,6 +428,25 @@ M9.4 is now the active slice and owns Lifecycle Operation workflow parity. This
 is the first higher-risk M9 slice, so it starts with a lifecycle contract before
 operation execution wiring.
 
+### M9.4 Closeout
+
+M9.4 landed through PRs #491 and #492. Lab lifecycle, app management, and sample
+app menu paths now open Python TUI lifecycle screens backed by the M3 operation
+catalog instead of stopping at placeholders. Operators can select actions with
+arrow keys or number keys, preview plans before execution, explicitly confirm
+mutating operations, cancel pending confirmation, and review bounded redacted
+results after the operation runner returns.
+
+Supported operation catalog targets are component/sample-app `start`, `stop`,
+and `destroy` actions for MySQL, PostgreSQL, SSC, LIM, ScanCentral SAST,
+ScanCentral DAST, Juice Shop, WebGoat, and DVWA, plus all-lab `start` and
+`stop`. Restart and reset remain unsupported placeholders until a later slice
+adds ordered sequence and destructive-scope screens.
+
+Default tests remain clone-safe. M9.4 lifecycle tests use injected or mocked
+runners and do not run live Kubernetes, Helm, Docker, network, or repository
+lifecycle scripts.
+
 ## Decision Log
 
 | Date | Decision | Status |
