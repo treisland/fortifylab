@@ -627,7 +627,18 @@ milestones:
           - git diff --check passed.
       - id: M9.4
         name: Lifecycle operation workflow
-        status: in_progress
+        status: complete
+        completed_at: 2026-08-26
+        merged_prs:
+          - 491
+          - 492
+          - 494
+        superseded_prs:
+          - 493
+        merge_commits:
+          - 79503b900b6a53fec561c43b26bae7ba0cf00b65
+          - 7ac6b7a2139a057f179b213a12907b359df0b5aa
+          - 247a696ca3b8840bb350665712972deb3afbb52a
         branches:
           - agent/tui-M9.4-lifecycle-contract
           - agent/tui-M9.4-lifecycle-operations
@@ -645,6 +656,12 @@ milestones:
           - Restart lab and reset lab remain unsupported placeholders until ordered sequence and destructive scope screens exist.
           - Dry-run preview, confirmation gating, result display, and output redaction contracts are covered by clone-safe TUI tests with injected runners only.
           - agent/tui-M9.4-lifecycle-operations wires app and sample app lifecycle screens to the confirmed operation runner, keeps preview/confirmation gates, renders redacted result output, and adds mocked runner workflow tests.
+          - Active workflow screens receive printable action keys in Textual mode, while lifecycle operation selection supports both arrow keys and number keys.
+          - agent/docs-M9.4-lifecycle-workflow documents supported lifecycle targets, confirmation flow, redacted/bounded output, clone-safe test boundaries, and restart/reset limitations.
+          - python3 -m compileall -q fortifylab passed.
+          - python3 -m unittest discover -s tests -v passed with 213 tests.
+          - ./bin/fortifylab tui --check, doctor --check, and status --check passed.
+          - git diff --check passed.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
