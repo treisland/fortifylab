@@ -61,6 +61,7 @@ def _static_screen(screen_id: str, title: str, summary: str, *lines: str) -> Wor
 
 
 DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
+    "configuration_editor": lambda _selected: _build_config_editor_screen(),
     "help_center": lambda _selected: _build_help_center_screen(),
     "runbook_library": lambda _selected: _build_runbook_library_screen(),
     "operational_guidance": _static_screen(
@@ -70,6 +71,12 @@ DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
         "M9.1 dispatch opens this screen; guidance browsing lands with the Help/Runbooks workflow slice.",
     ),
 }
+
+
+def build_config_workflow(env_file=None) -> WorkflowScreen:
+    from fortifylab.tui.config import ConfigEditorScreen
+
+    return ConfigEditorScreen(env_file=env_file)
 
 
 def build_help_workflow(help_root=None) -> WorkflowScreen:
@@ -82,6 +89,10 @@ def build_runbook_workflow(runbook_root=None) -> WorkflowScreen:
     from fortifylab.tui.help_runbooks import RunbookLibraryScreen
 
     return RunbookLibraryScreen(runbook_root=runbook_root)
+
+
+def _build_config_editor_screen() -> WorkflowScreen:
+    return build_config_workflow()
 
 
 def _build_help_center_screen() -> WorkflowScreen:
