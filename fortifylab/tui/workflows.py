@@ -66,6 +66,8 @@ DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
     "cluster_snapshot": lambda _selected: _build_status_screen(),
     "doctor": lambda _selected: _build_doctor_screen(),
     "status": lambda _selected: _build_status_screen(),
+    "logs": lambda _selected: _build_logs_screen(),
+    "wizard_log": lambda _selected: _build_wizard_log_screen(),
     "help_center": lambda _selected: _build_help_center_screen(),
     "runbook_library": lambda _selected: _build_runbook_library_screen(),
     "operational_guidance": _static_screen(
@@ -113,6 +115,18 @@ def build_status_workflow(status_provider=None) -> WorkflowScreen:
     return StatusScreen(status_provider=status_provider)
 
 
+def build_logs_workflow(log_sources=None) -> WorkflowScreen:
+    from fortifylab.tui.logs import LogsWorkflowScreen
+
+    return LogsWorkflowScreen(log_sources=log_sources)
+
+
+def build_wizard_log_workflow(log_sources=None) -> WorkflowScreen:
+    from fortifylab.tui.logs import WizardLogWorkflowScreen
+
+    return WizardLogWorkflowScreen(log_sources=log_sources)
+
+
 def _build_config_editor_screen() -> WorkflowScreen:
     return build_config_workflow()
 
@@ -127,6 +141,14 @@ def _build_doctor_screen() -> WorkflowScreen:
 
 def _build_status_screen() -> WorkflowScreen:
     return build_status_workflow()
+
+
+def _build_logs_screen() -> WorkflowScreen:
+    return build_logs_workflow()
+
+
+def _build_wizard_log_screen() -> WorkflowScreen:
+    return build_wizard_log_workflow()
 
 
 def _build_help_center_screen() -> WorkflowScreen:
