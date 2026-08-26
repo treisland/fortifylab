@@ -399,6 +399,15 @@ python3 -m unittest discover -s tests -v
 git diff --check
 ```
 
+### M9.1 Closeout
+
+M9.1 landed through PRs #481, #483, and #482. Help Center now opens a real
+offline topic browser, and Runbook Library opens discovered runbooks with
+metadata, clone-safe command preview, and bounded script preview. No unguarded
+runbook execution was added.
+
+M9.2 is now the active slice and owns the Configuration Editor workflow.
+
 ## Decision Log
 
 | Date | Decision | Status |
