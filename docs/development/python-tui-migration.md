@@ -363,6 +363,42 @@ while preparing `migration/python-tui` for merge-back to `dev`.
   local `mkdocs` limitation if still present, conflict strategy, and rollback
   guidance.
 
+## M9 TUI Submenu Workflow Parity
+
+M9 continues on `migration/python-tui` while PR #479 remains open but held out of
+`dev`. Manual testing confirmed the top-level TUI menu organization is retained;
+M9 moves from menu parity to functional submenu workflows one slice at a time.
+
+The rule for M9 is one submenu or workflow per submilestone. Do not redesign the
+top-level navigation, do not require live Kubernetes/Helm/Docker/network access
+in default tests, and do not duplicate config, diagnostics, or runbook domain
+logic inside Textual screens.
+
+Ordered submilestones:
+
+1. `M9.1 Help/Runbooks Workflow` - implement the shared workflow dispatch
+   contract, a functional help topic browser, and a runbook list/detail/preview
+   flow backed by the M6 APIs.
+2. `M9.2 Config Workflow` - implement config diagnostics, validation, redacted
+   diff preview, and confirmation-gated derived URL repair backed by the M4
+   config engine.
+3. `M9.3 Diagnostics And Status Workflow` - implement doctor/status result
+   screens backed by M5 APIs with PASS/WARN/FAIL/SKIP rendering and redaction.
+4. `M9.4 Lifecycle Operation Workflow` - wire lifecycle menu actions to the M3
+   operation catalog with dry-run preview, confirmation before mutating
+   execution, and redacted result output.
+
+Verification after every M9 slice:
+
+```bash
+python3 -m compileall -q fortifylab
+python3 -m unittest discover -s tests -v
+./bin/fortifylab tui --check
+./bin/fortifylab doctor --check
+./bin/fortifylab status --check
+git diff --check
+```
+
 ## Decision Log
 
 | Date | Decision | Status |

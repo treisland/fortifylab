@@ -1,7 +1,7 @@
 program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
-current_milestone: M8
+current_milestone: M9
 overall_status: active
 
 goal:
@@ -30,26 +30,26 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-25
-  milestone: M8
-  workstream: release-readiness
-  branch: agent/release-M8-readiness
+  milestone: M9
+  workstream: pm-open-M9-tui-workflow-parity
+  branch: agent/pm-open-M9-tui-workflow-parity
   status: active
   changed:
-    - Audited tracker and development docs for M8 release readiness consistency.
-    - Confirmed M0 through M7 are complete and M8 is in progress.
-    - Tightened active README wording so it names the Python CLI/TUI instead of the retired Bash wizard.
-    - Added a final M8 merge-back checklist for the migration/python-tui to dev handoff.
+    - User manual testing confirmed top-level TUI menu organization is retained.
+    - PR #479 remains open and mergeable, but is held out of dev while TUI workflow parity continues.
+    - Opened M9 for one-submenu-at-a-time TUI workflow parity on migration/python-tui.
+    - Added ordered submilestones M9.1 Help/Runbooks, M9.2 Config, M9.3 Diagnostics/Status, and M9.4 Lifecycle Operations.
   next:
-    - Run M8 final verification.
-    - Prepare the migration/python-tui to dev merge-back PR summary and conflict strategy.
+    - Implement M9.1 Help/Runbooks workflow dispatch and screens.
+    - Keep PR #479 updated as a held foundation PR until M9 parity work is complete or deliberately separated.
   blockers: []
   risks:
-    - Keep start_wizard.sh documented as a compatibility shim, not a primary command surface.
-    - Do not remove retained Bash operation adapters still referenced by the Python operation catalog.
-    - Local full docs site build depends on mkdocs; use CI docs evidence if mkdocs is absent locally.
+    - Keep one submenu/workflow per submilestone to avoid destabilizing the foundation.
+    - Do not require live Kubernetes, Helm, Docker, network, credentials, or lab state in default tests.
+    - Do not merge PR #479 to dev while M9 is active unless the user explicitly changes the release strategy.
 
   needs_decision:
-    - Confirm during M8 whether the start_wizard.sh compatibility shim is removed in a later milestone or retained for a longer deprecation window.
+    - None for M9.0; user approved the M9.1-M9.4 sequence.
 
 
 open_decisions:
@@ -85,12 +85,12 @@ workstreams:
   pm:
     owner: pm-agent
     status: active
-    branch: agent/pm-M7-closeout-open-M8
+    branch: agent/pm-open-M9-tui-workflow-parity
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Close M7 and open M8 merge-back coordination.
-    next_task: Spawn M8 release readiness, final verification, and merge-back prep agents.
+    current_task: Open M9 TUI submenu workflow parity coordination.
+    next_task: Spawn M9.1 workflow dispatch, Help/Runbooks implementation, and M9.1 test agents after M9.0 lands.
     blockers: []
   architecture:
     owner: architecture-agent
@@ -494,7 +494,7 @@ milestones:
       - start_wizard.sh remains a minimal compatibility shim for M7 unless a focused compatibility PR retires it explicitly.
   - id: M8
     name: Merge back to dev
-    status: in_progress
+    status: held
     opened_at: 2026-08-25
     acceptance:
       - All milestone acceptance tests pass.
@@ -511,6 +511,7 @@ milestones:
     notes:
       - M8 is governance and integration quality only; no new product features should be added.
       - M7 local docs validation passed Markdown and unittest gates but did not complete a full local docs site build because mkdocs is not installed locally.
+      - PR #479 opened from migration/python-tui to dev and passed offline-docs, but user intentionally held the merge while M9 TUI workflow parity continues.
     merge_back_checklist:
       - Verify .migration/python-tui-plan.yml parses as YAML.
       - Confirm M0 through M7 are marked complete and M8 is marked in_progress.
@@ -520,3 +521,76 @@ milestones:
       - Classify stale-reference scan hits as active guidance, compatibility shim, historical migration log, quarantine/reference material, or stale docs requiring cleanup.
       - Run full M8 verification on agent/test-M8-final-verification, including unit tests, CLI/shim smoke checks, retired-path scans, adapter-reference checks, docs validation, and git diff --check.
       - Prepare the migration/python-tui to dev PR with milestone evidence, known mkdocs local limitation, conflict strategy, and rollback guidance.
+  - id: M9
+    name: TUI submenu workflow parity
+    status: in_progress
+    opened_at: 2026-08-25
+    branch: agent/pm-open-M9-tui-workflow-parity
+    acceptance:
+      - TUI submenu workflows are implemented one at a time until parity is met from the retired Bash wizard structure.
+      - Top-level navigation organization remains stable.
+      - Default tests stay clone-safe and non-mutating.
+      - PR #479 remains held out of dev unless the user explicitly changes the release strategy.
+    rules:
+      - Do not redesign top-level navigation.
+      - Do not implement more than one submenu/workflow per submilestone.
+      - Reuse M4, M5, and M6 APIs instead of duplicating domain logic in Textual screens.
+      - Do not require live Kubernetes, Helm, Docker, network, credentials, or lab state in default tests.
+      - Do not delete retained Bash operation adapters.
+      - Mutating operations must require confirmation and tests must use temp files, mocks, or harmless subprocesses only.
+    submilestones:
+      - id: M9.1
+        name: Help/Runbooks workflow
+        status: pending
+        branches:
+          - agent/tui-M9-workflow-dispatch-contract
+          - agent/tui-M9-help-runbooks
+          - agent/test-M9-help-runbooks-tui
+        acceptance:
+          - Help Center menu opens a functional help topic browser.
+          - Runbook Library menu opens a functional runbook browser.
+          - Users can list, select, view detail, preview, go back, and quit with existing key conventions.
+          - Runbook execution remains preview-only or confirmation-gated.
+          - Noninteractive tests verify workflow wiring without live lab dependencies.
+      - id: M9.2
+        name: Config workflow
+        status: pending
+        branches:
+          - agent/tui-M9-config-workflow
+          - agent/test-M9-config-workflow
+        acceptance:
+          - Configuration menu opens a functional config workflow.
+          - Diagnostics and validation render in the TUI.
+          - Derived URL repair diff preview works.
+          - Mutating repair requires confirmation.
+          - Tests use temporary .env files only.
+      - id: M9.3
+        name: Diagnostics and status workflow
+        status: pending
+        branches:
+          - agent/tui-M9-diagnostics-status
+          - agent/test-M9-diagnostics-status
+        acceptance:
+          - Doctor and status menu paths show real diagnostic result screens.
+          - PASS, WARN, FAIL, and SKIP states render clearly.
+          - Redaction applies to rendered output.
+          - Live checks are mocked or safely skipped in default tests.
+      - id: M9.4
+        name: Lifecycle operation workflow
+        status: pending
+        branches:
+          - agent/tui-M9-lifecycle-operations
+          - agent/test-M9-lifecycle-operations
+        acceptance:
+          - Lifecycle menu actions resolve to operation catalog entries.
+          - Dry-run preview works before mutating execution.
+          - Mutating execution requires confirmation.
+          - Result and output displays are redacted.
+          - Tests use mocked runners or harmless subprocess commands only.
+    verification_gates:
+      - python3 -m compileall -q fortifylab
+      - python3 -m unittest discover -s tests -v
+      - ./bin/fortifylab tui --check
+      - ./bin/fortifylab doctor --check
+      - ./bin/fortifylab status --check
+      - git diff --check
