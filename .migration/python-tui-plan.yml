@@ -644,6 +644,7 @@ milestones:
           - First supported operation set is start, stop, and destroy for MySQL, PostgreSQL, SSC, LIM, ScanCentral SAST, ScanCentral DAST, Juice Shop, WebGoat, and DVWA, plus all-lab start and stop.
           - Restart lab and reset lab remain unsupported placeholders until ordered sequence and destructive scope screens exist.
           - Dry-run preview, confirmation gating, result display, and output redaction contracts are covered by clone-safe TUI tests with injected runners only.
+          - agent/tui-M9.4-lifecycle-operations wires app and sample app lifecycle screens to the confirmed operation runner, keeps preview/confirmation gates, renders redacted result output, and adds mocked runner workflow tests.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v

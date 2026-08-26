@@ -38,6 +38,18 @@ def render_check() -> str:
     return render_menu(controller.menu, controller.selected_item)
 
 
+def workflow_key_from_event(event) -> str | None:  # type: ignore[no-untyped-def]
+    """Return printable workflow key input from a Textual key event."""
+
+    key = getattr(event, "key", None)
+    if isinstance(key, str) and key.isdigit():
+        return key
+    character = getattr(event, "character", None)
+    if isinstance(character, str) and len(character) == 1 and character.isprintable():
+        return character
+    return None
+
+
 def run_tui(*, smoke_test: bool = False) -> int:
     """Run FortifyLab's TUI or a deterministic noninteractive check."""
 
@@ -118,11 +130,14 @@ def _run_textual_app() -> int:
             self._refresh_menu()
 
         def on_key(self, event) -> None:  # type: ignore[no-untyped-def]
+            if self.workflow_screen is not None:
+                workflow_key = workflow_key_from_event(event)
+                if workflow_key is not None:
+                    event.stop()
+                    self.action_menu_key(workflow_key)
+                return
             if event.key.isdigit():
                 event.stop()
-                if self.workflow_screen is not None:
-                    self.action_menu_key(event.key)
-                    return
                 self._handle_digit_key(event.key)
                 return
             if event.character and event.character in {"m", "b", "r", "h", "?"}:

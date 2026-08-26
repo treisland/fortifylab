@@ -8,6 +8,7 @@ Kubernetes, Helm, Docker, or repository lifecycle scripts.
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from fortifylab.operations import CommandExecutionResult, OperationRunResult
 from fortifylab.tui.lifecycle import (
@@ -103,6 +104,49 @@ class M9LifecycleContractTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(screen.handle_key("y").message, "mysql.stop completed successfully.")
         self.assertEqual(calls, ["mysql.stop"])
+
+    def test_default_runner_uses_catalog_only_after_screen_confirmation(self) -> None:
+        result = OperationRunResult("mysql.start", 0, ())
+        screen = LifecycleWorkflowScreen("app_lifecycle.mysql")
+
+        with patch("fortifylab.tui.lifecycle.run_operation", return_value=result) as run_operation:
+            self.assertNotIn("Status:", screen.render())
+            self.assertEqual(screen.handle_key("y").message, "No lifecycle action is bound to 'y'.")
+            run_operation.assert_not_called()
+
+            self.assertEqual(screen.handle_key("c").message, "Confirmation required before lifecycle execution.")
+            run_operation.assert_not_called()
+
+            self.assertEqual(screen.handle_key("y").message, "mysql.start completed successfully.")
+            run_operation.assert_called_once_with("mysql.start", confirmed=True)
+
+    def test_lifecycle_render_includes_result_status_and_redacted_output(self) -> None:
+        result = OperationRunResult(
+            "mysql.start",
+            0,
+            (
+                CommandExecutionResult(
+                    ("bash", "apps/mysql/start.sh", "--token=abc123"),
+                    0,
+                    "ready\npassword=hunter2\n",
+                    "",
+                    0.1,
+                ),
+            ),
+        )
+        screen = LifecycleWorkflowScreen("app_lifecycle.mysql", runner=lambda _operation_id: result)
+
+        screen.handle_key("c")
+        screen.handle_key("y")
+        rendered = screen.render()
+
+        self.assertIn("Status: success", rendered)
+        self.assertIn("Exit code: 0", rendered)
+        self.assertIn("stdout: ready password=<redacted>", rendered)
+        self.assertIn("Output:", rendered)
+        self.assertIn("--token=<redacted>", rendered)
+        self.assertNotIn("hunter2", rendered)
+        self.assertNotIn("abc123", rendered)
 
     def test_result_display_summarizes_exit_code_and_redacted_output(self) -> None:
         result = OperationRunResult(
