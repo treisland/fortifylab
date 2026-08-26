@@ -17,15 +17,14 @@ manual recovery over unattended production automation.
 
 ## Branching model
 
-`agent/phase-3.7-3.10-python-cli-tui` is the active CLI/TUI-focused Python migration runway. It starts from current `dev` after the accepted Phase 3.0-3.6 work and carries the next Python console foundation slices.
+`migration/python-tui` is the active CLI/TUI-focused Python migration integration branch. Focused agent branches target `migration/python-tui`; M8 prepares that branch for merge-back to `dev`.
 
-`dev` and `main` stay untouched until manual testing accepts the integrated
-Phase 3 branch.
+`dev` and `main` stay untouched until M8 readiness, final verification, and the merge-back review accept the integrated Phase 3 branch.
 
 Promotion flow:
 
 ```text
-agent/phase-3.x-* -> agent/phase-3.7-3.10-python-cli-tui -> dev -> main
+agent/<workstream>-<milestone>-<topic> -> migration/python-tui -> dev -> main
 ```
 
 ## Runtime direction
@@ -133,7 +132,7 @@ single binary in Phase 3.
 ## State rules
 
 Fortify Lab must infer deployed resource health from live Kubernetes and Helm
-state. Local state may make the wizard friendlier, but it must not become the
+state. Local state may make the CLI/TUI friendlier, but it must not become the
 authority for whether MySQL, SSC, ScanCentral, LIM, dashboard, or sample apps are
 actually deployed.
 
@@ -158,7 +157,7 @@ before moving live deployment execution from Bash into Python.
 
 ## Manual test gates
 
-Before promoting `agent/phase-3.7-3.10-python-cli-tui` to `dev`, manually test at least:
+Before merging `migration/python-tui` back to `dev`, manually verify at least:
 
 - guided deployment profile selection;
 - smooth wait-screen behavior and auto-advance takeover;

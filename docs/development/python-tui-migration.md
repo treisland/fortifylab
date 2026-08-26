@@ -339,6 +339,30 @@ Implementation agents can proceed in this order:
 4. Bash internals cleanup agent: `scripts/wizard/*` has been removed after supported entrypoint tests confirmed no shim/config/doctor/status/help/tui path depends on it.
 5. Operations agent: keep M3 adapter scripts under `apps/**` stable and only expand Python operation coverage with clone-safe previews/tests.
 
+## M8 Merge-Back Checklist
+
+M8 is a governance and integration milestone only. Do not add product features
+while preparing `migration/python-tui` for merge-back to `dev`.
+
+- Verify `.migration/python-tui-plan.yml` parses as YAML.
+- Confirm M0 through M7 are marked complete and M8 is marked in progress.
+- Confirm README and development docs present `./bin/fortifylab` as the primary
+  Python CLI/TUI surface.
+- Confirm `./start_wizard.sh` is documented only as an M7/M8 compatibility shim
+  for `--help`, `doctor`, `status`, `help topic ...`, and
+  `config-diagnostics`.
+- Confirm retained Bash scripts are described as low-level operation adapters,
+  bootstrap helpers, or lifecycle scripts, not the interactive application.
+- Classify stale-reference scan hits as active guidance, compatibility shim,
+  historical migration log, quarantine/reference material, or stale docs
+  requiring cleanup.
+- Run final verification on `agent/test-M8-final-verification`: unit tests,
+  CLI/shim smoke checks, retired-path scans, adapter-reference checks, docs
+  validation, and `git diff --check`.
+- Prepare the `migration/python-tui` to `dev` PR with milestone evidence, known
+  local `mkdocs` limitation if still present, conflict strategy, and rollback
+  guidance.
+
 ## Decision Log
 
 | Date | Decision | Status |
