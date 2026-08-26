@@ -408,6 +408,15 @@ runbook execution was added.
 
 M9.2 is now the active slice and owns the Configuration Editor workflow.
 
+### M9.2 Closeout
+
+M9.2 landed through PRs #486 and #485. Configuration Editor now opens a real
+TUI workflow with diagnostics, validation, redacted derived repair preview, and
+confirmation-gated repair backed by existing M4 config APIs. Tests use temporary
+`.env` fixtures only and do not mutate the repository `.env`.
+
+M9.3 is now the active slice and owns Diagnostics and Status result screens.
+
 ## Decision Log
 
 | Date | Decision | Status |
