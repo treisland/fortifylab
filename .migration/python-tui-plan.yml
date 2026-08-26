@@ -31,25 +31,25 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-26
   milestone: M9
-  workstream: pm-M9.2-closeout-open-M9.3
-  branch: agent/pm-M9.2-closeout-open-M9.3
+  workstream: pm-M9.3-closeout-open-M9.4
+  branch: agent/pm-M9.3-closeout-open-M9.4
   status: active
   changed:
-    - Closed M9.2 Config workflow after implementation and tests landed in migration/python-tui.
-    - Recorded M9.2 PRs #486 and #485.
-    - Verified config diagnostics, validation, redacted repair preview, and confirmation-gated repair through temp-file-safe tests.
-    - Opened M9.3 Diagnostics/Status workflow as the next one-submenu parity slice.
+    - Closed M9.3 Diagnostics/Status after implementation and tests landed in migration/python-tui.
+    - Recorded M9.3 PRs #489 and #488.
+    - Verified Doctor/Status TUI screens, PASS/WARN/FAIL/SKIP rendering, redaction, and refresh/back behavior.
+    - Opened M9.4 Lifecycle Operation workflow as the next one-submenu parity slice.
   next:
-    - Implement M9.3 Doctor and Status TUI result screens with PASS/WARN/FAIL/SKIP rendering and refresh/back behavior.
+    - Define M9.4 lifecycle operation catalog mapping, dry-run preview, confirmation flow, result display, and test-safe runner injection.
     - Keep PR #479 held out of dev while M9 remains active.
   blockers: []
   risks:
-    - Keep live Kubernetes, Helm, Docker, network, credentials, and lab state out of default tests.
-    - Preserve redaction in TUI-facing diagnostics and status output.
-    - Environment-dependent checks must degrade to SKIP or clear warnings by default.
+    - Lifecycle execution is the first higher-risk M9 slice; start with a contract before implementation.
+    - Mutating operations must require explicit confirmation and test execution must use mocks or harmless commands only.
+    - Do not delete or bypass retained Bash operation adapters referenced by the M3 catalog.
 
   needs_decision:
-    - None; M9.3 Diagnostics/Status sequencing is approved.
+    - None; M9.4 Lifecycle Operation sequencing is approved.
 
 
 open_decisions:
@@ -85,12 +85,12 @@ workstreams:
   pm:
     owner: pm-agent
     status: active
-    branch: agent/pm-M9.2-closeout-open-M9.3
+    branch: agent/pm-M9.3-closeout-open-M9.4
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Close M9.2 Config and open M9.3 Diagnostics/Status workflow coordination.
-    next_task: Spawn M9.3 diagnostics/status implementation, test, and docs agents after closeout lands.
+    current_task: Close M9.3 Diagnostics/Status and open M9.4 Lifecycle Operation workflow coordination.
+    next_task: Spawn M9.4 lifecycle contract, implementation, test, and docs agents after closeout lands.
     blockers: []
   architecture:
     owner: architecture-agent
@@ -599,7 +599,14 @@ milestones:
           - git diff --check passed.
       - id: M9.3
         name: Diagnostics and status workflow
-        status: in_progress
+        status: complete
+        completed_at: 2026-08-26
+        merged_prs:
+          - 489
+          - 488
+        merge_commits:
+          - 2dd7f4e30fa6702cb459a0909d1ae78964ef39cf
+          - 7093a22d4f0c76c4cf971fdaf75dca2b16e8a4f9
         branches:
           - agent/tui-M9.3-diagnostics-status
           - agent/test-M9.3-diagnostics-status
@@ -620,10 +627,12 @@ milestones:
           - git diff --check passed.
       - id: M9.4
         name: Lifecycle operation workflow
-        status: pending
+        status: in_progress
         branches:
-          - agent/tui-M9-lifecycle-operations
-          - agent/test-M9-lifecycle-operations
+          - agent/tui-M9.4-lifecycle-contract
+          - agent/tui-M9.4-lifecycle-operations
+          - agent/test-M9.4-lifecycle-operations
+          - agent/docs-M9.4-lifecycle-workflow
         acceptance:
           - Lifecycle menu actions resolve to operation catalog entries.
           - Dry-run preview works before mutating execution.

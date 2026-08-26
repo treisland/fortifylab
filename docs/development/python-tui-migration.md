@@ -417,6 +417,17 @@ confirmation-gated repair backed by existing M4 config APIs. Tests use temporary
 
 M9.3 is now the active slice and owns Diagnostics and Status result screens.
 
+### M9.3 Closeout
+
+M9.3 landed through PRs #489 and #488. Diagnostics now opens a combined
+Doctor/Status TUI screen, direct doctor/status workflow targets open focused
+result screens, PASS/WARN/FAIL/SKIP states render clearly, output is redacted,
+and refresh/back behavior is covered by clone-safe tests.
+
+M9.4 is now the active slice and owns Lifecycle Operation workflow parity. This
+is the first higher-risk M9 slice, so it starts with a lifecycle contract before
+operation execution wiring.
+
 ## Decision Log
 
 | Date | Decision | Status |
