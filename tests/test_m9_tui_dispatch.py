@@ -78,6 +78,26 @@ class M9TuiDispatchTests(unittest.TestCase):
         assert result.screen is not None
         self.assertEqual(result.screen.render(), "Injected workflow screen.")
 
+    def test_logs_actions_open_registered_workflow_screens(self) -> None:
+        cases = (
+            ("main", "4", "logs", "Logs"),
+            ("more_tools", "11", "logs", "Logs"),
+            ("more_tools", "19", "wizard_log", "Wizard log"),
+        )
+
+        for menu_id, key, screen_id, title in cases:
+            with self.subTest(menu_id=menu_id, key=key):
+                selected = find_item(menu_id, key)
+                assert selected is not None
+
+                result = dispatch_menu_item(selected)
+
+                self.assertEqual(result.kind, "screen")
+                self.assertIsNotNone(result.screen)
+                assert result.screen is not None
+                self.assertEqual(result.screen.id, screen_id)
+                self.assertEqual(result.screen.title, title)
+
     def test_unknown_nonplaceholder_action_reports_modeled_later(self) -> None:
         selected = MenuItem(
             "x",
