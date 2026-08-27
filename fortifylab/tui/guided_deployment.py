@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Literal
 
 from fortifylab.diagnostics import redact_diagnostic_text
-from fortifylab.operations import OperationRunResult, SensitiveRedactor, dry_run
+from fortifylab.operations import OperationRunResult, SensitiveRedactor, dry_run, run_operation
 from fortifylab.operations.catalog import get_operation
 from fortifylab.tui.lifecycle import ExecutionResultDisplayModel, build_result_display
 from fortifylab.tui.workflows import WorkflowKeyResult, WorkflowScreen
@@ -973,6 +973,8 @@ class GuidedDeploymentScreen(WorkflowScreen):
 
 
 def build_guided_deployment_workflow(**kwargs) -> GuidedDeploymentScreen:  # type: ignore[no-untyped-def]
+    if not kwargs:
+        kwargs = {"release_families": RELEASE_FAMILIES, "runner": _real_guided_plan_runner}
     return GuidedDeploymentScreen(**kwargs)
 
 
@@ -1006,6 +1008,46 @@ def _execute_guided_step(step: GuidedDeploymentStep, runner: GuidedDeploymentRun
 
 def _blocked_guided_runner(operation_id: str) -> OperationRunResult:
     raise RuntimeError(f"No guided deployment runner is configured for {operation_id}.")
+
+
+def _real_guided_plan_runner(plan: DeploymentPlan):  # type: ignore[no-untyped-def]
+    for step in plan.steps:
+        if step.operation_id is None:
+            yield GuidedDeploymentRunEvent(
+                step.step_id,
+                step.component,
+                "unavailable",
+                StepRuntimeState.UNAVAILABLE,
+                f"{step.label} has no operation adapter.",
+            )
+            if step.required:
+                return
+            continue
+        yield GuidedDeploymentRunEvent(
+            step.step_id,
+            step.component,
+            step.operation_id,
+            StepRuntimeState.RUNNING,
+            f"{step.label} running",
+        )
+        result = run_operation(step.operation_id, confirmed=True)
+        stdout = "\n".join(command.stdout for command in result.commands if command.stdout)
+        stderr = "\n".join(command.stderr for command in result.commands if command.stderr)
+        duration = sum(command.duration_seconds for command in result.commands)
+        status = StepRuntimeState.INSTALLED if result.ok else StepRuntimeState.FAILED
+        message = f"{step.label} installed" if result.ok else f"{step.label} failed"
+        yield GuidedDeploymentRunEvent(
+            step.step_id,
+            step.component,
+            step.operation_id,
+            status,
+            message,
+            stdout=stdout,
+            stderr=stderr,
+            duration_seconds=duration,
+        )
+        if not result.ok and plan.stop_on_failure:
+            return
 
 
 def _steps_for_profiles(profile_id: str, mode_id: str, profiles: tuple[GuidedDeploymentProfile, ...]) -> tuple[GuidedDeploymentStep, ...]:
