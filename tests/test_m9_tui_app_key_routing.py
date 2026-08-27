@@ -26,9 +26,12 @@ class M9TuiAppKeyRoutingTests(unittest.TestCase):
     def test_digit_workflow_keys_are_forwardable_for_number_selection(self) -> None:
         self.assertEqual(workflow_key_from_event(FakeKeyEvent(key="2", character="2")), "2")
 
-    def test_non_printable_keys_do_not_use_printable_workflow_route(self) -> None:
-        self.assertIsNone(workflow_key_from_event(FakeKeyEvent(key="up", character=None)))
-        self.assertIsNone(workflow_key_from_event(FakeKeyEvent(key="escape", character=None)))
+    def test_navigation_workflow_keys_are_forwardable(self) -> None:
+        self.assertEqual(workflow_key_from_event(FakeKeyEvent(key="enter", character=None)), "enter")
+        self.assertEqual(workflow_key_from_event(FakeKeyEvent(key="return", character=None)), "enter")
+        self.assertEqual(workflow_key_from_event(FakeKeyEvent(key="up", character=None)), "up")
+        self.assertEqual(workflow_key_from_event(FakeKeyEvent(key="down", character=None)), "down")
+        self.assertEqual(workflow_key_from_event(FakeKeyEvent(key="escape", character=None)), "back")
 
 
 if __name__ == "__main__":
