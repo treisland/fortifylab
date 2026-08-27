@@ -2,7 +2,7 @@ program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
 current_milestone: M9
-overall_status: active
+overall_status: ready_for_dev_merge
 
 goal:
   primary_objective: >-
@@ -31,25 +31,25 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-26
   milestone: M9
-  workstream: pm-M9.3-closeout-open-M9.4
-  branch: agent/pm-M9.3-closeout-open-M9.4
-  status: active
+  workstream: pm-M9-closeout-dev-merge-readiness
+  branch: agent/pm-M9-closeout-dev-merge-readiness
+  status: ready_for_dev_merge
   changed:
-    - Closed M9.3 Diagnostics/Status after implementation and tests landed in migration/python-tui.
-    - Recorded M9.3 PRs #489 and #488.
-    - Verified Doctor/Status TUI screens, PASS/WARN/FAIL/SKIP rendering, redaction, and refresh/back behavior.
-    - Opened M9.4 Lifecycle Operation workflow as the next one-submenu parity slice.
+    - Closed M9.1 through M9.5 TUI submenu workflow parity on migration/python-tui.
+    - Functional workflows now cover Help/Runbooks, Configuration, Diagnostics/Status, Lifecycle Operations, and Logs/Wizard Log.
+    - Manual testing checkpoint was confirmed after M9.5.
+    - PR #479 remains the merge-back PR from migration/python-tui to dev.
   next:
-    - Define M9.4 lifecycle operation catalog mapping, dry-run preview, confirmation flow, result display, and test-safe runner injection.
-    - Keep PR #479 held out of dev while M9 remains active.
+    - Refresh PR #479 with this final readiness commit.
+    - Merge PR #479 into dev after GitHub checks and the final local verification gate remain green.
+    - Track any remaining submenu parity gaps as focused post-merge follow-up PRs.
   blockers: []
   risks:
-    - Lifecycle execution is the first higher-risk M9 slice; start with a contract before implementation.
-    - Mutating operations must require explicit confirmation and test execution must use mocks or harmless commands only.
-    - Do not delete or bypass retained Bash operation adapters referenced by the M3 catalog.
+    - PR #479 is a broad migration diff; review should focus on documented architecture, entrypoints, tests, and retained Bash adapter boundaries.
+    - Older PR #436 targets dev separately; if it lands first, refresh migration/python-tui against dev and rerun checks before merging #479.
 
   needs_decision:
-    - None; M9.4 Lifecycle Operation sequencing is approved.
+    - None; PM recommends proceeding with the dev merge strategy after user-confirmed manual testing.
 
 
 open_decisions:
@@ -89,8 +89,8 @@ workstreams:
     owns:
       - .migration/python-tui-plan.yml
       - docs/development/python-tui-migration.md
-    current_task: Close M9.3 Diagnostics/Status and open M9.4 Lifecycle Operation workflow coordination.
-    next_task: Spawn M9.4 lifecycle contract, implementation, test, and docs agents after closeout lands.
+    current_task: Close M9 workflow parity and prepare PR #479 dev merge readiness.
+    next_task: Merge migration/python-tui to dev through PR #479 after final checks.
     blockers: []
   architecture:
     owner: architecture-agent
