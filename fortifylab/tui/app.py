@@ -251,6 +251,8 @@ def _run_textual_app() -> int:
                 if result.exit_screen:
                     self.workflow_screen = None
                 self._refresh_menu()
+                if self._workflow_run_started():
+                    self.run_worker(self._consume_workflow_run, thread=True, exclusive=True)
                 return
             if normalized == "back":
                 self._handle_back(None)
@@ -260,6 +262,32 @@ def _run_textual_app() -> int:
                 self.message = "Help is available from the Help Center workflow."
             else:
                 self.message = f"No workflow screen action is bound to {key!r}."
+            self._refresh_menu()
+
+        def _workflow_run_started(self) -> bool:
+            screen = self.workflow_screen
+            return bool(
+                screen is not None
+                and getattr(screen, "stage", None) == "deployment_monitor"
+                and hasattr(screen, "iter_deployment_run_events")
+                and hasattr(screen, "apply_deployment_run_event")
+                and hasattr(screen, "finish_deployment_plan")
+            )
+
+        def _consume_workflow_run(self) -> None:
+            screen = self.workflow_screen
+            if screen is None or not self._workflow_run_started():
+                return
+            for event in screen.iter_deployment_run_events():  # type: ignore[attr-defined]
+                result = screen.apply_deployment_run_event(event)  # type: ignore[attr-defined]
+                self.call_from_thread(self._update_workflow_message, result.message)
+                if getattr(screen, "stage", None) == "deployment_failed":
+                    return
+            result = screen.finish_deployment_plan()  # type: ignore[attr-defined]
+            self.call_from_thread(self._update_workflow_message, result.message)
+
+        def _update_workflow_message(self, message: str) -> None:
+            self.message = message
             self._refresh_menu()
 
         def _refresh_menu(self) -> None:
