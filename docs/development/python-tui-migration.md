@@ -690,8 +690,12 @@ completion handoffs.
 The live monitor slice starts real/default lifecycle plans from the Textual
 background worker instead of blocking the key handler. Lifecycle run events mark
 rows as running, success, or failure, refresh the screen incrementally, and stop
-on the first failed operation. Pod logs and deeper diagnostics inspection remain
-the next lifecycle parity slice.
+on the first failed operation.
+
+The logs/inspection slice adds bounded redacted lifecycle log rendering from
+run events, adapter inspection with dry-run command previews, pod-log guidance
+through existing Logs/Diagnostics handoffs, and completion/failure handoff keys
+to Logs, Diagnostics, Status, and Main menu.
 
 Default tests remain clone-safe. They use fake runners or mock the operation
 runner and do not invoke Kubernetes, Helm, Docker, network, lifecycle scripts,
