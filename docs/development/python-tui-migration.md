@@ -725,6 +725,40 @@ runner and do not invoke Kubernetes, Helm, Docker, network, lifecycle scripts,
 or credentials. Manual TUI smoke is recommended before using the real auto-run
 path against a live lab.
 
+### M9.11 Lifecycle UX Refinement Closeout
+
+M9.11 landed as a focused refinement after manual lifecycle testing confirmed the
+Python TUI flow worked but needed Bash-style polish. PR #529 added lifecycle
+status color mapping, closed Rich/Textual markup per row to avoid color bleed,
+and removed adapter IDs from normal lifecycle screens and plan previews. Adapter
+IDs and redacted command previews remain available from Inspection.
+
+PR #530 split runtime lifecycle execution into a dedicated status monitor screen.
+After confirmation, the plan preview is replaced by lifecycle status, latest
+update, colored component rows, logs/inspection/status handoffs, and a
+completion/failure summary with Enter/Main menu return.
+
+PR #531 added all-lab lifecycle profile scope selection for Core Fortify Lab,
+SAST Full Lab, DAST Full Lab, and SSC Only. This selection scopes the lifecycle
+action only and does not mutate saved deployment config. Single-component
+lifecycle screens continue to use action selection for Start, Stop, and Destroy.
+
+Manual lifecycle smoke for M9.11:
+
+1. Run `./bin/fortifylab tui`.
+2. Open `2` Lab lifecycle controls, then Start or Stop.
+3. Use arrows or number keys to select Core, SAST Full, DAST Full, or SSC Only.
+4. Press Enter to review the plan and confirm only deployment/component names are
+   shown.
+5. Press Enter again and confirm the dedicated Lifecycle status screen replaces
+   the preview, uses colored status rows, and offers Logs, Diagnostics, Status,
+   Inspection, and Main menu handoffs.
+6. Open Inspection and confirm adapter IDs and command previews are available
+   there, not in the normal plan review.
+
+Default verification passed with clone-safe tests only: focused lifecycle stack
+47 tests, full suite 311 tests, compileall, and TUI smoke.
+
 ### 2026-08-27
 
 Milestone: M9.7
