@@ -466,6 +466,17 @@ Default tests remain clone-safe. M9.5 tests use temporary fixture logs only and
 do not run Kubernetes, Helm, Docker, network calls, credentials, live lab checks,
 or repository lifecycle scripts.
 
+### M9 Dev Merge Readiness
+
+M9.1 through M9.5 are complete and the user-confirmed manual testing checkpoint
+has passed. PR #479 is the merge-back PR from `migration/python-tui` to `dev`.
+The migration is ready to land in `dev` after the final local verification gate
+and GitHub `offline-docs` check remain green.
+
+Future submenu parity gaps should be handled as normal focused follow-up PRs
+after the Python CLI/TUI foundation lands, rather than keeping the migration
+branch open indefinitely.
+
 ## Decision Log
 
 | Date | Decision | Status |
