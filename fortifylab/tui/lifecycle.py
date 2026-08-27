@@ -438,7 +438,7 @@ def build_lifecycle_workflow(selected, runner: LifecycleRunner | None = None):  
 
 
 class LifecycleWorkflowScreen:
-    """Lifecycle screen with dry-run, confirmation, and operation runner hooks."""
+    """Lifecycle screen with Bash-style target, action, plan, and confirmation flow."""
 
     def __init__(
         self,
@@ -449,14 +449,23 @@ class LifecycleWorkflowScreen:
     ) -> None:
         self.contract = resolve_lifecycle_action(action_target)
         self.runner = runner or _confirmed_operation_runner
-        self.selected_operation_id = self.contract.default_operation_id
+        self.action_options = _screen_action_options(action_target)
+        self.selected_action_index = 0
+        self.selected_operation_id = self._selected_default_operation_id()
         self.awaiting_confirmation = False
         self.last_preview: DryRunPreviewScreenModel | None = None
+        self.last_plan: LifecyclePlan | None = None
         self.last_result: ExecutionResultDisplayModel | None = None
         self.id = f"lifecycle:{action_target}"
         self.title = title or self.contract.label
-        self.summary = f"{self.contract.label} lifecycle contract."
+        self.summary = f"{self.contract.label} lifecycle controls."
         self.lines = ()
+
+    @property
+    def selected_action(self) -> LifecycleActionOption | None:
+        if not self.action_options:
+            return None
+        return self.action_options[self.selected_action_index]
 
     def render(self) -> str:
         lines = [self.summary]
@@ -464,12 +473,46 @@ class LifecycleWorkflowScreen:
             lines.append(f"Unsupported: {self.contract.unsupported_reason}")
             return "\n".join(lines)
 
-        lines.append("Use Up/Down or 1-3 to select. p previews, c confirms, y runs, n cancels, b backs out.")
-        lines.append("Operations:")
-        for index, operation_id in enumerate(self.contract.operation_ids, start=1):
-            marker = ">" if operation_id == self.selected_operation_id else " "
-            lines.append(f"{marker} {index}. {operation_id}")
-        lines.append("Preview before execution. Confirmation is required for mutating operations.")
+        scope = build_lifecycle_scope(self.contract.action_target)
+        lines.append(f"Target: {scope.label}")
+        lines.append(scope.description)
+        if self.contract.operation_ids:
+            lines.append("Catalog operation: " + ", ".join(self.contract.operation_ids))
+        lines.append("")
+        lines.append("Actions:")
+        for index, action in enumerate(self.action_options, start=1):
+            marker = ">" if index - 1 == self.selected_action_index else " "
+            status = "" if action.available else f" [{action.unavailable_reason}]"
+            lines.append(f"{marker} {index}. {action.label} - {action.description}{status}")
+        lines.append("")
+        lines.append("Use up/down or number to select. Press enter to review the plan. b backs out.")
+
+        action = self.selected_action
+        if action is not None and action.available:
+            try:
+                preview_plan = build_lifecycle_plan(self.contract.action_target, action.id)
+            except ValueError:
+                preview_plan = None
+            if preview_plan is not None:
+                lines.append(f"Selected plan: {preview_plan.label}")
+                lines.append(f"Order: {preview_plan.order_note}")
+                lines.append("Adapter preview: " + ", ".join(preview_plan.operation_ids))
+
+        if self.last_plan is not None:
+            lines.append("")
+            lines.append("Plan preview")
+            lines.append(f"Scope: {self.last_plan.scope.label}")
+            lines.append(f"Action: {self.last_plan.label}")
+            lines.append(f"Data impact: {self.last_plan.data_impact}")
+            lines.append("Steps that will run:")
+            for step in self.last_plan.steps:
+                lines.append(f"{step.order}. {step.label} -> {step.operation_id}")
+            if self.last_plan.destructive:
+                lines.append(f"Confirm by typing: {self.last_plan.confirmation_phrase}")
+            else:
+                lines.append("Continue: press enter to run this lifecycle plan.")
+            lines.append("Inspect: press i to review adapters, commands, and handoffs.")
+            lines.append("Cancel: press n before execution starts.")
 
         if self.last_preview is not None:
             lines.append("")
@@ -492,7 +535,11 @@ class LifecycleWorkflowScreen:
                 lines.extend(f"  {line}" for line in self.last_result.redacted_output[:12])
                 if len(self.last_result.redacted_output) > 12:
                     lines.append("  ...")
-        return "\n".join(lines)
+            lines.append("")
+            lines.append("Handoffs:")
+            for handoff in _LIFECYCLE_HANDOFFS:
+                lines.append(f"{handoff.key}. {handoff.label} -> {handoff.workflow_target}")
+        return "\n".join(line for line in lines if line is not None)
 
     def handle_key(self, key: str) -> WorkflowKeyResult:
         if key in {"back", "b", "escape"}:
@@ -501,18 +548,22 @@ class LifecycleWorkflowScreen:
             return WorkflowKeyResult(self.contract.unsupported_reason or "Lifecycle action is unsupported.")
         if key in {"up", "down"}:
             self._move_selection(-1 if key == "up" else 1)
-            return WorkflowKeyResult(f"Selected {self.selected_operation_id}.")
-        if key in {"1", "2", "3"}:
+            return WorkflowKeyResult(f"Selected {self._selected_operation_label()}.")
+        if key in {"1", "2", "3", "4", "5", "6"}:
             index = int(key) - 1
-            if index < len(self.contract.operation_ids):
-                self._select_operation(index)
-                return WorkflowKeyResult(f"Selected {self.selected_operation_id}.")
+            if index < len(self.action_options):
+                self._select_action(index)
+                return WorkflowKeyResult(f"Selected {self._selected_operation_label()}.")
         if key in {"p", "d"}:
-            self.last_preview = build_dry_run_preview(self.contract.action_target, self.selected_operation_id)
-            self.awaiting_confirmation = False
-            return WorkflowKeyResult(f"Previewed {self.last_preview.operation_id}.")
+            self._prepare_plan()
+            if self.selected_operation_id is not None:
+                self.last_preview = _preview_model(self.contract.action_target, dry_run(self.selected_operation_id))
+                return WorkflowKeyResult(f"Previewed {self.last_preview.operation_id}.")
+            return WorkflowKeyResult("Prepared lifecycle plan preview.")
         if key in {"c", "enter"}:
-            self.last_preview = build_dry_run_preview(self.contract.action_target, self.selected_operation_id)
+            if self.awaiting_confirmation and self.last_plan is not None and not self.last_plan.destructive:
+                return self._execute_selected_plan()
+            self._prepare_plan()
             self.awaiting_confirmation = True
             self.last_result = ExecutionResultDisplayModel(
                 status="requires_confirmation",
@@ -524,10 +575,12 @@ class LifecycleWorkflowScreen:
                 message="Confirmation required before lifecycle execution.",
             )
             return WorkflowKeyResult(self.last_result.message)
-        if key == "y" and self.awaiting_confirmation and self.selected_operation_id is not None:
-            self.awaiting_confirmation = False
-            self.last_result = _execute_with_runner(self.runner, self.selected_operation_id)
-            return WorkflowKeyResult(self.last_result.message)
+        if key == "y" and self.awaiting_confirmation and self.last_plan is not None:
+            if self.last_plan.destructive:
+                return WorkflowKeyResult(f"Type {self.last_plan.confirmation_phrase} to confirm destructive lifecycle execution.")
+            return self._execute_selected_plan()
+        if self.awaiting_confirmation and self.last_plan is not None and key == self.last_plan.confirmation_phrase:
+            return self._execute_selected_plan()
         if key in {"n", "cancel"} and self.awaiting_confirmation:
             self.awaiting_confirmation = False
             self.last_result = ExecutionResultDisplayModel(
@@ -540,23 +593,90 @@ class LifecycleWorkflowScreen:
                 message="Lifecycle execution cancelled.",
             )
             return WorkflowKeyResult("Lifecycle execution cancelled.")
+        if key == "i":
+            self._prepare_plan()
+            return WorkflowKeyResult("Lifecycle inspection is available in the plan preview.")
         return WorkflowKeyResult(f"No lifecycle action is bound to {key!r}.")
 
+    def _prepare_plan(self) -> None:
+        action = self.selected_action
+        if action is None:
+            raise ValueError("No lifecycle action is selected")
+        if not action.available:
+            raise ValueError(action.unavailable_reason or f"Lifecycle action {action.id} is unavailable")
+        self.last_plan = build_lifecycle_plan(self.contract.action_target, action.id)
+        self.selected_operation_id = self.last_plan.operation_ids[0] if self.last_plan.operation_ids else None
+        self.last_preview = None
+        self.last_result = None
 
-    def _select_operation(self, index: int) -> None:
-        self.selected_operation_id = self.contract.operation_ids[index]
+    def _execute_selected_plan(self) -> WorkflowKeyResult:
+        if self.last_plan is None:
+            self._prepare_plan()
+        assert self.last_plan is not None
+        self.awaiting_confirmation = False
+        results = [_execute_with_runner(self.runner, step.operation_id) for step in self.last_plan.steps]
+        failure = next((result for result in results if result.status != "success"), None)
+        if failure is not None:
+            self.last_result = failure
+            return WorkflowKeyResult(failure.message)
+        self.last_result = results[-1]
+        if len(results) == 1:
+            return WorkflowKeyResult(self.last_result.message)
+        self.last_result = ExecutionResultDisplayModel(
+            status="success",
+            operation_id=self.last_plan.operation_ids[-1],
+            exit_code=0,
+            stdout_summary="",
+            stderr_summary="",
+            redacted_output=(),
+            message="Lifecycle plan completed successfully.",
+        )
+        return WorkflowKeyResult(self.last_result.message)
+
+    def _select_action(self, index: int) -> None:
+        self.selected_action_index = index
+        self.selected_operation_id = self._selected_default_operation_id()
         self.awaiting_confirmation = False
         self.last_result = None
         self.last_preview = None
+        self.last_plan = None
 
     def _move_selection(self, delta: int) -> None:
-        if not self.contract.operation_ids:
+        if not self.action_options:
             return
+        self._select_action((self.selected_action_index + delta) % len(self.action_options))
+
+    def _selected_default_operation_id(self) -> str | None:
+        action = self.selected_action
+        if action is None or not action.available:
+            return self.contract.default_operation_id
         try:
-            current_index = self.contract.operation_ids.index(self.selected_operation_id or "")
+            plan = build_lifecycle_plan(self.contract.action_target, action.id)
         except ValueError:
-            current_index = 0
-        self._select_operation((current_index + delta) % len(self.contract.operation_ids))
+            return self.contract.default_operation_id
+        return plan.operation_ids[0] if plan.operation_ids else self.contract.default_operation_id
+
+    def _selected_operation_label(self) -> str:
+        action = self.selected_action
+        if action is None:
+            return "lifecycle action"
+        if self.selected_operation_id is not None:
+            return self.selected_operation_id
+        return action.label
+
+
+def _screen_action_options(action_target: str) -> tuple[LifecycleActionOption, ...]:
+    if action_target == "lifecycle.start_lab":
+        return (_find_lifecycle_action("start"),)
+    if action_target == "lifecycle.stop_lab":
+        return (_find_lifecycle_action("stop"),)
+    if action_target == "lifecycle.restart_lab":
+        return (_find_lifecycle_action("restart"),)
+    if action_target == "lifecycle.reset_lab":
+        return (_find_lifecycle_action("destroy"), _find_lifecycle_action("reset"))
+    if action_target.startswith(("app_lifecycle.", "sample_apps.")):
+        return tuple(_find_lifecycle_action(action_id) for action_id in ("start", "stop", "destroy"))
+    return ()
 
 
 def _preview_model(action_target: str, preview: OperationPreview) -> DryRunPreviewScreenModel:

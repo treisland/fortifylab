@@ -136,7 +136,8 @@ class M9LifecycleWorkflowTests(unittest.TestCase):
 
         self.assertEqual(screen.handle_key("3").message, "Selected webgoat.destroy.")
         self.assertEqual(screen.handle_key("c").message, "Confirmation required before lifecycle execution.")
-        self.assertEqual(screen.handle_key("y").message, "webgoat.destroy failed with exit code 42.")
+        self.assertEqual(screen.handle_key("y").message, "Type DESTROY to confirm destructive lifecycle execution.")
+        self.assertEqual(screen.handle_key("DESTROY").message, "webgoat.destroy failed with exit code 42.")
 
         assert screen.last_result is not None
         self.assertEqual(screen.last_result.status, "failure")
