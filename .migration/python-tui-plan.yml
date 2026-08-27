@@ -31,24 +31,24 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-27
   milestone: M9.8
-  workstream: pm-open-M9.8-dashboard-urls-credentials
-  branch: agent/pm-open-M9.8-dashboard-urls-credentials
+  workstream: pm-M9.8-closeout-open-next
+  branch: agent/pm-M9.8-closeout-open-next
   status: active
   changed:
-    - Closed M9.7 Guided Deployment workflow on migration/python-tui.
-    - User approved proceeding with M9.8 Dashboard Access, URLs, and Credentials workflow.
+    - M9.8 Dashboard Access, URLs, and Credentials workflow completed on migration/python-tui.
+    - PR #508 opened the milestone guardrails, PR #510 landed the contract/workflow implementation, and PR #509 landed workflow test coverage.
     - PR #479 remains open and held out of dev while focused parity work continues.
   next:
-    - Define a read-only dashboard/access snapshot contract backed by existing config/status helpers.
-    - Implement TUI screens for Dashboard access and URLs/credentials paths with masked secrets by default.
-    - Add fixture-only tests for missing values, redaction, and Config/Diagnostics/Help handoffs.
+    - Open M9.9 Samples And Training Apps Workflow as the next focused parity slice.
+    - Preserve read-only previews by default and require explicit confirmation before sample app mutations.
+    - Reuse operation catalog/runner abstractions with fixture-only default tests.
   blockers: []
   risks:
-    - Credential-adjacent screens must mask secrets by default and avoid printing sensitive local paths.
+    - Sample app actions can be mutating; previews and confirmation gates must stay explicit.
     - Default tests must not require live lab state, Kubernetes, Helm, Docker, network, or credentials.
 
   needs_decision:
-    - None; M9.8 sequencing is approved by the user's proceed instruction.
+    - None; M9.9 is PM-recommended follow-up work and remains on migration/python-tui.
 
 
 open_decisions:
@@ -750,13 +750,14 @@ milestones:
           - GitHub offline-docs passed on PRs #504, #505, and #506.
       - id: M9.8
         name: Dashboard access, URLs, and credentials workflow
-        status: in_progress
+        status: completed
         branches:
           - agent/pm-open-M9.8-dashboard-urls-credentials
           - agent/access-M9.8-contract
           - agent/test-M9.8-dashboard-urls-credentials
           - agent/tui-M9.8-dashboard-urls-credentials
           - agent/docs-M9.8-dashboard-urls-credentials
+          - agent/pm-M9.8-closeout-open-next
         acceptance:
           - Dashboard access and URLs/credentials menu paths open functional TUI workflow screens.
           - Values come from existing config/status helpers where possible.
@@ -769,6 +770,25 @@ milestones:
           - M9.8 should stay read-only by default, mask secrets, and use fixture-backed tests only.
           - Contract branch agent/access-M9.8-contract added read-only access snapshot models for dashboard URLs, configured URLs, credential presence, masked secret values, unavailable dashboard tokens, and workflow handoffs.
           - Contract tests verify fixture-backed URL expansion, missing-value states, default secret masking, disabled reveal behavior, and dispatch registration for Dashboard access and URLs/credentials.
+          - PR #508 merged the M9.8 kickoff tracker update into migration/python-tui.
+          - PR #510 merged the M9.8 dashboard access workflow contract into migration/python-tui at ecf8450.
+          - PR #509 merged the M9.8 workflow coverage into migration/python-tui at 4618000.
+          - Verification on migration/python-tui passed: python3 -m unittest discover tests, python3 -m compileall -q fortifylab tests, ./bin/fortifylab tui --check, ./bin/fortifylab doctor --check, ./bin/fortifylab status --check, and git diff --check.
+      - id: M9.9
+        name: Samples and training apps workflow
+        status: planned
+        branches:
+          - agent/pm-open-M9.9-samples-training-apps
+        acceptance:
+          - Sample Apps / training app menu paths open functional TUI workflow screens while preserving the current navigation structure.
+          - Juice Shop, WebGoat, and DVWA entries expose list/detail views with safe status and unavailable states.
+          - Deploy/start/stop actions render dry-run previews before any operation executes.
+          - Mutating actions require explicit confirmation and can be cancelled without running operations.
+          - Workflow screens provide handoffs to Logs, Diagnostics/Status, and URLs/Credentials.
+          - Tests use injected fake runners/status providers only and require no live lab state.
+        evidence:
+          - PM recommended M9.9 after M9.8 because sample/training apps are the next high-value parity area after readiness, deployment, diagnostics, logs, config, and access workflows.
+          - M9.9 should reuse existing operation catalog and runner abstractions rather than invoking Kubernetes, Helm, Docker, or network directly from default tests.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
