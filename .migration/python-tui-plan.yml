@@ -31,18 +31,17 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-27
   milestone: M9.7
-  workstream: pm-open-M9.7-guided-deployment
-  branch: agent/pm-open-M9.7-guided-deployment
-  status: active
+  workstream: pm-M9.7-closeout-open-next
+  branch: agent/pm-M9.7-closeout-open-next
+  status: closeout
   changed:
     - Closed M9.6 Setup and Readiness workflow on migration/python-tui.
     - Functional workflows now cover Help/Runbooks, Configuration, Diagnostics/Status, Lifecycle Operations, Logs/Wizard Log, and Setup/Readiness.
     - User chose to keep PR #479 open and continue adding focused parity work before dev merge.
-    - Opened M9.7 Guided Deployment workflow as the next focused slice.
+    - Opened and completed M9.7 Guided Deployment workflow as the next focused slice.
   next:
-    - Define a guided deployment state-machine contract backed by existing operation adapters and fake runners in tests.
-    - Implement profile/mode/step selection, dry-run preview, confirmation/cancel gates, progress/results, and completion handoffs.
-    - Keep PR #479 held out of dev while M9.7 remains active.
+    - Await user approval before opening M9.8 Dashboard Access, URLs, And Credentials workflow.
+    - Keep PR #479 held out of dev until the user explicitly approves merge-back.
   blockers: []
   risks:
     - Guided deployment can sprawl; keep M9.7 scoped to the guided deployment workflow only.
@@ -722,7 +721,7 @@ milestones:
           - git diff --check passed.
       - id: M9.7
         name: Guided deployment workflow
-        status: in_progress
+        status: completed
         branches:
           - agent/pm-open-M9.7-guided-deployment
           - agent/deploy-M9.7-contract
@@ -742,7 +741,32 @@ milestones:
         evidence:
           - M9.7 opened after M9.6 closeout as the next focused parity gap before any dev merge.
           - PR #479 remains held out of dev unless the user explicitly changes the release strategy.
-          - agent/deploy-M9.7-contract defines the guided deployment profile/mode/step state-machine contract with fake-runner-only execution boundaries.
+          - PR #504 opened the guided deployment workflow milestone and guardrails.
+          - PR #506 defined the guided deployment state machine, profile/mode/step contracts, preview/confirmation/cancel behavior, fake-runner boundary, completion handoffs, and workflow registration.
+          - PR #505 added active workflow coverage for preserved Deploy navigation, selection, preview, confirmation, cancellation, redaction, unavailable resume/repair states, and completion handoffs.
+          - python3 -m compileall -q fortifylab tests passed.
+          - python3 -m unittest discover tests passed with 257 tests.
+          - ./bin/fortifylab tui --check, doctor --check, and status --check passed.
+          - git diff --check passed.
+          - GitHub offline-docs passed on PRs #504, #505, and #506.
+      - id: M9.8
+        name: Dashboard access, URLs, and credentials workflow
+        status: proposed
+        branches:
+          - agent/pm-open-M9.8-dashboard-urls-credentials
+          - agent/access-M9.8-contract
+          - agent/test-M9.8-dashboard-urls-credentials
+          - agent/tui-M9.8-dashboard-urls-credentials
+          - agent/docs-M9.8-dashboard-urls-credentials
+        acceptance:
+          - Dashboard access and URLs/credentials menu paths open functional TUI workflow screens.
+          - Values come from existing config/status helpers where possible.
+          - Secrets are masked by default, with explicit reveal only if a later approved implementation adds it.
+          - Missing values produce clear safe states and handoffs to Config, Diagnostics/Status, and Help.
+          - Tests use fixture config/state only and require no live lab state.
+        evidence:
+          - PM recommended M9.8 after M9.7 because users need safe post-deployment access surfaces after guided deployment.
+          - Awaiting user approval before activation.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
