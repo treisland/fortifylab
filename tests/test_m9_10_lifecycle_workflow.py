@@ -99,6 +99,52 @@ class M910LifecycleWorkflowParityTests(unittest.TestCase):
             ],
         )
 
+
+    def test_default_lifecycle_run_streams_monitor_events(self) -> None:
+        calls: list[str] = []
+
+        def runner(operation_id: str) -> OperationRunResult:
+            calls.append(operation_id)
+            return _result(operation_id)
+
+        screen = LifecycleWorkflowScreen("lifecycle.start_lab")
+        screen.runner = runner
+        self.assertEqual(screen.handle_key("enter").message, "Confirmation required before lifecycle execution.")
+        self.assertEqual(screen.handle_key("enter").message, "Lifecycle execution started.")
+        self.assertEqual(screen.stage, "lifecycle_monitor")
+        self.assertIn("Lifecycle status", screen.render())
+        self.assertIn("pending", screen.render())
+
+        events = screen.iter_lifecycle_run_events()
+        first_event = next(events)
+        self.assertEqual(first_event.status, "running")
+        self.assertEqual(screen.apply_lifecycle_run_event(first_event).message, "Starting MySQL.")
+        self.assertIn("MySQL | mysql.start | running | Starting MySQL.", screen.render())
+
+        for event in events:
+            screen.apply_lifecycle_run_event(event)
+        self.assertEqual(screen.finish_lifecycle_plan().message, "Lifecycle plan completed successfully.")
+        self.assertEqual(screen.stage, "lifecycle_complete")
+        self.assertEqual(calls, ["mysql.start", "postgresql.start", "ssc.start", "lim.start", "scancentral_sast.start", "scancentral_dast.start"])
+
+    def test_lifecycle_monitor_stops_on_failure(self) -> None:
+        def runner(operation_id: str) -> OperationRunResult:
+            return _result(operation_id, 17 if operation_id == "ssc.start" else 0)
+
+        screen = LifecycleWorkflowScreen("lifecycle.start_lab")
+        screen.runner = runner
+        screen.handle_key("enter")
+        screen.handle_key("enter")
+
+        for event in screen.iter_lifecycle_run_events():
+            result = screen.apply_lifecycle_run_event(event)
+            if screen.stage == "lifecycle_failed":
+                break
+
+        self.assertEqual(screen.stage, "lifecycle_failed")
+        self.assertIn("SSC", result.message)
+        self.assertEqual(screen.finish_lifecycle_plan().message, "Lifecycle stopped after SSC failed.")
+
     def test_reset_lab_stays_deferred_on_current_menu_route(self) -> None:
         screen = LifecycleWorkflowScreen("lifecycle.reset_lab")
 

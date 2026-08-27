@@ -685,8 +685,13 @@ workflow is rewritten.
 The first workflow implementation replaces the raw operation-id-first lifecycle
 screen with readable target and action selection, plan preview, Enter-to-run safe
 actions, typed confirmation for destroy, bounded redacted result output, and
-completion handoffs. Live status refresh, pod logs, and diagnostics inspection
-remain the next lifecycle parity slice.
+completion handoffs.
+
+The live monitor slice starts real/default lifecycle plans from the Textual
+background worker instead of blocking the key handler. Lifecycle run events mark
+rows as running, success, or failure, refresh the screen incrementally, and stop
+on the first failed operation. Pod logs and deeper diagnostics inspection remain
+the next lifecycle parity slice.
 
 Default tests remain clone-safe. They use fake runners or mock the operation
 runner and do not invoke Kubernetes, Helm, Docker, network, lifecycle scripts,

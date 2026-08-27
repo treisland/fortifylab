@@ -854,7 +854,7 @@ milestones:
             status: completed
           - id: M9.10.4
             name: Live lifecycle monitor, logs, and inspection
-            status: planned
+            status: in_progress
           - id: M9.10.5
             name: Completion/failure handoffs and docs
             status: planned
@@ -877,6 +877,7 @@ milestones:
           - Contract branch agent/lifecycle-M9.10-contract adds clone-safe lifecycle scope, action, plan step, handoff, and plan models.
           - Contract tests pin user-facing lifecycle actions, all-lab forward start, reverse stop/destroy, selected-profile scope, component/sample isolation, destructive confirmation phrases, and completion handoffs.
           - TUI branch agent/tui-M9.10-lifecycle-parity replaces the raw operation-id-first lifecycle screen with readable target/action selection, plan preview, Enter-to-run safe actions, typed destroy confirmation, and completion handoffs.
+          - Live monitor branch agent/tui-M9.10-lifecycle-live-monitor starts real/default lifecycle runs in a Textual background worker, streams lifecycle run events, updates status rows incrementally, and stops on failure.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v

@@ -263,12 +263,22 @@ def _run_textual_app() -> int:
 
         def _workflow_run_started(self) -> bool:
             screen = self.workflow_screen
+            return bool(screen is not None and (self._deployment_run_started(screen) or self._lifecycle_run_started(screen)))
+
+        def _deployment_run_started(self, screen: WorkflowScreen) -> bool:
             return bool(
-                screen is not None
-                and getattr(screen, "stage", None) == "deployment_monitor"
+                getattr(screen, "stage", None) == "deployment_monitor"
                 and hasattr(screen, "iter_deployment_run_events")
                 and hasattr(screen, "apply_deployment_run_event")
                 and hasattr(screen, "finish_deployment_plan")
+            )
+
+        def _lifecycle_run_started(self, screen: WorkflowScreen) -> bool:
+            return bool(
+                getattr(screen, "stage", None) == "lifecycle_monitor"
+                and hasattr(screen, "iter_lifecycle_run_events")
+                and hasattr(screen, "apply_lifecycle_run_event")
+                and hasattr(screen, "finish_lifecycle_plan")
             )
 
         def _consume_workflow_run(self) -> None:
@@ -276,15 +286,30 @@ def _run_textual_app() -> int:
                 screen = self.workflow_screen
                 if screen is None or not self._workflow_run_started():
                     return
-                for event in screen.iter_deployment_run_events():  # type: ignore[attr-defined]
-                    result = screen.apply_deployment_run_event(event)  # type: ignore[attr-defined]
-                    self.call_from_thread(self._update_workflow_message, result.message)
-                    if getattr(screen, "stage", None) == "deployment_failed":
-                        return
-                result = screen.finish_deployment_plan()  # type: ignore[attr-defined]
-                self.call_from_thread(self._update_workflow_message, result.message)
+                if self._lifecycle_run_started(screen):
+                    self._consume_lifecycle_run(screen)
+                    return
+                self._consume_deployment_run(screen)
             finally:
                 self.call_from_thread(self._mark_workflow_worker_complete)
+
+        def _consume_deployment_run(self, screen: WorkflowScreen) -> None:
+            for event in screen.iter_deployment_run_events():  # type: ignore[attr-defined]
+                result = screen.apply_deployment_run_event(event)  # type: ignore[attr-defined]
+                self.call_from_thread(self._update_workflow_message, result.message)
+                if getattr(screen, "stage", None) == "deployment_failed":
+                    return
+            result = screen.finish_deployment_plan()  # type: ignore[attr-defined]
+            self.call_from_thread(self._update_workflow_message, result.message)
+
+        def _consume_lifecycle_run(self, screen: WorkflowScreen) -> None:
+            for event in screen.iter_lifecycle_run_events():  # type: ignore[attr-defined]
+                result = screen.apply_lifecycle_run_event(event)  # type: ignore[attr-defined]
+                self.call_from_thread(self._update_workflow_message, result.message)
+                if getattr(screen, "stage", None) == "lifecycle_failed":
+                    return
+            result = screen.finish_lifecycle_plan()  # type: ignore[attr-defined]
+            self.call_from_thread(self._update_workflow_message, result.message)
 
         def _mark_workflow_worker_complete(self) -> None:
             self._workflow_worker_active = False
