@@ -18,7 +18,7 @@ from fortifylab.operations import (
 from fortifylab.tui.workflows import WorkflowKeyResult
 
 
-LifecycleStatus = Literal["preview", "requires_confirmation", "success", "failure", "blocked", "unsupported"]
+LifecycleStatus = Literal["preview", "running", "requires_confirmation", "success", "failure", "blocked", "unsupported"]
 LifecycleDataImpact = Literal["none", "retained", "review", "deleted"]
 LifecycleRunner = Callable[[str], OperationRunResult]
 
@@ -127,6 +127,28 @@ class LifecyclePlan:
     @property
     def operation_ids(self) -> tuple[str, ...]:
         return tuple(step.operation_id for step in self.steps)
+
+
+@dataclass(frozen=True)
+class LifecycleStatusRow:
+    """One visible row in the lifecycle monitor table."""
+
+    component_id: str
+    label: str
+    operation_id: str
+    status: LifecycleStatus
+    message: str
+
+
+@dataclass(frozen=True)
+class LifecycleRunEvent:
+    """Runner event consumed by the Textual lifecycle monitor worker."""
+
+    component_id: str
+    operation_id: str
+    status: LifecycleStatus
+    message: str
+    result: OperationRunResult | None = None
 
 
 _COMPONENT_TARGETS: Mapping[str, str] = {
@@ -448,6 +470,7 @@ class LifecycleWorkflowScreen:
         runner: LifecycleRunner | None = None,
     ) -> None:
         self.contract = resolve_lifecycle_action(action_target)
+        self._async_run = runner is None
         self.runner = runner or _confirmed_operation_runner
         self.action_options = _screen_action_options(action_target)
         self.selected_action_index = 0
@@ -456,6 +479,10 @@ class LifecycleWorkflowScreen:
         self.last_preview: DryRunPreviewScreenModel | None = None
         self.last_plan: LifecyclePlan | None = None
         self.last_result: ExecutionResultDisplayModel | None = None
+        self.status_rows: tuple[LifecycleStatusRow, ...] = ()
+        self.stage = "action_selection"
+        self._run_failed = False
+        self._run_message = ""
         self.id = f"lifecycle:{action_target}"
         self.title = title or self.contract.label
         self.summary = f"{self.contract.label} lifecycle controls."
@@ -513,6 +540,13 @@ class LifecycleWorkflowScreen:
                 lines.append("Continue: press enter to run this lifecycle plan.")
             lines.append("Inspect: press i to review adapters, commands, and handoffs.")
             lines.append("Cancel: press n before execution starts.")
+
+        if self.status_rows:
+            lines.append("")
+            lines.append("Lifecycle status")
+            lines.append("Component | Operation | Status | Last update")
+            for row in self.status_rows:
+                lines.append(f"{row.label} | {row.operation_id} | {row.status} | {row.message}")
 
         if self.last_preview is not None:
             lines.append("")
@@ -614,17 +648,67 @@ class LifecycleWorkflowScreen:
             self._prepare_plan()
         assert self.last_plan is not None
         self.awaiting_confirmation = False
+        if self._async_run:
+            self.status_rows = _initial_lifecycle_status_rows(self.last_plan)
+            self.stage = "lifecycle_monitor"
+            self._run_failed = False
+            self._run_message = "Lifecycle execution started."
+            self.last_result = None
+            return WorkflowKeyResult(self._run_message)
         results = [_execute_with_runner(self.runner, step.operation_id) for step in self.last_plan.steps]
         failure = next((result for result in results if result.status != "success"), None)
         if failure is not None:
             self.last_result = failure
+            self.stage = "lifecycle_failed"
             return WorkflowKeyResult(failure.message)
         self.last_result = results[-1]
         if len(results) == 1:
+            self.stage = "lifecycle_complete"
             return WorkflowKeyResult(self.last_result.message)
         self.last_result = ExecutionResultDisplayModel(
             status="success",
             operation_id=self.last_plan.operation_ids[-1],
+            exit_code=0,
+            stdout_summary="",
+            stderr_summary="",
+            redacted_output=(),
+            message="Lifecycle plan completed successfully.",
+        )
+        self.stage = "lifecycle_complete"
+        return WorkflowKeyResult(self.last_result.message)
+
+    def iter_lifecycle_run_events(self):  # type: ignore[no-untyped-def]
+        if self.last_plan is None:
+            return iter(())
+        return iter(_run_lifecycle_plan_events(self.last_plan, self.runner))
+
+    def apply_lifecycle_run_event(self, event: LifecycleRunEvent) -> WorkflowKeyResult:
+        if self.last_plan is None:
+            return WorkflowKeyResult("Prepare a lifecycle plan before running.")
+        rows = {row.operation_id: row for row in self.status_rows or _initial_lifecycle_status_rows(self.last_plan)}
+        label = next((step.label for step in self.last_plan.steps if step.operation_id == event.operation_id), event.component_id)
+        rows[event.operation_id] = LifecycleStatusRow(event.component_id, label, event.operation_id, event.status, event.message)
+        self.status_rows = tuple(rows[step.operation_id] for step in self.last_plan.steps)
+        self._run_message = event.message
+        if event.result is not None:
+            self.last_result = build_result_display(event.result)
+        if event.status == "failure":
+            self._run_failed = True
+            self.stage = "lifecycle_failed"
+            self._run_message = f"Lifecycle stopped after {label} failed."
+        return WorkflowKeyResult(self._run_message)
+
+    def finish_lifecycle_plan(self) -> WorkflowKeyResult:
+        if self.last_plan is None:
+            return WorkflowKeyResult("Prepare a lifecycle plan before running.")
+        if self._run_failed:
+            message = self._run_message or "Lifecycle execution failed."
+            self.stage = "lifecycle_failed"
+            return WorkflowKeyResult(message)
+        self.stage = "lifecycle_complete"
+        self.last_result = ExecutionResultDisplayModel(
+            status="success",
+            operation_id=self.last_plan.operation_ids[-1] if self.last_plan.operation_ids else None,
             exit_code=0,
             stdout_summary="",
             stderr_summary="",
@@ -640,6 +724,8 @@ class LifecycleWorkflowScreen:
         self.last_result = None
         self.last_preview = None
         self.last_plan = None
+        self.status_rows = ()
+        self.stage = "action_selection"
 
     def _move_selection(self, delta: int) -> None:
         if not self.action_options:
@@ -677,6 +763,30 @@ def _screen_action_options(action_target: str) -> tuple[LifecycleActionOption, .
     if action_target.startswith(("app_lifecycle.", "sample_apps.")):
         return tuple(_find_lifecycle_action(action_id) for action_id in ("start", "stop", "destroy"))
     return ()
+
+
+def _initial_lifecycle_status_rows(plan: LifecyclePlan) -> tuple[LifecycleStatusRow, ...]:
+    return tuple(
+        LifecycleStatusRow(
+            step.component_id,
+            step.label,
+            step.operation_id,
+            "preview",
+            "pending",
+        )
+        for step in plan.steps
+    )
+
+
+def _run_lifecycle_plan_events(plan: LifecyclePlan, runner: LifecycleRunner):  # type: ignore[no-untyped-def]
+    for step in plan.steps:
+        yield LifecycleRunEvent(step.component_id, step.operation_id, "running", f"Starting {step.label}.")
+        result = runner(step.operation_id)
+        status: LifecycleStatus = "success" if result.ok else "failure"
+        message = f"{step.label} {'completed' if result.ok else 'failed'}."
+        yield LifecycleRunEvent(step.component_id, step.operation_id, status, message, result)
+        if not result.ok:
+            return
 
 
 def _preview_model(action_target: str, preview: OperationPreview) -> DryRunPreviewScreenModel:

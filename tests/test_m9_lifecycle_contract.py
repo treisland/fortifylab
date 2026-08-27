@@ -117,7 +117,12 @@ class M9LifecycleContractTests(unittest.TestCase):
             self.assertEqual(screen.handle_key("c").message, "Confirmation required before lifecycle execution.")
             run_operation.assert_not_called()
 
-            self.assertEqual(screen.handle_key("y").message, "mysql.start completed successfully.")
+            self.assertEqual(screen.handle_key("y").message, "Lifecycle execution started.")
+            run_operation.assert_not_called()
+
+            for event in screen.iter_lifecycle_run_events():
+                screen.apply_lifecycle_run_event(event)
+            self.assertEqual(screen.finish_lifecycle_plan().message, "Lifecycle plan completed successfully.")
             run_operation.assert_called_once_with("mysql.start", confirmed=True)
 
     def test_lifecycle_render_includes_result_status_and_redacted_output(self) -> None:
