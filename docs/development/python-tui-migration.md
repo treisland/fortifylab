@@ -492,14 +492,24 @@ recommended actions into existing Config, Doctor, Status, Help, Lifecycle, and
 Logs workflows. Reset tier guidance remains read-only and routes destructive work
 through lifecycle controls.
 
-### M9.7 Active Slice
+### M9.7 Completed Slice
 
-M9.7 owns Guided Deployment workflow parity. The slice should make the Deploy
-path functional as an explicit state machine: choose profile, choose mode, review
-guided steps, preview mutating operations, require confirmation before execution,
-show progress/results, and hand completion to Diagnostics/Status, Logs, Help, and
-Lifecycle. Tests must use injected fake runners only and must not require live
-Kubernetes, Helm, Docker, network, credentials, or lab state.
+M9.7 delivered Guided Deployment workflow parity. The Deploy path now opens an
+explicit TUI state machine for profile selection, deployment mode selection, step
+selection, dry-run preview, confirmation/cancel gates, progress/result rendering,
+clone-safe resume/repair representation, and completion handoffs to
+Diagnostics/Status, Logs, Help, and Lifecycle. Tests use injected fake runners
+only and require no live Kubernetes, Helm, Docker, network, credentials, or lab
+state.
+
+### M9.8 Proposed Slice
+
+The PM recommends Dashboard Access, URLs, and Credentials as the next focused
+submenu parity milestone. This should remain mostly read-only: surface dashboard
+URLs and access details from existing config/status helpers, mask secrets by
+default, show safe missing-value states, and hand off to Config,
+Diagnostics/Status, and Help when values are incomplete. M9.8 is not active until
+user approval.
 
 ## Decision Log
 
@@ -522,6 +532,43 @@ Kubernetes, Helm, Docker, network, credentials, or lab state.
 | Branch upstream | Push `migration/python-tui` and track `origin/migration/python-tui` | M0 - accepted |
 
 ## Heartbeat Log
+
+### 2026-08-27
+
+Milestone: M9.7
+
+Workstream: Guided Deployment Workflow Closeout
+
+Branch: `agent/pm-M9.7-closeout-open-next`
+
+Status: closeout
+
+Changed:
+
+- Merged PR #504 for M9.7 kickoff and guardrails.
+- Merged PR #506 for the guided deployment state machine, operation-adapter/fake-runner boundary, and workflow registration.
+- Merged PR #505 for active guided deployment workflow coverage.
+- Recorded PM recommendation for proposed M9.8 Dashboard Access, URLs, and Credentials workflow.
+- Kept PR #479 open and held out of `dev` for continued focused parity work.
+
+Verification:
+
+- `python3 -m unittest discover tests` passed with 257 tests.
+- `python3 -m compileall -q fortifylab tests` passed.
+- `./bin/fortifylab tui --check`, `./bin/fortifylab doctor --check`, and `./bin/fortifylab status --check` passed.
+- `git diff --check` passed.
+- GitHub `offline-docs` passed on PRs #504, #505, and #506.
+
+Next:
+
+- Await user approval before opening M9.8.
+- Continue adding to PR #479 through `migration/python-tui`; do not merge to `dev` yet.
+
+Blockers: none.
+
+Risks:
+
+- M9.8 includes credential-adjacent surfaces, so default behavior should mask secrets and stay fixture-backed in tests.
 
 ### 2026-08-27
 
