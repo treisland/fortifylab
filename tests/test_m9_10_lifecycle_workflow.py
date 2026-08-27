@@ -26,7 +26,8 @@ class M910LifecycleWorkflowParityTests(unittest.TestCase):
         self.assertIn("1. Start / upgrade", rendered)
         self.assertIn("2. Stop", rendered)
         self.assertIn("3. Destroy (deletes data)", rendered)
-        self.assertIn("Catalog operation: ssc.start, ssc.stop, ssc.destroy", rendered)
+        self.assertNotIn("Catalog operation:", rendered)
+        self.assertNotIn("ssc.start", rendered)
 
     def test_arrows_and_numbers_select_user_facing_actions(self) -> None:
         screen = LifecycleWorkflowScreen("app_lifecycle.mysql")
@@ -80,11 +81,13 @@ class M910LifecycleWorkflowParityTests(unittest.TestCase):
             return _result(operation_id)
 
         screen = LifecycleWorkflowScreen("lifecycle.start_lab", runner=runner)
-        self.assertIn("Catalog operation: lab.start.all", screen.render())
+        self.assertNotIn("Catalog operation:", screen.render())
         self.assertEqual(screen.handle_key("enter").message, "Confirmation required before lifecycle execution.")
         rendered = screen.render()
-        self.assertIn("1. MySQL -> mysql.start", rendered)
-        self.assertIn("6. ScanCentral DAST -> scancentral_dast.start", rendered)
+        self.assertIn("1. MySQL", rendered)
+        self.assertIn("6. ScanCentral DAST", rendered)
+        self.assertNotIn("mysql.start", rendered)
+        self.assertNotIn("scancentral_dast.start", rendered)
 
         self.assertEqual(screen.handle_key("enter").message, "Lifecycle plan completed successfully.")
         self.assertEqual(
@@ -119,7 +122,7 @@ class M910LifecycleWorkflowParityTests(unittest.TestCase):
         first_event = next(events)
         self.assertEqual(first_event.status, "running")
         self.assertEqual(screen.apply_lifecycle_run_event(first_event).message, "Starting MySQL.")
-        self.assertIn("MySQL | mysql.start | running | Starting MySQL.", screen.render())
+        self.assertIn("[cyan]MySQL | running | Starting MySQL.[/cyan]", screen.render())
 
         for event in events:
             screen.apply_lifecycle_run_event(event)

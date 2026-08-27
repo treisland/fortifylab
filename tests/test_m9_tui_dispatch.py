@@ -69,7 +69,9 @@ class M9TuiDispatchTests(unittest.TestCase):
         self.assertIsNone(result.menu)
         self.assertIsNotNone(result.screen)
         assert result.screen is not None
-        self.assertIn("lab.start.all", result.screen.render())
+        rendered = result.screen.render()
+        self.assertIn("Start lab lifecycle controls", rendered)
+        self.assertNotIn("lab.start.all", rendered)
 
     def test_registered_workflows_can_be_injected_for_future_screens(self) -> None:
         selected = MenuItem(
