@@ -86,7 +86,10 @@ class M9LifecycleContractTests(unittest.TestCase):
         self.assertIsNotNone(result.screen)
         assert result.screen is not None
         self.assertEqual(result.screen.title, "MySQL")
-        self.assertIn("mysql.start", result.screen.render())
+        rendered = result.screen.render()
+        self.assertIn("MySQL lifecycle controls", rendered)
+        self.assertIn("Start / upgrade", rendered)
+        self.assertNotIn("mysql.start", rendered)
 
     def test_screen_preview_and_confirmation_do_not_call_runner_until_yes(self) -> None:
         calls: list[str] = []

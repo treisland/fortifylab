@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from enum import Enum
 from typing import Literal
 
 from fortifylab.operations import (
@@ -21,6 +22,28 @@ from fortifylab.tui.workflows import WorkflowKeyResult
 LifecycleStatus = Literal["preview", "running", "requires_confirmation", "success", "failure", "blocked", "unsupported"]
 LifecycleDataImpact = Literal["none", "retained", "review", "deleted"]
 LifecycleRunner = Callable[[str], OperationRunResult]
+
+
+class LifecycleStatusColor(str, Enum):
+    """Rich/Textual color names for lifecycle status rows."""
+
+    CYAN = "cyan"
+    DIM = "dim"
+    GREEN = "green"
+    MAGENTA = "magenta"
+    RED = "red"
+    YELLOW = "yellow"
+
+
+STATUS_COLOR_BY_LIFECYCLE_STATUS: Mapping[LifecycleStatus, LifecycleStatusColor] = {
+    "preview": LifecycleStatusColor.DIM,
+    "running": LifecycleStatusColor.CYAN,
+    "requires_confirmation": LifecycleStatusColor.YELLOW,
+    "success": LifecycleStatusColor.GREEN,
+    "failure": LifecycleStatusColor.RED,
+    "blocked": LifecycleStatusColor.YELLOW,
+    "unsupported": LifecycleStatusColor.MAGENTA,
+}
 
 
 @dataclass(frozen=True)
@@ -138,6 +161,10 @@ class LifecycleStatusRow:
     operation_id: str
     status: LifecycleStatus
     message: str
+
+    @property
+    def color(self) -> LifecycleStatusColor:
+        return STATUS_COLOR_BY_LIFECYCLE_STATUS.get(self.status, LifecycleStatusColor.DIM)
 
 
 @dataclass(frozen=True)
@@ -504,8 +531,6 @@ class LifecycleWorkflowScreen:
         scope = build_lifecycle_scope(self.contract.action_target)
         lines.append(f"Target: {scope.label}")
         lines.append(scope.description)
-        if self.contract.operation_ids:
-            lines.append("Catalog operation: " + ", ".join(self.contract.operation_ids))
         lines.append("")
         lines.append("Actions:")
         for index, action in enumerate(self.action_options, start=1):
@@ -524,7 +549,6 @@ class LifecycleWorkflowScreen:
             if preview_plan is not None:
                 lines.append(f"Selected plan: {preview_plan.label}")
                 lines.append(f"Order: {preview_plan.order_note}")
-                lines.append("Adapter preview: " + ", ".join(preview_plan.operation_ids))
 
         if self.last_plan is not None and self.stage == "lifecycle_inspection":
             lines.append("")
@@ -552,7 +576,7 @@ class LifecycleWorkflowScreen:
             lines.append(f"Data impact: {self.last_plan.data_impact}")
             lines.append("Steps that will run:")
             for step in self.last_plan.steps:
-                lines.append(f"{step.order}. {step.label} -> {step.operation_id}")
+                lines.append(f"{step.order}. {step.label}")
             if self.last_plan.destructive:
                 lines.append(f"Confirm by typing: {self.last_plan.confirmation_phrase}")
             else:
@@ -563,9 +587,9 @@ class LifecycleWorkflowScreen:
         if self.status_rows:
             lines.append("")
             lines.append("Lifecycle status")
-            lines.append("Component | Operation | Status | Last update")
+            lines.append("Component | Status | Last update")
             for row in self.status_rows:
-                lines.append(f"{row.label} | {row.operation_id} | {row.status} | {row.message}")
+                lines.append(_format_lifecycle_status_row(row))
 
         if self.last_preview is not None:
             lines.append("")
@@ -780,6 +804,11 @@ class LifecycleWorkflowScreen:
         if self.selected_operation_id is not None:
             return self.selected_operation_id
         return action.label
+
+
+def _format_lifecycle_status_row(row: LifecycleStatusRow) -> str:
+    color = row.color.value
+    return f"[{color}]{row.label} | {row.status} | {row.message}[/{color}]"
 
 
 def _handoff_for_key(key: str) -> LifecycleHandoff | None:

@@ -189,15 +189,15 @@ class M9LifecycleWorkflowTests(unittest.TestCase):
 
     def test_lifecycle_dispatch_from_preserved_menus_opens_workflow_screens(self) -> None:
         cases = (
-            ("lifecycle", "1", "lifecycle:lifecycle.start_lab", "lab.start.all"),
-            ("lifecycle", "2", "lifecycle:lifecycle.stop_lab", "lab.stop.all"),
-            ("app_lifecycle", "5", "lifecycle:app_lifecycle.scancentral_sast", "scancentral_sast.start"),
-            ("app_lifecycle", "9", "lifecycle:app_lifecycle.dvwa", "dvwa.start"),
-            ("sample_apps", "1", "lifecycle:sample_apps.juice_shop", "juice_shop.start"),
-            ("sample_apps", "3", "lifecycle:sample_apps.dvwa", "dvwa.start"),
+            ("lifecycle", "1", "lifecycle:lifecycle.start_lab", "Start lab lifecycle controls"),
+            ("lifecycle", "2", "lifecycle:lifecycle.stop_lab", "Stop lab lifecycle controls"),
+            ("app_lifecycle", "5", "lifecycle:app_lifecycle.scancentral_sast", "ScanCentral SAST lifecycle controls"),
+            ("app_lifecycle", "9", "lifecycle:app_lifecycle.dvwa", "DVWA lifecycle controls"),
+            ("sample_apps", "1", "lifecycle:sample_apps.juice_shop", "Juice Shop lifecycle controls"),
+            ("sample_apps", "3", "lifecycle:sample_apps.dvwa", "DVWA lifecycle controls"),
         )
 
-        for menu_id, key, screen_id, rendered_operation in cases:
+        for menu_id, key, screen_id, rendered_label in cases:
             with self.subTest(menu_id=menu_id, key=key):
                 selected = find_item(menu_id, key)
                 assert selected is not None
@@ -208,7 +208,10 @@ class M9LifecycleWorkflowTests(unittest.TestCase):
                 self.assertIsNotNone(result.screen)
                 assert result.screen is not None
                 self.assertEqual(result.screen.id, screen_id)
-                self.assertIn(rendered_operation, result.screen.render())
+                rendered = result.screen.render()
+                self.assertIn(rendered_label, rendered)
+                self.assertNotIn(".start", rendered)
+                self.assertNotIn(".stop", rendered)
 
 
 if __name__ == "__main__":
