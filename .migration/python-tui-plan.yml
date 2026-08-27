@@ -30,21 +30,25 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-27
-  milestone: M9.10
-  workstream: docs-M9.10-lifecycle-closeout
-  branch: agent/docs-M9.10-lifecycle-closeout
+  milestone: M9.11
+  workstream: docs-M9.11-lifecycle-ux-refinement
+  branch: agent/docs-M9.11-lifecycle-ux-refinement
   status: complete
   changed:
-    - M9.10 Lifecycle Controls Parity completed on migration/python-tui.
-    - Lifecycle controls now use readable target/action screens, plan previews, selected-profile/all-lab contract models, typed destructive confirmation, live monitor status rows, bounded redacted logs, inspection, and completion/failure handoffs.
+    - M9.11 Lifecycle UX Refinement completed on migration/python-tui.
+    - Lifecycle status rows now carry bounded Rich/Textual color markup and close styles per row to avoid option color bleed.
+    - Normal lifecycle screens and plan previews now show deployment/component names instead of raw adapter IDs; inspection remains the under-the-hood view for adapter IDs and command previews.
+    - Lifecycle execution now transitions to a dedicated status monitor screen with completion/failure summaries and main-menu handoff.
+    - All-lab start/stop lifecycle screens now allow runtime profile scope selection for Core, SAST Full, DAST Full, and SSC Only without mutating saved deployment config.
     - PR #479 remains open and held out of dev while focused parity work continues.
   next:
-    - Manual TUI smoke lifecycle options from migration/python-tui.
+    - Manual TUI smoke lifecycle start/stop against migration/python-tui, including profile scope selection and completion handoff.
     - PM should recommend the next focused parity slice or prepare PR #479 for final merge readiness after user confirmation.
   blockers: []
   risks:
     - Live lifecycle actions still depend on retained Bash operation adapters and should be manually validated against a lab before dev merge.
     - Reset/restart/repair remain intentionally deferred unless a later slice implements safe ordered flows.
+    - Profile scope selection is runtime-only; future config work must avoid implying it changes saved deployment profile state.
 
   needs_decision:
     - Select the next focused parity slice or approve preparing PR #479 for merge to dev.
