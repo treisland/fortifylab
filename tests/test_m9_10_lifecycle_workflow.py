@@ -145,6 +145,56 @@ class M910LifecycleWorkflowParityTests(unittest.TestCase):
         self.assertIn("SSC", result.message)
         self.assertEqual(screen.finish_lifecycle_plan().message, "Lifecycle stopped after SSC failed.")
 
+
+    def test_lifecycle_logs_and_inspection_are_available_during_monitor(self) -> None:
+        def runner(operation_id: str) -> OperationRunResult:
+            return OperationRunResult(
+                operation_id,
+                0,
+                (CommandExecutionResult(("bash", "apps/mysql/start.sh", "--token=abc123"), 0, "password=hunter2\n", "", 0.01),),
+            )
+
+        screen = LifecycleWorkflowScreen("app_lifecycle.mysql")
+        screen.runner = runner
+        screen.handle_key("enter")
+        screen.handle_key("enter")
+
+        for event in screen.iter_lifecycle_run_events():
+            screen.apply_lifecycle_run_event(event)
+
+        self.assertEqual(screen.handle_key("l").message, "Opened lifecycle logs.")
+        rendered_logs = screen.render()
+        self.assertIn("Lifecycle logs", rendered_logs)
+        self.assertIn("password=<redacted>", rendered_logs)
+        self.assertNotIn("hunter2", rendered_logs)
+        self.assertNotIn("abc123", rendered_logs)
+
+        self.assertEqual(screen.handle_key("i").message, "Opened lifecycle inspection.")
+        rendered_inspection = screen.render()
+        self.assertIn("Lifecycle inspection", rendered_inspection)
+        self.assertIn("mysql.start", rendered_inspection)
+        self.assertIn("bash apps/mysql/start.sh", rendered_inspection)
+        self.assertIn("Pod logs: use Diagnostics or Logs handoff", rendered_inspection)
+
+    def test_lifecycle_completion_handoff_keys_open_existing_workflows(self) -> None:
+        screen = LifecycleWorkflowScreen("app_lifecycle.mysql")
+        screen.runner = lambda operation_id: _result(operation_id)
+        screen.handle_key("enter")
+        screen.handle_key("enter")
+        for event in screen.iter_lifecycle_run_events():
+            screen.apply_lifecycle_run_event(event)
+        screen.finish_lifecycle_plan()
+
+        logs = screen.handle_key("1")
+        diagnostics = screen.handle_key("2")
+        status = screen.handle_key("3")
+        main = screen.handle_key("m")
+
+        self.assertEqual(logs.open_target, "logs")
+        self.assertEqual(diagnostics.open_target, "diagnostics")
+        self.assertEqual(status.open_target, "status")
+        self.assertEqual(main.open_target, "main")
+
     def test_reset_lab_stays_deferred_on_current_menu_route(self) -> None:
         screen = LifecycleWorkflowScreen("lifecycle.reset_lab")
 

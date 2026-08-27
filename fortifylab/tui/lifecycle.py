@@ -480,6 +480,7 @@ class LifecycleWorkflowScreen:
         self.last_plan: LifecyclePlan | None = None
         self.last_result: ExecutionResultDisplayModel | None = None
         self.status_rows: tuple[LifecycleStatusRow, ...] = ()
+        self.log_lines: tuple[str, ...] = ()
         self.stage = "action_selection"
         self._run_failed = False
         self._run_message = ""
@@ -524,6 +525,24 @@ class LifecycleWorkflowScreen:
                 lines.append(f"Selected plan: {preview_plan.label}")
                 lines.append(f"Order: {preview_plan.order_note}")
                 lines.append("Adapter preview: " + ", ".join(preview_plan.operation_ids))
+
+        if self.last_plan is not None and self.stage == "lifecycle_inspection":
+            lines.append("")
+            lines.append("Lifecycle inspection")
+            lines.append(f"Scope: {self.last_plan.scope.label}")
+            lines.append(f"Order: {self.last_plan.order_note}")
+            lines.append(f"Data impact: {self.last_plan.data_impact}")
+            lines.append("Adapters:")
+            for step in self.last_plan.steps:
+                preview = dry_run(step.operation_id)
+                commands = ", ".join(preview.commands)
+                lines.append(f"{step.order}. {step.label}: {step.operation_id} -> {commands}")
+            lines.append("Pod logs: use Diagnostics or Logs handoff for live environment inspection.")
+
+        if self.log_lines and self.stage == "lifecycle_logs":
+            lines.append("")
+            lines.append("Lifecycle logs")
+            lines.extend(self.log_lines[-12:])
 
         if self.last_plan is not None:
             lines.append("")
@@ -580,6 +599,17 @@ class LifecycleWorkflowScreen:
             return WorkflowKeyResult("Returned.", exit_screen=True)
         if not self.contract.supported:
             return WorkflowKeyResult(self.contract.unsupported_reason or "Lifecycle action is unsupported.")
+        if key == "l":
+            self.stage = "lifecycle_logs"
+            return WorkflowKeyResult("Opened lifecycle logs.")
+        if key == "i":
+            self._prepare_plan()
+            self.stage = "lifecycle_inspection"
+            return WorkflowKeyResult("Opened lifecycle inspection.")
+        if self.stage in {"lifecycle_monitor", "lifecycle_complete", "lifecycle_failed", "lifecycle_logs", "lifecycle_inspection"}:
+            handoff = _handoff_for_key(key)
+            if handoff is not None:
+                return WorkflowKeyResult(f"Open workflow target: {handoff.workflow_target}.", open_target=handoff.workflow_target)
         if key in {"up", "down"}:
             self._move_selection(-1 if key == "up" else 1)
             return WorkflowKeyResult(f"Selected {self._selected_operation_label()}.")
@@ -627,9 +657,6 @@ class LifecycleWorkflowScreen:
                 message="Lifecycle execution cancelled.",
             )
             return WorkflowKeyResult("Lifecycle execution cancelled.")
-        if key == "i":
-            self._prepare_plan()
-            return WorkflowKeyResult("Lifecycle inspection is available in the plan preview.")
         return WorkflowKeyResult(f"No lifecycle action is bound to {key!r}.")
 
     def _prepare_plan(self) -> None:
@@ -650,6 +677,7 @@ class LifecycleWorkflowScreen:
         self.awaiting_confirmation = False
         if self._async_run:
             self.status_rows = _initial_lifecycle_status_rows(self.last_plan)
+            self.log_lines = ()
             self.stage = "lifecycle_monitor"
             self._run_failed = False
             self._run_message = "Lifecycle execution started."
@@ -690,8 +718,10 @@ class LifecycleWorkflowScreen:
         rows[event.operation_id] = LifecycleStatusRow(event.component_id, label, event.operation_id, event.status, event.message)
         self.status_rows = tuple(rows[step.operation_id] for step in self.last_plan.steps)
         self._run_message = event.message
+        self.log_lines = (*self.log_lines, event.message)[-24:]
         if event.result is not None:
             self.last_result = build_result_display(event.result)
+            self.log_lines = (*self.log_lines, *self.last_result.redacted_output)[-24:]
         if event.status == "failure":
             self._run_failed = True
             self.stage = "lifecycle_failed"
@@ -725,6 +755,7 @@ class LifecycleWorkflowScreen:
         self.last_preview = None
         self.last_plan = None
         self.status_rows = ()
+        self.log_lines = ()
         self.stage = "action_selection"
 
     def _move_selection(self, delta: int) -> None:
@@ -749,6 +780,13 @@ class LifecycleWorkflowScreen:
         if self.selected_operation_id is not None:
             return self.selected_operation_id
         return action.label
+
+
+def _handoff_for_key(key: str) -> LifecycleHandoff | None:
+    for handoff in _LIFECYCLE_HANDOFFS:
+        if handoff.key == key:
+            return handoff
+    return None
 
 
 def _screen_action_options(action_target: str) -> tuple[LifecycleActionOption, ...]:
