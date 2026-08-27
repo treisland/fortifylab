@@ -502,14 +502,14 @@ Diagnostics/Status, Logs, Help, and Lifecycle. Tests use injected fake runners
 only and require no live Kubernetes, Helm, Docker, network, credentials, or lab
 state.
 
-### M9.8 Proposed Slice
+### M9.8 Active Slice
 
-The PM recommends Dashboard Access, URLs, and Credentials as the next focused
-submenu parity milestone. This should remain mostly read-only: surface dashboard
-URLs and access details from existing config/status helpers, mask secrets by
-default, show safe missing-value states, and hand off to Config,
-Diagnostics/Status, and Help when values are incomplete. M9.8 is not active until
-user approval.
+M9.8 owns Dashboard Access, URLs, and Credentials workflow parity. The slice
+should remain read-only by default: surface dashboard URLs and access details
+from existing config/status helpers, mask secrets by default, show safe
+missing-value states, and hand off to Config, Diagnostics/Status, and Help when
+values are incomplete. Tests must use fixture config/state only and must not
+require live lab state, Kubernetes, Helm, Docker, network, or credentials.
 
 ## Decision Log
 
@@ -532,6 +532,34 @@ user approval.
 | Branch upstream | Push `migration/python-tui` and track `origin/migration/python-tui` | M0 - accepted |
 
 ## Heartbeat Log
+
+### 2026-08-27
+
+Milestone: M9.8
+
+Workstream: Dashboard Access, URLs, and Credentials Kickoff
+
+Branch: `agent/pm-open-M9.8-dashboard-urls-credentials`
+
+Status: active
+
+Changed:
+
+- Activated M9.8 after user approval to proceed.
+- Scoped the slice to read-only dashboard/access surfaces, masked credential display, missing-value states, and workflow handoffs.
+- Kept PR #479 open and held out of `dev` for continued focused parity work.
+
+Next:
+
+- Contract agent defines dashboard/access snapshot models and redaction boundaries.
+- Test agent covers fixture config, masked secrets, missing values, and handoffs.
+- TUI agent wires Dashboard access and URLs/credentials menu paths after the contract stabilizes.
+
+Blockers: none.
+
+Risks:
+
+- Credential-adjacent screens must mask secrets by default and remain fixture-backed in tests.
 
 ### 2026-08-27
 

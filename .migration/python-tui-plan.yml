@@ -30,26 +30,25 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-27
-  milestone: M9.7
-  workstream: pm-M9.7-closeout-open-next
-  branch: agent/pm-M9.7-closeout-open-next
-  status: closeout
+  milestone: M9.8
+  workstream: pm-open-M9.8-dashboard-urls-credentials
+  branch: agent/pm-open-M9.8-dashboard-urls-credentials
+  status: active
   changed:
-    - Closed M9.6 Setup and Readiness workflow on migration/python-tui.
-    - Functional workflows now cover Help/Runbooks, Configuration, Diagnostics/Status, Lifecycle Operations, Logs/Wizard Log, and Setup/Readiness.
-    - User chose to keep PR #479 open and continue adding focused parity work before dev merge.
-    - Opened and completed M9.7 Guided Deployment workflow as the next focused slice.
+    - Closed M9.7 Guided Deployment workflow on migration/python-tui.
+    - User approved proceeding with M9.8 Dashboard Access, URLs, and Credentials workflow.
+    - PR #479 remains open and held out of dev while focused parity work continues.
   next:
-    - Await user approval before opening M9.8 Dashboard Access, URLs, And Credentials workflow.
-    - Keep PR #479 held out of dev until the user explicitly approves merge-back.
+    - Define a read-only dashboard/access snapshot contract backed by existing config/status helpers.
+    - Implement TUI screens for Dashboard access and URLs/credentials paths with masked secrets by default.
+    - Add fixture-only tests for missing values, redaction, and Config/Diagnostics/Help handoffs.
   blockers: []
   risks:
-    - Guided deployment can sprawl; keep M9.7 scoped to the guided deployment workflow only.
-    - Default tests must not require Kubernetes, Helm, Docker, network, credentials, or live lab state.
-    - Mutating operations must require preview plus explicit confirmation and should reuse the operation catalog/adapters.
+    - Credential-adjacent screens must mask secrets by default and avoid printing sensitive local paths.
+    - Default tests must not require live lab state, Kubernetes, Helm, Docker, network, or credentials.
 
   needs_decision:
-    - None; M9.7 sequencing is approved by the user's proceed instruction.
+    - None; M9.8 sequencing is approved by the user's proceed instruction.
 
 
 open_decisions:
@@ -751,7 +750,7 @@ milestones:
           - GitHub offline-docs passed on PRs #504, #505, and #506.
       - id: M9.8
         name: Dashboard access, URLs, and credentials workflow
-        status: proposed
+        status: in_progress
         branches:
           - agent/pm-open-M9.8-dashboard-urls-credentials
           - agent/access-M9.8-contract
@@ -766,7 +765,8 @@ milestones:
           - Tests use fixture config/state only and require no live lab state.
         evidence:
           - PM recommended M9.8 after M9.7 because users need safe post-deployment access surfaces after guided deployment.
-          - Awaiting user approval before activation.
+          - User approved activation with proceed on 2026-08-27.
+          - M9.8 should stay read-only by default, mask secrets, and use fixture-backed tests only.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
