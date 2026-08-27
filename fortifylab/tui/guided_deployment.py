@@ -412,6 +412,7 @@ DEPLOYMENT_PROFILES: tuple[GuidedDeploymentProfile, ...] = (
     GuidedDeploymentProfile("core", "Core Fortify Lab", "SSC, LIM, databases, ScanCentral SAST, and ScanCentral DAST.", ("mysql", "postgresql", "ssc", "lim", "scancentral_sast", "scancentral_dast")),
     GuidedDeploymentProfile("sast_full", "SAST Full Lab", "Core SAST services with Juice Shop for the first-scan path.", ("mysql", "postgresql", "ssc", "lim", "scancentral_sast", "juice_shop"), sample=True),
     GuidedDeploymentProfile("dast_full", "DAST Full Lab", "Core DAST services with sample targets.", ("mysql", "postgresql", "ssc", "lim", "scancentral_dast", "juice_shop", "webgoat", "dvwa"), sample=True),
+    GuidedDeploymentProfile("ssc_only", "SSC Only", "Deploy MySQL and SSC without ScanCentral or sample targets.", ("mysql", "ssc")),
 )
 
 
@@ -734,15 +735,10 @@ class GuidedDeploymentScreen(WorkflowScreen):
             lines.append(self.render_plan_preview())
         elif self.snapshot.phase in {GuidedDeploymentPhase.MONITOR, GuidedDeploymentPhase.DEPLOYMENT_COMPLETE, GuidedDeploymentPhase.DEPLOYMENT_FAILED}:
             if self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_COMPLETE:
-                lines.append("Success: guided deployment complete.")
+                lines.append(self.render_completion_summary())
             elif self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_FAILED:
                 lines.append("Guided deployment needs attention.")
             lines.append(self.render_status_table())
-            lines.append("Handoffs:")
-            lines.append("1  Logs -> logs")
-            lines.append("2  Diagnostics -> diagnostics")
-            lines.append("3  Status -> status")
-            lines.append("i  Inspection")
         elif self.snapshot.phase is GuidedDeploymentPhase.LOGS:
             lines.append(self.render_logs())
         elif self.snapshot.phase is GuidedDeploymentPhase.INSPECTION:
@@ -771,10 +767,32 @@ class GuidedDeploymentScreen(WorkflowScreen):
                 lines.extend(self.last_result.display.redacted_output)
         lines.extend(("", "Actions:"))
         if self._m99_flow:
-            lines.extend(("up/down  Select", "number  Jump", "enter  Select / continue / start deployment", "i  Inspection", "l  Logs", "n  Cancel before deployment starts", "r  Refresh", "b  Back", "q  Quit"))
+            lines.extend(self.render_actions())
         else:
             lines.extend(("up/down  Select", "number  Jump", "enter/c  Confirm", "p/v  Preview", "y  Run confirmed", "n  Cancel", "m  Mode selection", "s  Step controls", "r  Refresh", "b  Back", "q  Quit"))
         return redact_diagnostic_text("\n".join(lines))
+
+    def render_actions(self) -> tuple[str, ...]:
+        if self.snapshot.phase in {GuidedDeploymentPhase.PROFILE, GuidedDeploymentPhase.RELEASE_FAMILY}:
+            return ("up/down  Select", "number  Jump", "enter  Continue", "b  Back", "q  Quit")
+        if self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW:
+            return ("enter  Start automatic deployment", "i  Inspection", "l  Logs", "n  Cancel", "b  Back", "q  Quit")
+        if self.snapshot.phase is GuidedDeploymentPhase.MONITOR:
+            return ("l  Deployment logs", "i  Inspection", "r  Refresh screen", "b  Back to menu", "q  Quit")
+        if self.snapshot.phase in {GuidedDeploymentPhase.LOGS, GuidedDeploymentPhase.INSPECTION}:
+            return ("b  Back to deployment status", "r  Refresh screen", "q  Quit")
+        if self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_COMPLETE:
+            return ("enter/b  Return to main menu", "1  Logs", "2  Diagnostics", "3  Status", "i  Inspection", "q  Quit")
+        if self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_FAILED:
+            return ("1  Logs", "2  Diagnostics", "3  Status", "i  Inspection", "b  Back to menu", "q  Quit")
+        return ("b  Back", "q  Quit")
+
+    def _deployment_status_phase(self) -> GuidedDeploymentPhase:
+        if self._run_failed:
+            return GuidedDeploymentPhase.DEPLOYMENT_FAILED
+        if self.current_plan is not None and self.status_rows and all(row.state in {StepRuntimeState.INSTALLED, StepRuntimeState.SUCCESS, StepRuntimeState.COMPLETE} for row in self.status_rows):
+            return GuidedDeploymentPhase.DEPLOYMENT_COMPLETE
+        return GuidedDeploymentPhase.MONITOR
 
     @property
     def current_view(self) -> str:
@@ -785,8 +803,15 @@ class GuidedDeploymentScreen(WorkflowScreen):
         return self.render()
 
     def handle_key(self, key: str) -> WorkflowKeyResult:
-        if key in {"back", "b", "escape", "", "q"}:
+        if key in {"back", "b", "escape", ""}:
+            if self.snapshot.phase in {GuidedDeploymentPhase.LOGS, GuidedDeploymentPhase.INSPECTION} and self.current_plan is not None:
+                self.snapshot = _replace_snapshot(self.snapshot, phase=self._deployment_status_phase(), message="Returned to deployment status.")
+                return WorkflowKeyResult(self.snapshot.message)
             return WorkflowKeyResult("Back to menu.", exit_screen=True)
+        if key == "q":
+            return WorkflowKeyResult("Back to menu.", exit_screen=True)
+        if key == "enter" and self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_COMPLETE:
+            return WorkflowKeyResult("Returned to main menu.", exit_screen=True)
         if key in {"r", "refresh"}:
             return WorkflowKeyResult("Refreshed guided deployment workflow.")
         if key == "m":
@@ -991,7 +1016,7 @@ class GuidedDeploymentScreen(WorkflowScreen):
             label = next((_canonical_step_label(step.step_id, step.label) for step in self.current_plan.steps if step.step_id == event.step_id), event.step_id)
             self._run_message = f"Guided deployment stopped after {label} failed."
             self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.DEPLOYMENT_FAILED, message=self._run_message)
-        else:
+        elif self.snapshot.phase is GuidedDeploymentPhase.MONITOR:
             self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.MONITOR, message=self._run_message)
         return WorkflowKeyResult(self._run_message)
 
@@ -1041,6 +1066,20 @@ class GuidedDeploymentScreen(WorkflowScreen):
         ))
         return "\n".join(lines)
 
+    def render_completion_summary(self) -> str:
+        if self.current_plan is None:
+            return "Completion\nGuided deployment complete."
+        completed = sum(1 for row in self.status_rows if row.state in {StepRuntimeState.INSTALLED, StepRuntimeState.SUCCESS, StepRuntimeState.COMPLETE})
+        total = len(self.status_rows)
+        return "\n".join((
+            "Completion",
+            "Success: guided deployment complete.",
+            f"Profile: {self.current_plan.profile.label}",
+            f"Flight Plan: {self.current_plan.release_family.label}",
+            f"Deployments complete: {completed}/{total}",
+            "Use Logs, Diagnostics, or Status for follow-up, or press enter to return to the main menu.",
+        ))
+
     def render_status_table(self) -> str:
         rows = self.status_rows
         lines = ["Deployment state", "Component | Operation | Status | Duration | Last update"]
@@ -1048,7 +1087,7 @@ class GuidedDeploymentScreen(WorkflowScreen):
         for index, row in enumerate(rows, start=1):
             component = _canonical_step_label(row.component, row.component.replace("_", " ").title())
             status = _status_label(row.state)
-            lines.append(f"[{row.color.value}] [{index}/{total}] {component} | {row.operation} | {status} | {row.duration} | {row.last_update}")
+            lines.append(f"[{row.color.value}] [{index}/{total}] {component} | {row.operation} | {status} | {row.duration} | {row.last_update}[/]")
         return "\n".join(lines)
 
     def render_logs(self) -> str:

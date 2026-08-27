@@ -107,13 +107,7 @@ def _run_textual_app() -> int:
             color: $text-disabled;
         }
         """
-        BINDINGS = [
-            ("up", "menu_key('up')", "Up"),
-            ("down", "menu_key('down')", "Down"),
-            ("enter", "menu_key('enter')", "Select"),
-            ("escape", "menu_key('escape')", "Back"),
-            ("q", "menu_key('q')", "Quit"),
-        ]
+        BINDINGS = []
 
         def __init__(self) -> None:
             super().__init__()
@@ -121,6 +115,7 @@ def _run_textual_app() -> int:
             self.workflow_screen: WorkflowScreen | None = None
             self.message = "Use arrows to move, number keys to jump, Enter to activate."
             self._digit_buffer = ""
+            self._workflow_worker_active = False
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
@@ -134,19 +129,20 @@ def _run_textual_app() -> int:
             self._refresh_menu()
 
         def on_key(self, event) -> None:  # type: ignore[no-untyped-def]
-            if self.workflow_screen is not None:
-                workflow_key = workflow_key_from_event(event)
-                if workflow_key is not None:
-                    event.stop()
-                    self.action_menu_key(workflow_key)
+            key = workflow_key_from_event(event)
+            if key is None:
                 return
-            if event.key.isdigit():
-                event.stop()
-                self._handle_digit_key(event.key)
+            self._stop_key_event(event)
+            if self.workflow_screen is None and key.isdigit():
+                self._handle_digit_key(key)
                 return
-            if event.character and event.character in {"m", "b", "r", "h", "?"}:
-                event.stop()
-                self.action_menu_key(event.character)
+            self.action_menu_key(key)
+
+        def _stop_key_event(self, event) -> None:  # type: ignore[no-untyped-def]
+            event.stop()
+            prevent_default = getattr(event, "prevent_default", None)
+            if callable(prevent_default):
+                prevent_default()
 
         def _handle_digit_key(self, digit: str) -> None:
             candidate = f"{self._digit_buffer}{digit}"
@@ -251,7 +247,8 @@ def _run_textual_app() -> int:
                 if result.exit_screen:
                     self.workflow_screen = None
                 self._refresh_menu()
-                if self._workflow_run_started():
+                if self._workflow_run_started() and not self._workflow_worker_active:
+                    self._workflow_worker_active = True
                     self.run_worker(self._consume_workflow_run, thread=True, exclusive=True)
                 return
             if normalized == "back":
@@ -275,16 +272,22 @@ def _run_textual_app() -> int:
             )
 
         def _consume_workflow_run(self) -> None:
-            screen = self.workflow_screen
-            if screen is None or not self._workflow_run_started():
-                return
-            for event in screen.iter_deployment_run_events():  # type: ignore[attr-defined]
-                result = screen.apply_deployment_run_event(event)  # type: ignore[attr-defined]
-                self.call_from_thread(self._update_workflow_message, result.message)
-                if getattr(screen, "stage", None) == "deployment_failed":
+            try:
+                screen = self.workflow_screen
+                if screen is None or not self._workflow_run_started():
                     return
-            result = screen.finish_deployment_plan()  # type: ignore[attr-defined]
-            self.call_from_thread(self._update_workflow_message, result.message)
+                for event in screen.iter_deployment_run_events():  # type: ignore[attr-defined]
+                    result = screen.apply_deployment_run_event(event)  # type: ignore[attr-defined]
+                    self.call_from_thread(self._update_workflow_message, result.message)
+                    if getattr(screen, "stage", None) == "deployment_failed":
+                        return
+                result = screen.finish_deployment_plan()  # type: ignore[attr-defined]
+                self.call_from_thread(self._update_workflow_message, result.message)
+            finally:
+                self.call_from_thread(self._mark_workflow_worker_complete)
+
+        def _mark_workflow_worker_complete(self) -> None:
+            self._workflow_worker_active = False
 
         def _update_workflow_message(self, message: str) -> None:
             self.message = message
