@@ -549,7 +549,7 @@ def build_deployment_inspection(plan: DeploymentPlan, *, current_step_id: str | 
         config_keys=tuple(dict.fromkeys((*plan.release_family.version_keys, *(selected.config_keys if selected else ())))),
         notes=(
             "Clone-safe inspection only; no Kubernetes, Helm, Docker, network, scripts, or credentials are invoked.",
-            "Real execution wiring must use injected runners and preserve the DEPLOY confirmation gate.",
+            "Real execution wiring must use injected runners and start only after the plan preview continue action.",
         ),
     )
 
@@ -729,8 +729,6 @@ class GuidedDeploymentScreen(WorkflowScreen):
                 lines.append(f"{marker} {index}. {mode.label} - {mode.summary}")
         elif self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW:
             lines.append(self.render_plan_preview())
-        elif self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION:
-            lines.append(self.render_continue_prompt())
         elif self.snapshot.phase in {GuidedDeploymentPhase.MONITOR, GuidedDeploymentPhase.DEPLOYMENT_COMPLETE, GuidedDeploymentPhase.DEPLOYMENT_FAILED}:
             if self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_COMPLETE:
                 lines.append("Success: guided deployment complete.")
@@ -770,7 +768,7 @@ class GuidedDeploymentScreen(WorkflowScreen):
                 lines.extend(self.last_result.display.redacted_output)
         lines.extend(("", "Actions:"))
         if self._m99_flow:
-            lines.extend(("up/down  Select", "number  Jump", "enter  Select / prepare plan", "c  Continue from plan preview", "DEPLOY  Start automatic deployment", "i  Inspection", "l  Logs", "n  Cancel before deploy", "r  Refresh", "b  Back", "q  Quit"))
+            lines.extend(("up/down  Select", "number  Jump", "enter  Select / continue / start deployment", "i  Inspection", "l  Logs", "n  Cancel before deployment starts", "r  Refresh", "b  Back", "q  Quit"))
         else:
             lines.extend(("up/down  Select", "number  Jump", "enter/c  Confirm", "p/v  Preview", "y  Run confirmed", "n  Cancel", "m  Mode selection", "s  Step controls", "r  Refresh", "b  Back", "q  Quit"))
         return redact_diagnostic_text("\n".join(lines))
@@ -810,7 +808,7 @@ class GuidedDeploymentScreen(WorkflowScreen):
             return WorkflowKeyResult("Opened deployment logs.")
         if key in {"p", "v"}:
             if self._m99_flow:
-                return self.preview_plan() if self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY else WorkflowKeyResult("Use c to continue from plan preview or i for inspection details.")
+                return self.preview_plan() if self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY else WorkflowKeyResult("Press enter from the plan preview to start automatic deployment, or i for inspection details.")
             return self.preview_step()
         if key == "enter":
             if self.snapshot.phase is GuidedDeploymentPhase.PROFILE:
@@ -820,19 +818,19 @@ class GuidedDeploymentScreen(WorkflowScreen):
             if self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY:
                 return self.preview_plan()
             if self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW and self._m99_flow:
-                return self.confirm_deployment_plan()
+                return self.run_deployment_plan()
             if self.snapshot.phase is GuidedDeploymentPhase.MODE:
                 self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.STEPS, message=f"Selected {self.snapshot.mode.label} mode.")
                 return WorkflowKeyResult(self.snapshot.message)
-            return WorkflowKeyResult("Use c to continue from plan preview or DEPLOY after confirmation.") if self._m99_flow else self.confirm_step()
+            return WorkflowKeyResult("Press enter from the plan preview to start automatic deployment.") if self._m99_flow else self.confirm_step()
         if key == "c":
-            return self.confirm_deployment_plan() if self._m99_flow and self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW else (WorkflowKeyResult("Prepare a plan before continuing.") if self._m99_flow else self.confirm_step())
+            return self.run_deployment_plan() if self._m99_flow and self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW else (WorkflowKeyResult("Press enter from the plan preview to start automatic deployment.") if self._m99_flow else self.confirm_step())
         if key == "DEPLOY":
-            return self.run_deployment_plan()
+            return WorkflowKeyResult("Press enter from the plan preview to start automatic deployment.") if self._m99_flow else self.run_deployment_plan()
         if key.lower() == "deploy":
-            return WorkflowKeyResult("Type DEPLOY to start automatic deployment.")
+            return WorkflowKeyResult("Press enter from the plan preview to start automatic deployment.")
         if key == "y":
-            return WorkflowKeyResult("Use DEPLOY to start the automatic guided deployment.") if self._m99_flow else self.run_confirmed_step()
+            return WorkflowKeyResult("Press enter from the plan preview to start automatic deployment.") if self._m99_flow else self.run_confirmed_step()
         if key in {"n", "cancel"}:
             return self.cancel_deployment_plan() if self._m99_flow and self.snapshot.phase in {GuidedDeploymentPhase.PLAN_PREVIEW, GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION} else self.cancel_step()
         if key == "o":
@@ -895,7 +893,7 @@ class GuidedDeploymentScreen(WorkflowScreen):
             self.selected_handoff_index = (self.selected_handoff_index + offset) % len(COMPLETION_HANDOFFS)
             return WorkflowKeyResult(f"Selected handoff: {COMPLETION_HANDOFFS[self.selected_handoff_index].label}.")
         if self._m99_flow:
-            return WorkflowKeyResult("Use c to continue from plan preview or i for inspection details.")
+            return WorkflowKeyResult("Press enter from the plan preview to start automatic deployment, or i for inspection details.")
         index = (self.snapshot.current_step_index + offset) % len(self.snapshot.steps)
         self.snapshot = _replace_snapshot(self.snapshot, current_step_index=index, phase=GuidedDeploymentPhase.STEPS, message=f"Selected step {_display_label(self.snapshot.steps[index])}.")
         return WorkflowKeyResult(self.snapshot.message)
@@ -954,18 +952,15 @@ class GuidedDeploymentScreen(WorkflowScreen):
         return WorkflowKeyResult(self.snapshot.message)
 
     def confirm_deployment_plan(self) -> WorkflowKeyResult:
-        if self.current_plan is None:
-            self.preview_plan()
-        self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION, message="Type DEPLOY to start automatic deployment.")
-        return WorkflowKeyResult(self.snapshot.message)
+        return self.run_deployment_plan()
 
     def cancel_deployment_plan(self) -> WorkflowKeyResult:
         self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.CANCELLED, message="Guided deployment cancelled before execution.")
         return WorkflowKeyResult(self.snapshot.message)
 
     def run_deployment_plan(self) -> WorkflowKeyResult:
-        if self.snapshot.phase is not GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION:
-            return WorkflowKeyResult("Type DEPLOY to start automatic deployment.")
+        if self.snapshot.phase is not GuidedDeploymentPhase.PLAN_PREVIEW:
+            return WorkflowKeyResult("Prepare and review a deployment plan before starting automatic deployment.")
         if self.current_plan is None:
             return WorkflowKeyResult("Prepare a deployment plan before running.")
         self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.MONITOR, message="Guided deployment auto-run started.")
@@ -1001,17 +996,11 @@ class GuidedDeploymentScreen(WorkflowScreen):
             lines.append(f"- {label} ({marker}) -> {operation}")
         lines.extend((
             "",
-            "Continue: press c to review the final DEPLOY prompt.",
+            "Continue: press enter to start automatic deployment.",
             "Inspect: press i to see adapters, commands, and config keys.",
-            "After continuing, type DEPLOY and FortifyLab will auto-run the deployment.",
+            "Cancel: press n before deployment starts.",
         ))
         return "\n".join(lines)
-
-    def render_continue_prompt(self) -> str:
-        plan = self.current_plan
-        prompt = plan.continue_prompt if plan else "Continue with deployment? If you proceed, FortifyLab will automatically run the planned deployment steps."
-        phrase = plan.confirmation_phrase if plan else "DEPLOY"
-        return f"{prompt}\nType {phrase} to continue."
 
     def render_status_table(self) -> str:
         lines = ["Component | Operation | Status | Duration | Last update"]

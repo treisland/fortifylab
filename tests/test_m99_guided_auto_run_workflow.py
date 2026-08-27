@@ -176,32 +176,26 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         self.assertIn("Plan preview", rendered)
         self.assertIn("ScanCentral SAST", rendered)
         self.assertNotIn("bash apps/scancentral_sast/start.sh --family 24.4", rendered)
-        self.assertIn("Continue: press c", rendered)
+        self.assertIn("Continue: press enter", rendered)
         self.assertIn("Inspect: press i", rendered)
-        self.assertIn("will auto-run the deployment", rendered)
+        self.assertNotIn("DEPLOY", rendered)
         self.assertEqual(runner.calls, [])
 
-    def test_continue_prompt_requires_uppercase_deploy_and_cancel_executes_nothing(self) -> None:
+    def test_cancel_before_enter_executes_nothing(self) -> None:
         _contract_obj, runner, screen = self._screen()
         self._choose_sast_full_244(screen)
 
-        result = screen.handle_key("c")
-        self.assertEqual(result.message, "Type DEPLOY to start automatic deployment.")
-        self.assertEqual(screen.stage, "deployment_confirmation")
-        self.assertIn("If you proceed, FortifyLab will automatically run", screen.render())
-
-        self.assertIn("Type DEPLOY", screen.handle_key("deploy").message)
+        self.assertIn("Press enter", screen.handle_key("deploy").message)
         self.assertEqual(runner.calls, [])
         self.assertEqual(screen.handle_key("n").message, "Guided deployment cancelled before execution.")
         self.assertEqual(screen.stage, "cancelled")
         self.assertEqual(runner.calls, [])
 
-    def test_deploy_confirmation_autoruns_fake_runner_and_updates_colored_status_table(self) -> None:
+    def test_enter_from_plan_preview_autoruns_fake_runner_and_updates_colored_status_table(self) -> None:
         contract, runner, screen = self._screen()
         self._choose_sast_full_244(screen)
-        screen.handle_key("c")
 
-        self.assertEqual(screen.handle_key("DEPLOY").message, "Guided deployment auto-run completed.")
+        self.assertEqual(screen.handle_key("enter").message, "Guided deployment auto-run completed.")
         self.assertEqual(runner.calls[0:3], ["mysql.start", "postgresql.start", "ssc.start"])
         self.assertEqual(screen.stage, "deployment_complete")
 
@@ -222,8 +216,7 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
     def test_logs_are_bounded_and_redacted_and_can_be_opened_from_deployment_view(self) -> None:
         _contract_obj, _runner, screen = self._screen(log_limit=3)
         self._choose_sast_full_244(screen)
-        screen.handle_key("c")
-        screen.handle_key("DEPLOY")
+        screen.handle_key("enter")
 
         logs = screen.deployment_logs
         self.assertLessEqual(len(logs), 3)
@@ -260,9 +253,8 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         runner = FakeGuidedRunner(contract, fail_step="ssc")
         _contract_obj, active_runner, screen = self._screen(runner=runner)
         self._choose_sast_full_244(screen)
-        screen.handle_key("c")
 
-        self.assertEqual(screen.handle_key("DEPLOY").message, "Guided deployment stopped after SSC failed.")
+        self.assertEqual(screen.handle_key("enter").message, "Guided deployment stopped after SSC failed.")
         self.assertIs(active_runner, runner)
         self.assertEqual(active_runner.calls, ["mysql.start", "postgresql.start", "ssc.start"])
         self.assertEqual(screen.stage, "deployment_failed")
