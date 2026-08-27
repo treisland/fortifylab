@@ -402,6 +402,11 @@ Ordered submilestones:
    functional with profile selection, release family selection, plan preview,
    `DEPLOY` confirmation, adapter-backed auto-run, colored status table,
    bounded redacted logs, and inspection view.
+10. `M9.10 Lifecycle Controls Parity` - replace the thin lifecycle operation
+    wrapper with Bash-style lifecycle controls: selected-profile and all-lab
+    scopes, readable target/action screens, reverse-order stop/destroy, explicit
+    destructive confirmation, live status, bounded logs, inspection, and
+    completion/failure handoffs.
 
 Verification after every M9 slice:
 
@@ -541,6 +546,37 @@ require live lab state, Kubernetes, Helm, Docker, network, or credentials.
 
 ### 2026-08-27
 
+Milestone: M9.10
+
+Workstream: Lifecycle Controls Parity Kickoff
+
+Branch: `agent/pm-open-M9.10-lifecycle-parity`
+
+Status: active
+
+Changed:
+
+- Activated M9.10 after the user pivoted to Lifecycle options.
+- Scoped the slice to Bash-style lifecycle parity in the Python TUI, with Bash retained only as low-level lifecycle adapters.
+- Started Bash parity mapping and lifecycle UX contract work before implementation.
+- Kept PR #479 open and held out of `dev` for continued focused parity work.
+
+Next:
+
+- Map selected-profile, all-lab, component, and sample-app lifecycle behavior from Bash.
+- Define the lifecycle target/action, preview, confirmation, live status, logs, inspection, completion, and failure contracts.
+- Open focused PRs into `migration/python-tui` only.
+
+Blockers: none.
+
+Risks:
+
+- Destroy/reset paths are destructive and must keep high-friction confirmation.
+- Default tests must not run Kubernetes, Helm, Docker, network, live lab state, or real lifecycle scripts.
+- Shared monitor/log patterns should be reused without reopening guided deployment scope.
+
+### 2026-08-27
+
 Milestone: M9.8
 
 Workstream: Dashboard Access, URLs, and Credentials Kickoff
@@ -618,6 +654,27 @@ component, operation, status, duration, and latest update, while logs and
 inspection are separate views. Logs are bounded and redacted. Inspection exposes
 profile, release family, adapter IDs, redacted command previews, and config keys
 so operators can see what is happening without exposing credentials.
+
+### M9.10 Active Slice
+
+M9.10 owns Lifecycle Controls parity after manual guided-deployment testing
+pivoted attention to lifecycle options. The current Python lifecycle screen is
+safe but too thin: it presents operation IDs first, requires a preview/confirm/run
+key sequence, renders results after the runner returns, and does not yet capture
+the Bash operator flow users preferred.
+
+The parity target is Bash-style lifecycle control in the Python TUI while keeping
+Bash at the low-level adapter boundary. Lab lifecycle, App management, and Sample
+apps must keep their existing navigation structure and support arrow movement,
+jump-to-number selection, Enter activation, back, and quit. Lifecycle actions
+should show readable names, selected-profile and all-lab scope where supported,
+reverse-order stop/destroy, persistent-data safety language, live status updates,
+bounded redacted logs, inspection, and completion/failure handoffs.
+
+M9.10 starts with Bash parity mapping and a lifecycle UX contract before code
+implementation. Default tests must use injected fake runners/status/log providers
+and must not invoke Kubernetes, Helm, Docker, network calls, credentials, live lab
+state, or repository lifecycle scripts.
 
 Default tests remain clone-safe. They use fake runners or mock the operation
 runner and do not invoke Kubernetes, Helm, Docker, network, lifecycle scripts,

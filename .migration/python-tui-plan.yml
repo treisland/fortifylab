@@ -30,24 +30,27 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-27
-  milestone: M9.9
-  workstream: pm-M9.9-closeout-open-next
-  branch: agent/pm-M9.9-closeout-open-next
+  milestone: M9.10
+  workstream: pm-open-M9.10-lifecycle-parity
+  branch: agent/pm-open-M9.10-lifecycle-parity
   status: active
   changed:
-    - M9.9 Functional Guided Deployment completed on migration/python-tui.
-    - Guided Deployment now supports Python TUI profile selection, release family selection, plan preview, auto-run warning, DEPLOY confirmation, adapter-backed execution, status table, bounded logs, and inspection.
+    - M9.10 Lifecycle Controls Parity opened after user-directed pivot from guided deployment to lifecycle options.
+    - PM scope is to preserve the Bash lifecycle operator experience while keeping Python as the TUI/application layer and Bash as low-level lifecycle adapters.
+    - First work starts with lifecycle UX contract and Bash parity mapping before implementation.
     - PR #479 remains open and held out of dev while focused parity work continues.
   next:
-    - Await user direction for the next parity slice.
-    - Manual TUI smoke is recommended before using the real auto-run path against a live lab.
+    - Map Bash lifecycle behavior for selected-profile, all-lab, component, and sample-app operations.
+    - Define lifecycle TUI states, key handling, confirmation, live status, logs, inspection, and completion handoffs.
+    - Open focused PRs into migration/python-tui only.
   blockers: []
   risks:
-    - Live lab deployment through the Python TUI has not been manually validated in this closeout.
-    - Operation adapter behavior is trusted through the M3 boundary; default tests mock real execution.
+    - Lifecycle actions include destructive paths; destroy/reset must not become easier than the Bash workflow.
+    - Default tests must not run Kubernetes, Helm, Docker, network, or real lifecycle scripts.
+    - Scope must stay on lifecycle parity and avoid reopening guided deployment behavior except for shared monitor/log primitives.
 
   needs_decision:
-    - Select the next focused parity slice or approve preparing PR #479 for merge to dev.
+    - Confirm whether full-lab destructive destroy should retain Bash's typed confirmation phrase or use a TUI-native equivalent with the same friction.
 
 
 open_decisions:
@@ -829,6 +832,48 @@ milestones:
           - Manual TUI smoke is recommended before using real auto-run against a live lab; default CI uses fake runners/mocks only.
           - Contract branch agent/deploy-M9.9-profile-family-contract defines release family, deployment plan, plan step, auto-run DEPLOY gate, status row/color, bounded log buffer, and inspection models.
           - M9.9.1 plan generation uses existing operation catalog dry-run previews and remains clone-safe with injected providers in tests.
+      - id: M9.10
+        name: Lifecycle controls parity
+        status: in_progress
+        branches:
+          - agent/pm-open-M9.10-lifecycle-parity
+          - agent/lifecycle-M9.10-bash-parity-map
+          - agent/lifecycle-M9.10-contract
+          - agent/test-M9.10-lifecycle-parity
+          - agent/tui-M9.10-lifecycle-parity
+          - agent/docs-M9.10-lifecycle-parity
+        submilestones:
+          - id: M9.10.1
+            name: Bash parity mapping and UX contract
+            status: in_progress
+          - id: M9.10.2
+            name: Clone-safe lifecycle parity tests
+            status: planned
+          - id: M9.10.3
+            name: Lifecycle target/action screens
+            status: planned
+          - id: M9.10.4
+            name: Live lifecycle monitor, logs, and inspection
+            status: planned
+          - id: M9.10.5
+            name: Completion/failure handoffs and docs
+            status: planned
+        acceptance:
+          - Lab lifecycle, App management, and Sample apps keep the existing navigation structure and support arrow movement, jump-to-number selection, Enter activation, back, and quit.
+          - Lifecycle screens show user-friendly target/action names instead of exposing raw operation IDs as the primary UX.
+          - Start selected profile workloads and Start all lab deployments are available where catalog/profile state supports them.
+          - Stop/shutdown preserves persistent data and runs selected-profile or full-lab workloads in reverse dependency order.
+          - Destroy clearly warns about data loss, requires explicit destructive confirmation, and runs in reverse dependency order.
+          - Component and sample-app lifecycle actions remain isolated and map to the M3 operation catalog adapters.
+          - Running lifecycle operations use a live-updating status surface with bounded redacted logs and inspection handoffs.
+          - Completion and failure screens offer clear summaries plus handoffs to Logs, Diagnostics/Status, Help/Inspection, Lifecycle, and Main menu.
+          - Restart/reset remain unavailable unless the slice implements ordered safe sequences and destructive-scope screens.
+          - Tests use injected fake runners/status/log providers only and require no live lab state.
+        evidence:
+          - User pivoted to Lifecycle options after guided deployment manual testing and stated users liked the Bash implementation.
+          - Bash parity references include selected-profile lifecycle scripts, all-lab start/stop/destroy, reverse-order shutdown/destroy, typed full-lab destroy confirmation, app/sample isolation, and logs/diagnostics/help handoffs.
+          - Existing Python lifecycle implementation is currently a thin operation wrapper with preview/confirm/run behavior and synchronous result rendering.
+          - PM recommends beginning with M9.10.1 mapping/contract before implementation.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
