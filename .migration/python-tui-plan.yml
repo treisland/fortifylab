@@ -29,29 +29,28 @@ goal:
 heartbeat:
   cadence: daily
   stale_after_days: 3
-  last_updated: 2026-08-26
-  milestone: M9
-  workstream: pm-M9-closeout-dev-merge-readiness
-  branch: agent/pm-M9-closeout-dev-merge-readiness
+  last_updated: 2026-08-27
+  milestone: M9.7
+  workstream: pm-open-M9.7-guided-deployment
+  branch: agent/pm-open-M9.7-guided-deployment
   status: active
   changed:
-    - Closed M9.1 through M9.5 TUI submenu workflow parity on migration/python-tui.
-    - Functional workflows now cover Help/Runbooks, Configuration, Diagnostics/Status, Lifecycle Operations, and Logs/Wizard Log.
-    - Manual testing checkpoint was confirmed after M9.5.
+    - Closed M9.6 Setup and Readiness workflow on migration/python-tui.
+    - Functional workflows now cover Help/Runbooks, Configuration, Diagnostics/Status, Lifecycle Operations, Logs/Wizard Log, and Setup/Readiness.
     - User chose to keep PR #479 open and continue adding focused parity work before dev merge.
-    - Opened M9.6 Setup and Readiness workflow as the next focused slice.
+    - Opened M9.7 Guided Deployment workflow as the next focused slice.
   next:
-    - Define and implement a read-only readiness overview that aggregates existing config, diagnostics, status, help, and lifecycle handoffs.
-    - Keep PR #479 held out of dev while M9.6 remains active.
-    - Reassess dev merge readiness or M9.7 guided deployment after M9.6 closeout.
+    - Define a guided deployment state-machine contract backed by existing operation adapters and fake runners in tests.
+    - Implement profile/mode/step selection, dry-run preview, confirmation/cancel gates, progress/results, and completion handoffs.
+    - Keep PR #479 held out of dev while M9.7 remains active.
   blockers: []
   risks:
-    - Scope creep into full guided deployment; M9.6 should remain setup/readiness only.
-    - Live cluster checks must stay optional, skipped, or fixture-backed in default tests.
-    - Recommended actions should hand off to existing workflows and must not mutate state without those workflows' confirmation gates.
+    - Guided deployment can sprawl; keep M9.7 scoped to the guided deployment workflow only.
+    - Default tests must not require Kubernetes, Helm, Docker, network, credentials, or live lab state.
+    - Mutating operations must require preview plus explicit confirmation and should reuse the operation catalog/adapters.
 
   needs_decision:
-    - None; M9.6 Setup and Readiness sequencing is approved.
+    - None; M9.7 sequencing is approved by the user's proceed instruction.
 
 
 open_decisions:
@@ -721,6 +720,28 @@ milestones:
           - python3 -m unittest discover tests passed with 241 tests.
           - ./bin/fortifylab tui --check, doctor --check, and status --check passed.
           - git diff --check passed.
+      - id: M9.7
+        name: Guided deployment workflow
+        status: in_progress
+        branches:
+          - agent/pm-open-M9.7-guided-deployment
+          - agent/deploy-M9.7-contract
+          - agent/test-M9.7-guided-deployment
+          - agent/tui-M9.7-guided-deployment
+          - agent/docs-M9.7-guided-deployment
+        acceptance:
+          - Deploy menu opens a functional guided deployment workflow.
+          - Profile selection works and is represented as explicit workflow state.
+          - Deployment mode selection works and preserves the existing navigation intent.
+          - Guided steps are represented as explicit state with progress/result rendering.
+          - Mutating steps require dry-run/preview and explicit confirmation before execution.
+          - Cancelled steps do not execute operations.
+          - Resume/repair paths are represented or clearly unavailable.
+          - Completion state offers handoffs to Diagnostics/Status, Logs, Help, and Lifecycle.
+          - Tests use injected fake runners only and require no live lab state.
+        evidence:
+          - M9.7 opened after M9.6 closeout as the next focused parity gap before any dev merge.
+          - PR #479 remains held out of dev unless the user explicitly changes the release strategy.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
