@@ -226,7 +226,41 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         self.assertIn("MySQL", rendered)
         self.assertIn("complete", rendered.lower())
         self.assertIn("[green]", rendered)
+        self.assertIn("[/]", rendered)
         self.assertIn("Success: guided deployment complete.", screen.render())
+
+    def test_running_logs_can_be_opened_without_losing_the_active_run(self) -> None:
+        _contract_obj, _runner, screen = self._screen(log_limit=6)
+        self._choose_sast_full_244(screen)
+        screen.handle_key("enter")
+        events = screen.iter_deployment_run_events()
+        first = next(events)
+        screen.apply_deployment_run_event(first)
+
+        self.assertEqual(screen.handle_key("l").message, "Opened deployment logs.")
+        self.assertEqual(screen.stage, "deployment_logs")
+        self.assertIn("Mysql running", screen.render_logs())
+
+        second = next(events)
+        screen.apply_deployment_run_event(second)
+        self.assertEqual(screen.stage, "deployment_logs")
+        self.assertIn("Mysql installed", screen.render_logs())
+
+        self.assertEqual(screen.handle_key("b").message, "Returned to deployment status.")
+        self.assertEqual(screen.stage, "deployment_monitor")
+
+    def test_completion_page_summarizes_run_and_enter_returns_to_menu(self) -> None:
+        _contract_obj, _runner, screen = self._screen()
+        self._choose_sast_full_244(screen)
+        screen.run_deployment_plan()
+
+        rendered = screen.render()
+        self.assertIn("Completion", rendered)
+        self.assertIn("Deployments complete: 6/6", rendered)
+        self.assertIn("enter/b  Return to main menu", rendered)
+        result = screen.handle_key("enter")
+        self.assertTrue(result.exit_screen)
+        self.assertEqual(result.message, "Returned to main menu.")
 
     def test_logs_are_bounded_and_redacted_and_can_be_opened_from_deployment_view(self) -> None:
         _contract_obj, _runner, screen = self._screen(log_limit=3)
@@ -301,6 +335,16 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         self.assertIn("Flight Plan selection", rendered)
         self.assertIn("Fortify 26.2", rendered)
         self.assertNotIn("Current recommended", rendered)
+
+    def test_default_profiles_include_ssc_only_option_with_mysql_dependency(self) -> None:
+        contract = _contract()
+
+        screen = contract.build_guided_deployment_workflow()
+
+        labels = [profile.label for profile in screen.profiles]
+        self.assertIn("SSC Only", labels)
+        ssc_only = next(profile for profile in screen.profiles if profile.id == "ssc_only")
+        self.assertEqual(ssc_only.step_ids, ("mysql", "ssc"))
 
     def test_real_guided_runner_delegates_to_operation_runner_after_confirmation(self) -> None:
         contract = _contract()
