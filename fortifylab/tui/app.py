@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fortifylab.navigation import MenuController, MenuItem, MenuNode, get_menu, normalize_menu_key
+from fortifylab.navigation import ActionKind, ActionRef, MenuController, MenuItem, MenuNode, get_menu, normalize_menu_key
 from fortifylab.tui.workflows import WorkflowScreen, dispatch_menu_item
 
 CHECK_HEADER = (
@@ -199,6 +199,20 @@ def _run_textual_app() -> int:
                 return
             self.message = dispatch.message
 
+        def _open_workflow_target(self, target: str, fallback_message: str) -> None:
+            selected = MenuItem("handoff", target.replace("_", " ").title(), ActionRef(ActionKind.WORKFLOW, target, placeholder=False))
+            dispatch = dispatch_menu_item(selected)
+            if dispatch.kind == "menu" and dispatch.menu is not None:
+                self.controller = MenuController(dispatch.menu)
+                self.workflow_screen = None
+                self.message = dispatch.message
+                return
+            if dispatch.kind == "screen" and dispatch.screen is not None:
+                self.workflow_screen = dispatch.screen
+                self.message = dispatch.message
+                return
+            self.message = fallback_message
+
         def _handle_back(self, target: str | None) -> None:
             self._digit_buffer = ""
             if self.workflow_screen is not None:
@@ -219,13 +233,17 @@ def _run_textual_app() -> int:
                 self.message = "Already at the top menu."
 
         def _handle_workflow_screen_key(self, key: str) -> None:
-            normalized = normalize_menu_key(key)
+            normalized = key if key == "r" else normalize_menu_key(key)
             if normalized == "quit":
                 self.exit()
                 return
             if self.workflow_screen is not None:
                 result = self.workflow_screen.handle_key(normalized)
                 self.message = result.message
+                if result.open_target is not None:
+                    self._open_workflow_target(result.open_target, result.message)
+                    self._refresh_menu()
+                    return
                 if result.exit_screen:
                     self.workflow_screen = None
                 self._refresh_menu()

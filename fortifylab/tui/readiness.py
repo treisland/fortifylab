@@ -199,7 +199,7 @@ class SetupReadinessScreen(WorkflowScreen):
             return WorkflowKeyResult("No readiness handoff is available.")
         action = self._snapshot.actions[self.selected_action_index]
         self.last_handoff = action
-        return WorkflowKeyResult(f"Open workflow target: {action.workflow_target}.")
+        return WorkflowKeyResult(f"Open workflow target: {action.workflow_target}.", open_target=action.workflow_target)
 
 
 def build_setup_readiness_workflow(
@@ -292,3 +292,49 @@ def _live_lab_signal(status: LabStatus) -> ReadinessSignal:
     if status.warnings:
         detail = f"{detail}; {len(status.warnings)} warning(s)"
     return ReadinessSignal("live_lab", "Live lab", state, "status provider reported lab state", detail, "fortifylab.status")
+
+
+@dataclass
+class ResetTiersScreen(WorkflowScreen):
+    """Read-only reset guidance that hands off to lifecycle controls."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "setup_readiness.reset_tiers",
+            "Complete lab reset tiers",
+            "Read-only reset guidance: review lifecycle controls before any destructive reset operation.",
+        )
+        self.last_handoff: RecommendedAction | None = None
+
+    def render(self) -> str:
+        return "\n".join(
+            (
+                self.summary,
+                "SKIP Lab reset: no Kubernetes, Helm, Docker, network, or filesystem mutation is performed here.",
+                "",
+                "Actions:",
+                "enter/o  Open Lifecycle Controls",
+                "b  Back to menu",
+                "q  Quit",
+            )
+        )
+
+    @property
+    def current_view(self) -> str:
+        return self.render()
+
+    @property
+    def screen(self) -> str:
+        return self.render()
+
+    def handle_key(self, key: str) -> WorkflowKeyResult:
+        if key in {"enter", "o"}:
+            self.last_handoff = RecommendedAction("5", "Open Lifecycle Controls", "lifecycle", "Review lifecycle reset/stop/start options.")
+            return WorkflowKeyResult("Open workflow target: lifecycle.", open_target="lifecycle")
+        if key in {"back", "b", "escape", ""}:
+            return WorkflowKeyResult("Back to menu.", exit_screen=True)
+        return WorkflowKeyResult(f"No reset tiers workflow action is bound to {key!r}.")
+
+
+def build_reset_tiers_workflow() -> ResetTiersScreen:
+    return ResetTiersScreen()
