@@ -682,6 +682,12 @@ stop/destroy order, selected-profile scope, component/sample isolation,
 destructive confirmation phrases, and completion handoffs before the runtime TUI
 workflow is rewritten.
 
+The first workflow implementation replaces the raw operation-id-first lifecycle
+screen with readable target and action selection, plan preview, Enter-to-run safe
+actions, typed confirmation for destroy, bounded redacted result output, and
+completion handoffs. Live status refresh, pod logs, and diagnostics inspection
+remain the next lifecycle parity slice.
+
 Default tests remain clone-safe. They use fake runners or mock the operation
 runner and do not invoke Kubernetes, Helm, Docker, network, lifecycle scripts,
 or credentials. Manual TUI smoke is recommended before using the real auto-run

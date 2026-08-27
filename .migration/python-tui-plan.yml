@@ -848,10 +848,10 @@ milestones:
             status: completed
           - id: M9.10.2
             name: Clone-safe lifecycle parity tests
-            status: in_progress
+            status: completed
           - id: M9.10.3
             name: Lifecycle target/action screens
-            status: planned
+            status: completed
           - id: M9.10.4
             name: Live lifecycle monitor, logs, and inspection
             status: planned
@@ -876,6 +876,7 @@ milestones:
           - PM recommends beginning with M9.10.1 mapping/contract before implementation.
           - Contract branch agent/lifecycle-M9.10-contract adds clone-safe lifecycle scope, action, plan step, handoff, and plan models.
           - Contract tests pin user-facing lifecycle actions, all-lab forward start, reverse stop/destroy, selected-profile scope, component/sample isolation, destructive confirmation phrases, and completion handoffs.
+          - TUI branch agent/tui-M9.10-lifecycle-parity replaces the raw operation-id-first lifecycle screen with readable target/action selection, plan preview, Enter-to-run safe actions, typed destroy confirmation, and completion handoffs.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
