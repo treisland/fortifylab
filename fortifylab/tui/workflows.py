@@ -75,6 +75,8 @@ DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
     "cluster_snapshot": lambda _selected: _build_status_screen(),
     "doctor": lambda _selected: _build_doctor_screen(),
     "status": lambda _selected: _build_status_screen(),
+    "dashboard_access": lambda _selected: _build_dashboard_access_screen(),
+    "urls_credentials": lambda _selected: _build_urls_credentials_screen(),
     "logs": lambda _selected: _build_logs_screen(),
     "wizard_log": lambda _selected: _build_wizard_log_screen(),
     "help_center": lambda _selected: _build_help_center_screen(),
@@ -148,6 +150,18 @@ def build_logs_workflow(log_sources=None) -> WorkflowScreen:
     return LogsWorkflowScreen(log_sources=log_sources)
 
 
+def build_dashboard_access_workflow(**kwargs) -> WorkflowScreen:
+    from fortifylab.tui.dashboard_access import build_dashboard_access_workflow as build
+
+    return build(**kwargs)
+
+
+def build_urls_credentials_workflow(**kwargs) -> WorkflowScreen:
+    from fortifylab.tui.dashboard_access import build_urls_credentials_workflow as build
+
+    return build(**kwargs)
+
+
 def build_wizard_log_workflow(log_sources=None) -> WorkflowScreen:
     from fortifylab.tui.logs import WizardLogWorkflowScreen
 
@@ -180,6 +194,14 @@ def _build_doctor_screen() -> WorkflowScreen:
 
 def _build_status_screen() -> WorkflowScreen:
     return build_status_workflow()
+
+
+def _build_dashboard_access_screen() -> WorkflowScreen:
+    return build_dashboard_access_workflow()
+
+
+def _build_urls_credentials_screen() -> WorkflowScreen:
+    return build_urls_credentials_workflow()
 
 
 def _build_logs_screen() -> WorkflowScreen:

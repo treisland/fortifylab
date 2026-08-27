@@ -767,6 +767,8 @@ milestones:
           - PM recommended M9.8 after M9.7 because users need safe post-deployment access surfaces after guided deployment.
           - User approved activation with proceed on 2026-08-27.
           - M9.8 should stay read-only by default, mask secrets, and use fixture-backed tests only.
+          - Contract branch agent/access-M9.8-contract added read-only access snapshot models for dashboard URLs, configured URLs, credential presence, masked secret values, unavailable dashboard tokens, and workflow handoffs.
+          - Contract tests verify fixture-backed URL expansion, missing-value states, default secret masking, disabled reveal behavior, and dispatch registration for Dashboard access and URLs/credentials.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
