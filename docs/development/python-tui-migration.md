@@ -396,6 +396,12 @@ Ordered submilestones:
 7. `M9.7 Guided Deployment Workflow` - implement guided deployment as an
    explicit TUI state machine with profile/mode selection, preview/confirmation
    gates, fake-runner tests, progress/results, and completion handoffs.
+8. `M9.8 Dashboard Access, URLs, and Credentials Workflow` - add read-only
+   access surfaces with masked secrets, missing-value states, and handoffs.
+9. `M9.9 Functional Guided Deployment` - make the Python TUI guided path
+   functional with profile selection, release family selection, plan preview,
+   `DEPLOY` confirmation, adapter-backed auto-run, colored status table,
+   bounded redacted logs, and inspection view.
 
 Verification after every M9 slice:
 
@@ -597,6 +603,26 @@ Blockers: none.
 Risks:
 
 - M9.8 includes credential-adjacent surfaces, so default behavior should mask secrets and stay fixture-backed in tests.
+
+### M9.9 Functional Guided Deployment Notes
+
+M9.9 refocused Guided Deployment on the Python TUI experience. The default
+workflow now moves from deployment profile selection to release family selection,
+then prepares a concrete plan preview from the operation catalog. The continue
+prompt states that deployment will auto-run after confirmation, and the mutating
+path requires the uppercase `DEPLOY` phrase before the TUI delegates to the M3
+operation runner with `run_operation(..., confirmed=True)`.
+
+The run surface keeps the Bash guided-deployment spirit: a monitor table shows
+component, operation, status, duration, and latest update, while logs and
+inspection are separate views. Logs are bounded and redacted. Inspection exposes
+profile, release family, adapter IDs, redacted command previews, and config keys
+so operators can see what is happening without exposing credentials.
+
+Default tests remain clone-safe. They use fake runners or mock the operation
+runner and do not invoke Kubernetes, Helm, Docker, network, lifecycle scripts,
+or credentials. Manual TUI smoke is recommended before using the real auto-run
+path against a live lab.
 
 ### 2026-08-27
 
