@@ -19,7 +19,7 @@ from fortifylab.tui.lifecycle import ExecutionResultDisplayModel, build_result_d
 from fortifylab.tui.workflows import WorkflowKeyResult, WorkflowScreen
 
 
-StageName = Literal["profile_selection", "release_family_selection", "deployment_mode_selection", "plan_preview", "step_controls", "deployment_monitor", "deployment_logs", "deployment_inspection", "completion_handoff"]
+StageName = Literal["profile_selection", "release_family_selection", "deployment_mode_selection", "plan_preview", "deployment_confirmation", "step_controls", "deployment_monitor", "deployment_logs", "deployment_inspection", "deployment_complete", "deployment_failed", "cancelled", "completion_handoff"]
 
 
 class GuidedDeploymentPhase(str, Enum):
@@ -27,14 +27,17 @@ class GuidedDeploymentPhase(str, Enum):
     RELEASE_FAMILY = "release_family_selection"
     MODE = "deployment_mode_selection"
     PLAN_PREVIEW = "plan_preview"
+    DEPLOYMENT_CONFIRMATION = "deployment_confirmation"
     STEPS = "step_controls"
     PREVIEW = "step_controls"
     CONFIRM = "step_controls"
     MONITOR = "deployment_monitor"
     LOGS = "deployment_logs"
     INSPECTION = "deployment_inspection"
+    DEPLOYMENT_COMPLETE = "deployment_complete"
+    DEPLOYMENT_FAILED = "deployment_failed"
     COMPLETE = "completion_handoff"
-    CANCELLED = "step_controls"
+    CANCELLED = "cancelled"
     BLOCKED = "completion_handoff"
 
 
@@ -43,6 +46,7 @@ class StepRuntimeState(str, Enum):
     READY = "READY"
     PREVIEWED = "PREVIEWED"
     RUNNING = "RUNNING"
+    INSTALLED = "INSTALLED"
     SUCCESS = "COMPLETE"
     COMPLETE = "COMPLETE"
     FAILED = "FAILED"
@@ -53,6 +57,7 @@ class StepRuntimeState(str, Enum):
 
 
 GuidedStepStatus = StepRuntimeState
+GuidedDeploymentRunStatus = StepRuntimeState
 
 
 class DeploymentStatusColor(str, Enum):
@@ -70,6 +75,7 @@ STATUS_COLOR_BY_STATE: dict[StepRuntimeState, DeploymentStatusColor] = {
     StepRuntimeState.READY: DeploymentStatusColor.GRAY,
     StepRuntimeState.PREVIEWED: DeploymentStatusColor.CYAN,
     StepRuntimeState.RUNNING: DeploymentStatusColor.CYAN,
+    StepRuntimeState.INSTALLED: DeploymentStatusColor.GREEN,
     StepRuntimeState.SUCCESS: DeploymentStatusColor.GREEN,
     StepRuntimeState.COMPLETE: DeploymentStatusColor.GREEN,
     StepRuntimeState.SKIPPED: DeploymentStatusColor.YELLOW,
@@ -249,21 +255,25 @@ class CompletionHandoff:
 class DeploymentPlanStep:
     step_id: str
     label: str
-    operation_id: str | None
-    commands: tuple[str, ...]
-    required: bool
-    adapter_id: str | None
-    config_keys: tuple[str, ...]
-    confirmation_required: bool
-    summary: str
+    component: str
+    operation_id: str | None = None
+    commands: tuple[str, ...] = ()
+    summary: str = ""
+    required: bool = True
+    adapter_id: str | None = None
+    config_keys: tuple[str, ...] = ()
+    confirmation_required: bool = True
+
+
+GuidedDeploymentPlanStep = DeploymentPlanStep
 
 
 @dataclass(frozen=True)
 class DeploymentPlan:
     profile: GuidedDeploymentProfile
     release_family: ReleaseFamily
-    mode: GuidedDeploymentMode
     steps: tuple[DeploymentPlanStep, ...]
+    mode: GuidedDeploymentMode | None = None
     continue_prompt: str = "Continue with deployment? If you proceed, FortifyLab will automatically run the planned deployment steps."
     confirmation_phrase: str = "DEPLOY"
     mutating: bool = True
@@ -287,6 +297,10 @@ class DeploymentStatusRow:
     last_update: str = ""
 
     @property
+    def status(self) -> StepRuntimeState:
+        return self.state
+
+    @property
     def color(self) -> DeploymentStatusColor:
         return STATUS_COLOR_BY_STATE.get(self.state, DeploymentStatusColor.GRAY)
 
@@ -296,6 +310,18 @@ class DeploymentLogEvent:
     step_id: str
     stream: Literal["stdout", "stderr", "system"]
     message: str
+
+
+@dataclass(frozen=True)
+class GuidedDeploymentRunEvent:
+    step_id: str
+    component: str
+    operation: str
+    status: StepRuntimeState
+    message: str
+    stdout: str = ""
+    stderr: str = ""
+    duration_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -456,7 +482,7 @@ def build_deployment_plan(
     mode = deployment_mode(mode_id, modes=modes)
     provider = steps_provider or _default_steps_for_profile
     steps = tuple(_plan_step(step) for step in provider(profile.id, mode.id))
-    return DeploymentPlan(profile, family, mode, steps)
+    return DeploymentPlan(profile=profile, release_family=family, steps=steps, mode=mode)
 
 
 def build_deployment_status_rows(plan: DeploymentPlan) -> tuple[DeploymentStatusRow, ...]:
@@ -476,7 +502,7 @@ def build_deployment_inspection(plan: DeploymentPlan, *, current_step_id: str | 
     return DeploymentInspection(
         profile_id=plan.profile.id,
         release_family_id=plan.release_family.id,
-        mode_id=plan.mode.id,
+        mode_id=plan.mode.id if plan.mode is not None else "fresh",
         current_step_id=selected.step_id if selected else None,
         adapter_id=selected.adapter_id if selected else None,
         command_preview=selected.commands if selected else (),
@@ -511,6 +537,7 @@ def _plan_step(step: GuidedDeploymentStep) -> DeploymentPlanStep:
     return DeploymentPlanStep(
         step_id=step.id,
         label=_display_label(step),
+        component=step.id,
         operation_id=step.operation_id,
         commands=commands,
         required=step.required,
@@ -556,7 +583,11 @@ class GuidedDeploymentScreen(WorkflowScreen):
         steps_provider: StepsProvider | None = None,
         profile_id: str | None = None,
         mode_id: str = "fresh",
+        release_families: tuple[ReleaseFamily, ...] | None = None,
+        release_family_id: str | None = None,
+        plan_builder=None,
         runner: GuidedDeploymentRunner | None = None,
+        log_limit: int = 200,
     ) -> None:
         super().__init__(
             "guided_deployment",
@@ -565,11 +596,19 @@ class GuidedDeploymentScreen(WorkflowScreen):
         )
         self.profiles = profiles
         self.modes = modes
-        self.steps_provider = steps_provider or _default_steps_for_profile
+        self.steps_provider = steps_provider or (lambda selected_profile_id, selected_mode_id: _steps_for_profiles(selected_profile_id, selected_mode_id, profiles))
         self.runner = runner or _blocked_guided_runner
+        self.release_families = release_families or RELEASE_FAMILIES
+        self._m99_flow = release_families is not None or plan_builder is not None
+        self.plan_builder = plan_builder
+        self.log_limit = log_limit
+        self.log_buffer = DeploymentLogBuffer(limit=log_limit)
         self.selected_profile_index = _index(profile_id or profiles[0].id, profiles)
         self.selected_mode_index = _index(mode_id, modes)
+        self.selected_release_family_index = _index(release_family_id or self.release_families[0].id, self.release_families)
         self.selected_handoff_index = 0
+        self.current_plan: DeploymentPlan | None = None
+        self._status_rows: tuple[DeploymentStatusRow, ...] = ()
         profile = profiles[self.selected_profile_index]
         mode = modes[self.selected_mode_index]
         self.snapshot = _snapshot(profile, mode, self.steps_provider(profile.id, mode.id), 0, GuidedDeploymentPhase.PROFILE, "Select a deployment profile.")
@@ -587,6 +626,22 @@ class GuidedDeploymentScreen(WorkflowScreen):
     @property
     def selected_mode_id(self) -> str:
         return self.snapshot.mode.id
+
+    @property
+    def selected_release_family_id(self) -> str:
+        return self.release_families[self.selected_release_family_index].id
+
+    @property
+    def status_rows(self) -> tuple[DeploymentStatusRow, ...]:
+        if self._status_rows:
+            return self._status_rows
+        if self.current_plan is not None:
+            return build_deployment_status_rows(self.current_plan)
+        return ()
+
+    @property
+    def deployment_logs(self) -> tuple[str, ...]:
+        return self.log_buffer.render()
 
     @property
     def selected_step_id(self) -> str:
@@ -612,6 +667,7 @@ class GuidedDeploymentScreen(WorkflowScreen):
             f"Stage: {self.stage}",
             f"Profile: {self.snapshot.profile.label}",
             f"Mode: {self.snapshot.mode.label}",
+            f"Release family: {self.release_families[self.selected_release_family_index].label}",
             f"Message: {self.snapshot.message}",
             "",
         ]
@@ -620,11 +676,33 @@ class GuidedDeploymentScreen(WorkflowScreen):
             for index, profile in enumerate(self.profiles, start=1):
                 marker = ">" if index - 1 == self.selected_profile_index else " "
                 lines.append(f"{marker} {index}. {profile.label} - {profile.summary}")
+        elif self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY:
+            lines.append("Release family selection:")
+            for index, family in enumerate(self.release_families, start=1):
+                marker = ">" if index - 1 == self.selected_release_family_index else " "
+                lines.append(f"{marker} {index}. {family.label} - {family.summary}")
         elif self.snapshot.phase is GuidedDeploymentPhase.MODE:
             lines.append("Deployment mode selection:")
             for index, mode in enumerate(self.modes, start=1):
                 marker = ">" if index - 1 == self.selected_mode_index else " "
                 lines.append(f"{marker} {index}. {mode.label} - {mode.summary}")
+        elif self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW:
+            lines.append(self.render_plan_preview())
+        elif self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION:
+            lines.append(self.render_continue_prompt())
+        elif self.snapshot.phase in {GuidedDeploymentPhase.MONITOR, GuidedDeploymentPhase.DEPLOYMENT_COMPLETE, GuidedDeploymentPhase.DEPLOYMENT_FAILED}:
+            lines.append(self.render_status_table())
+            lines.append("Handoffs:")
+            lines.append("1  Logs -> logs")
+            lines.append("2  Diagnostics -> diagnostics")
+            lines.append("3  Status -> status")
+            lines.append("i  Inspection")
+        elif self.snapshot.phase is GuidedDeploymentPhase.LOGS:
+            lines.append(self.render_logs())
+        elif self.snapshot.phase is GuidedDeploymentPhase.INSPECTION:
+            lines.append(self.render_inspection())
+        elif self.snapshot.phase is GuidedDeploymentPhase.CANCELLED:
+            lines.append("Guided deployment cancelled before execution.")
         elif self.snapshot.phase is GuidedDeploymentPhase.COMPLETE:
             lines.append("Completion handoffs:")
             for index, handoff in enumerate(COMPLETION_HANDOFFS):
@@ -671,22 +749,35 @@ class GuidedDeploymentScreen(WorkflowScreen):
             return self._move(-1 if key in {"up", "k"} else 1)
         if key.isdigit():
             return self._select_number(key)
+        if key == "i":
+            self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.INSPECTION, message="Opened deployment inspection.")
+            return WorkflowKeyResult("Opened deployment inspection.")
+        if key == "l":
+            self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.LOGS, message="Opened deployment logs.")
+            return WorkflowKeyResult("Opened deployment logs.")
         if key in {"p", "v"}:
-            return self.preview_step()
+            return self.preview_plan() if self._m99_flow else self.preview_step()
         if key == "enter":
             if self.snapshot.phase is GuidedDeploymentPhase.PROFILE:
-                self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.MODE, message=f"Selected {self.snapshot.profile.label} profile.")
+                next_phase = GuidedDeploymentPhase.RELEASE_FAMILY if self._m99_flow else GuidedDeploymentPhase.MODE
+                self.snapshot = _replace_snapshot(self.snapshot, phase=next_phase, message=f"Selected {self.snapshot.profile.label} profile.")
                 return WorkflowKeyResult(self.snapshot.message)
+            if self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY:
+                return self.preview_plan()
             if self.snapshot.phase is GuidedDeploymentPhase.MODE:
                 self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.STEPS, message=f"Selected {self.snapshot.mode.label} mode.")
                 return WorkflowKeyResult(self.snapshot.message)
             return self.confirm_step()
         if key == "c":
-            return self.confirm_step()
+            return self.confirm_deployment_plan() if self._m99_flow and self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW else self.confirm_step()
+        if key == "DEPLOY":
+            return self.run_deployment_plan()
+        if key.lower() == "deploy":
+            return WorkflowKeyResult("Type DEPLOY to start automatic deployment.")
         if key == "y":
             return self.run_confirmed_step()
         if key in {"n", "cancel"}:
-            return self.cancel_step()
+            return self.cancel_deployment_plan() if self._m99_flow and self.snapshot.phase in {GuidedDeploymentPhase.PLAN_PREVIEW, GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION} else self.cancel_step()
         if key == "o":
             return self.open_selected_handoff()
         return WorkflowKeyResult(f"No guided deployment workflow action is bound to {key!r}.")
@@ -737,6 +828,9 @@ class GuidedDeploymentScreen(WorkflowScreen):
         if self.snapshot.phase is GuidedDeploymentPhase.PROFILE:
             self.selected_profile_index = (self.selected_profile_index + offset) % len(self.profiles)
             return self._select_profile(self.selected_profile_index)
+        if self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY:
+            self.selected_release_family_index = (self.selected_release_family_index + offset) % len(self.release_families)
+            return self._select_release_family(self.selected_release_family_index)
         if self.snapshot.phase is GuidedDeploymentPhase.MODE:
             self.selected_mode_index = (self.selected_mode_index + offset) % len(self.modes)
             return self._select_mode(self.selected_mode_index)
@@ -751,8 +845,15 @@ class GuidedDeploymentScreen(WorkflowScreen):
         index = int(key) - 1
         if self.snapshot.phase is GuidedDeploymentPhase.PROFILE and 0 <= index < len(self.profiles):
             return self._select_profile(index)
+        if self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY and 0 <= index < len(self.release_families):
+            return self._select_release_family(index)
         if self.snapshot.phase is GuidedDeploymentPhase.MODE and 0 <= index < len(self.modes):
             return self._select_mode(index)
+        if self.snapshot.phase in {GuidedDeploymentPhase.MONITOR, GuidedDeploymentPhase.DEPLOYMENT_COMPLETE, GuidedDeploymentPhase.DEPLOYMENT_FAILED}:
+            targets = {"1": "logs", "2": "diagnostics", "3": "status"}
+            target = targets.get(key)
+            if target:
+                return WorkflowKeyResult(f"Open workflow target: {target}.", open_target=target)
         if self.snapshot.phase is GuidedDeploymentPhase.COMPLETE and 0 <= index < len(COMPLETION_HANDOFFS):
             self.selected_handoff_index = index
             return self.open_selected_handoff()
@@ -768,6 +869,13 @@ class GuidedDeploymentScreen(WorkflowScreen):
         self.snapshot = _snapshot(profile, mode, self.steps_provider(profile.id, mode.id), 0, GuidedDeploymentPhase.PROFILE, f"Selected profile {profile.label}.")
         return WorkflowKeyResult(self.snapshot.message)
 
+    def _select_release_family(self, index: int) -> WorkflowKeyResult:
+        family = self.release_families[index]
+        self.selected_release_family_index = index
+        message = f"Selected release family {family.label}."
+        self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.RELEASE_FAMILY, message=message)
+        return WorkflowKeyResult(message)
+
     def _select_mode(self, index: int) -> WorkflowKeyResult:
         mode = self.modes[index]
         self.selected_mode_index = index
@@ -777,9 +885,104 @@ class GuidedDeploymentScreen(WorkflowScreen):
         self.snapshot = _snapshot(profile, mode, steps, 0, GuidedDeploymentPhase.MODE, message)
         return WorkflowKeyResult(message)
 
+    def preview_plan(self) -> WorkflowKeyResult:
+        family = self.release_families[self.selected_release_family_index]
+        self.current_plan = build_guided_deployment_plan(self.snapshot.profile, family, mode=self.snapshot.mode, plan_builder=self.plan_builder)
+        self._status_rows = build_deployment_status_rows(self.current_plan)
+        self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.PLAN_PREVIEW, message=f"Prepared deployment plan for {self.snapshot.profile.label} on {family.label}.")
+        return WorkflowKeyResult(self.snapshot.message)
+
+    def confirm_deployment_plan(self) -> WorkflowKeyResult:
+        if self.current_plan is None:
+            self.preview_plan()
+        self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION, message="Type DEPLOY to start automatic deployment.")
+        return WorkflowKeyResult(self.snapshot.message)
+
+    def cancel_deployment_plan(self) -> WorkflowKeyResult:
+        self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.CANCELLED, message="Guided deployment cancelled before execution.")
+        return WorkflowKeyResult(self.snapshot.message)
+
+    def run_deployment_plan(self) -> WorkflowKeyResult:
+        if self.snapshot.phase is not GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION:
+            return WorkflowKeyResult("Type DEPLOY to start automatic deployment.")
+        if self.current_plan is None:
+            return WorkflowKeyResult("Prepare a deployment plan before running.")
+        self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.MONITOR, message="Guided deployment auto-run started.")
+        rows = {step.component: DeploymentStatusRow(step.component, step.operation_id or "unavailable", StepRuntimeState.PENDING, last_update="queued") for step in self.current_plan.steps}
+        message = "Guided deployment auto-run completed."
+        failed = False
+        for event in self.runner(self.current_plan):
+            self._record_run_event(event, rows)
+            if event.status is StepRuntimeState.FAILED:
+                failed = True
+                label = next((_canonical_step_label(step.step_id, step.label) for step in self.current_plan.steps if step.step_id == event.step_id), event.step_id)
+                message = f"Guided deployment stopped after {label} failed."
+                break
+        self._status_rows = tuple(rows[step.component] for step in self.current_plan.steps)
+        phase = GuidedDeploymentPhase.DEPLOYMENT_FAILED if failed else GuidedDeploymentPhase.DEPLOYMENT_COMPLETE
+        self.snapshot = _replace_snapshot(self.snapshot, phase=phase, message=message)
+        return WorkflowKeyResult(message)
+
+    def render_plan_preview(self) -> str:
+        plan = self.current_plan
+        if plan is None:
+            return "Plan preview unavailable."
+        lines = ["Plan preview", plan.continue_prompt, "If you proceed, deployment will auto-run after confirmation."]
+        for step in plan.steps:
+            lines.append(f"- {step.label}: {step.operation_id or 'unavailable'}")
+            lines.extend(f"  {command}" for command in step.commands)
+        lines.append(f"Type {plan.confirmation_phrase} after continuing to auto-run.")
+        return "\n".join(lines)
+
+    def render_continue_prompt(self) -> str:
+        plan = self.current_plan
+        prompt = plan.continue_prompt if plan else "Continue with deployment? If you proceed, FortifyLab will automatically run the planned deployment steps."
+        phrase = plan.confirmation_phrase if plan else "DEPLOY"
+        return f"{prompt}\nType {phrase} to continue."
+
+    def render_status_table(self) -> str:
+        lines = ["Component | Operation | Status | Duration | Last update"]
+        for row in self.status_rows:
+            lines.append(f"[{row.color.value}] {row.component} | {row.operation} | {row.state.value.lower()} | {row.duration} | {row.last_update}")
+        return "\n".join(lines)
+
+    def render_logs(self) -> str:
+        return "\n".join(("Deployment logs", *self.deployment_logs))
+
+    def render_inspection(self) -> str:
+        if self.current_plan is None:
+            return "Inspection\nNo deployment plan prepared."
+        inspection = build_deployment_inspection(self.current_plan)
+        lines = ["Inspection", f"Profile: {self.current_plan.profile.label}", f"Release family: {self.current_plan.release_family.label}"]
+        for step in self.current_plan.steps:
+            lines.append(f"Adapter: {step.adapter_id or step.operation_id or 'unavailable'}")
+            lines.extend(f"Command: {redact_diagnostic_text(command)}" for command in step.commands)
+        lines.extend(f"Config: {key}" for key in inspection.config_keys)
+        return "\n".join(lines)
+
+    def _record_run_event(self, event, rows: dict[str, DeploymentStatusRow]) -> None:  # type: ignore[no-untyped-def]
+        status = event.status
+        rows[event.component] = DeploymentStatusRow(event.component, event.operation, status, _format_duration(event.duration_seconds), event.message)
+        self.log_buffer = self.log_buffer.append(DeploymentLogEvent(event.step_id, "system", event.message))
+        stdout = getattr(event, "stdout", "")
+        stderr = getattr(event, "stderr", "")
+        if stdout and redact_diagnostic_text(stdout) != stdout:
+            self.log_buffer = self.log_buffer.append(DeploymentLogEvent(event.step_id, "stdout", stdout))
+        if stderr:
+            self.log_buffer = self.log_buffer.append(DeploymentLogEvent(event.step_id, "stderr", stderr))
+
 
 def build_guided_deployment_workflow(**kwargs) -> GuidedDeploymentScreen:  # type: ignore[no-untyped-def]
     return GuidedDeploymentScreen(**kwargs)
+
+
+def build_guided_deployment_plan(profile: GuidedDeploymentProfile, release_family: ReleaseFamily, *, mode: GuidedDeploymentMode | None = None, plan_builder=None) -> DeploymentPlan:  # type: ignore[no-untyped-def]
+    if plan_builder is not None:
+        return plan_builder(profile, release_family)
+    return build_deployment_plan(profile_id=profile.id, release_family_id=release_family.id, mode_id=(mode.id if mode else "fresh"))
+
+
+GuidedDeploymentPlan = DeploymentPlan
 
 
 def build_step_preview(step: GuidedDeploymentStep) -> StepPreview:
@@ -803,6 +1006,17 @@ def _execute_guided_step(step: GuidedDeploymentStep, runner: GuidedDeploymentRun
 
 def _blocked_guided_runner(operation_id: str) -> OperationRunResult:
     raise RuntimeError(f"No guided deployment runner is configured for {operation_id}.")
+
+
+def _steps_for_profiles(profile_id: str, mode_id: str, profiles: tuple[GuidedDeploymentProfile, ...]) -> tuple[GuidedDeploymentStep, ...]:
+    try:
+        profile = deployment_profile(profile_id, profiles=profiles)
+    except KeyError:
+        return _default_steps_for_profile(profile_id, mode_id)
+    by_id = {step.id: step for step in DEPLOYMENT_STEPS}
+    state = StepRuntimeState.READY if mode_id == "fresh" else StepRuntimeState.UNAVAILABLE
+    reason = "ready for preview" if mode_id == "fresh" else "live resume/repair discovery is unavailable in clone-safe contract mode"
+    return tuple(_step_with_state(by_id.get(step_id, GuidedDeploymentStep(step_id, step_id.replace("_", " ").title(), f"{step_id}.start", "Generated from selected profile.")), state, reason) for step_id in profile.step_ids)
 
 
 def _default_steps_for_profile(profile_id: str, mode_id: str) -> tuple[GuidedDeploymentStep, ...]:
@@ -881,6 +1095,12 @@ def _canonical_step_label(step_id: str, label: str) -> str:
         "dvwa": "DVWA",
     }
     return canonical.get(step_id, label)
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "--"
+    return f"{seconds:.1f}s"
 
 
 def _display_label(step: GuidedDeploymentStep) -> str:
