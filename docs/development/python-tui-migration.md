@@ -697,6 +697,29 @@ run events, adapter inspection with dry-run command previews, pod-log guidance
 through existing Logs/Diagnostics handoffs, and completion/failure handoff keys
 to Logs, Diagnostics, Status, and Main menu.
 
+### M9.10 Closeout
+
+M9.10 landed through PRs #523, #524, #525, #526, and #527. Lifecycle controls now
+open Bash-style Python TUI workflows with readable target/action selection, dry
+plan previews, selected-profile and all-lab planning contracts, reverse-order
+stop/destroy, typed destructive confirmation, live monitor status rows, bounded
+redacted lifecycle logs, adapter inspection, and completion/failure handoffs.
+
+Manual lifecycle smoke from `migration/python-tui`:
+
+1. Run `./bin/fortifylab tui`.
+2. Open `2` Lab lifecycle controls and verify Start/Stop show readable plan previews.
+3. Open `m` More tools, then `5` App management, and verify a component supports
+   Start / upgrade, Stop, and Destroy (deletes data).
+4. Confirm Stop requires preview/confirmation and shows a lifecycle status table.
+5. Confirm Destroy requires the typed destructive phrase rather than `y`.
+6. During or after a lifecycle run, press `l` for lifecycle logs and `i` for
+   inspection; use `1`, `2`, `3`, or `m` from completion/failure handoffs.
+
+Default verification passed with clone-safe tests only: focused lifecycle stack
+38 tests, full suite 309 tests, compileall, TUI/doctor/status checks, and
+`git diff --check`.
+
 Default tests remain clone-safe. They use fake runners or mock the operation
 runner and do not invoke Kubernetes, Helm, Docker, network, lifecycle scripts,
 or credentials. Manual TUI smoke is recommended before using the real auto-run

@@ -31,26 +31,23 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-27
   milestone: M9.10
-  workstream: pm-open-M9.10-lifecycle-parity
-  branch: agent/pm-open-M9.10-lifecycle-parity
-  status: active
+  workstream: docs-M9.10-lifecycle-closeout
+  branch: agent/docs-M9.10-lifecycle-closeout
+  status: complete
   changed:
-    - M9.10 Lifecycle Controls Parity opened after user-directed pivot from guided deployment to lifecycle options.
-    - PM scope is to preserve the Bash lifecycle operator experience while keeping Python as the TUI/application layer and Bash as low-level lifecycle adapters.
-    - First work starts with lifecycle UX contract and Bash parity mapping before implementation.
+    - M9.10 Lifecycle Controls Parity completed on migration/python-tui.
+    - Lifecycle controls now use readable target/action screens, plan previews, selected-profile/all-lab contract models, typed destructive confirmation, live monitor status rows, bounded redacted logs, inspection, and completion/failure handoffs.
     - PR #479 remains open and held out of dev while focused parity work continues.
   next:
-    - Map Bash lifecycle behavior for selected-profile, all-lab, component, and sample-app operations.
-    - Define lifecycle TUI states, key handling, confirmation, live status, logs, inspection, and completion handoffs.
-    - Open focused PRs into migration/python-tui only.
+    - Manual TUI smoke lifecycle options from migration/python-tui.
+    - PM should recommend the next focused parity slice or prepare PR #479 for final merge readiness after user confirmation.
   blockers: []
   risks:
-    - Lifecycle actions include destructive paths; destroy/reset must not become easier than the Bash workflow.
-    - Default tests must not run Kubernetes, Helm, Docker, network, or real lifecycle scripts.
-    - Scope must stay on lifecycle parity and avoid reopening guided deployment behavior except for shared monitor/log primitives.
+    - Live lifecycle actions still depend on retained Bash operation adapters and should be manually validated against a lab before dev merge.
+    - Reset/restart/repair remain intentionally deferred unless a later slice implements safe ordered flows.
 
   needs_decision:
-    - Confirm whether full-lab destructive destroy should retain Bash's typed confirmation phrase or use a TUI-native equivalent with the same friction.
+    - Select the next focused parity slice or approve preparing PR #479 for merge to dev.
 
 
 open_decisions:
@@ -834,7 +831,7 @@ milestones:
           - M9.9.1 plan generation uses existing operation catalog dry-run previews and remains clone-safe with injected providers in tests.
       - id: M9.10
         name: Lifecycle controls parity
-        status: in_progress
+        status: completed
         branches:
           - agent/pm-open-M9.10-lifecycle-parity
           - agent/lifecycle-M9.10-bash-parity-map
@@ -857,7 +854,7 @@ milestones:
             status: completed
           - id: M9.10.5
             name: Completion/failure handoffs and docs
-            status: in_progress
+            status: completed
         acceptance:
           - Lab lifecycle, App management, and Sample apps keep the existing navigation structure and support arrow movement, jump-to-number selection, Enter activation, back, and quit.
           - Lifecycle screens show user-friendly target/action names instead of exposing raw operation IDs as the primary UX.
@@ -879,6 +876,12 @@ milestones:
           - TUI branch agent/tui-M9.10-lifecycle-parity replaces the raw operation-id-first lifecycle screen with readable target/action selection, plan preview, Enter-to-run safe actions, typed destroy confirmation, and completion handoffs.
           - Live monitor branch agent/tui-M9.10-lifecycle-live-monitor starts real/default lifecycle runs in a Textual background worker, streams lifecycle run events, updates status rows incrementally, and stops on failure.
           - Inspection/logs branch agent/tui-M9.10-lifecycle-inspection-logs adds bounded redacted lifecycle logs, adapter inspection, pod-log guidance, and handoff keys to Logs, Diagnostics, Status, and Main menu.
+          - PR #523 merged the M9.10 kickoff into migration/python-tui at fed63a0.
+          - PR #524 merged the lifecycle parity contract into migration/python-tui at 68d9ab7.
+          - PR #525 merged the lifecycle target/action workflow into migration/python-tui at 7aac1e6.
+          - PR #526 merged lifecycle live monitor streaming into migration/python-tui at c133ea7.
+          - PR #527 merged lifecycle logs and inspection handoffs into migration/python-tui at 0b78baf.
+          - Verification passed: focused lifecycle stack 38 tests, full suite 309 tests, python3 -m compileall -q fortifylab tests, ./bin/fortifylab tui --check, ./bin/fortifylab doctor --check, ./bin/fortifylab status --check, and git diff --check.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
