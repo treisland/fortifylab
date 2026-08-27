@@ -479,13 +479,15 @@ and GitHub `offline-docs` check remain green.
 User review after this checkpoint chose to keep PR #479 open and continue adding
 focused workflow parity before merging to `dev`.
 
-### M9.6 Active Slice
+### M9.6 Completed Slice
 
-M9.6 owns Setup and Readiness workflow parity. The slice should make the `0`
-Initial setup and readiness path useful before full guided deployment lands:
-show a read-only readiness overview, aggregate existing diagnostics/status/config
-signals, surface safe next actions into existing workflows, and keep live cluster
-or deployment mutation out of default tests.
+M9.6 delivered Setup and Readiness workflow parity for the `0` Initial setup
+and readiness path while PR #479 remains held out of `dev`. The TUI now shows a
+read-only readiness overview, aggregates existing diagnostics/status/config
+signals, surfaces redacted config/license/prerequisite/live-lab states, and hands
+recommended actions into existing Config, Doctor, Status, Help, Lifecycle, and
+Logs workflows. Reset tier guidance remains read-only and routes destructive work
+through lifecycle controls.
 
 ## Decision Log
 
@@ -508,6 +510,41 @@ or deployment mutation out of default tests.
 | Branch upstream | Push `migration/python-tui` and track `origin/migration/python-tui` | M0 - accepted |
 
 ## Heartbeat Log
+
+### 2026-08-27
+
+Milestone: M9.6
+
+Workstream: Setup and Readiness Workflow
+
+Branch: `agent/close-M9.6-readiness-workflow`
+
+Status: closeout
+
+Changed:
+
+- Merged PR #501 for the setup readiness snapshot contract and clone-safe provider boundaries.
+- Merged PR #502 for functional setup/readiness TUI wiring, recommended-action handoffs, reset tier guidance, and active workflow tests.
+- Kept PR #479 open and held out of `dev` for continued focused parity work.
+
+Verification:
+
+- `python3 -m unittest discover tests` passed with 241 tests.
+- `python3 -m compileall -q fortifylab tests` passed.
+- `./bin/fortifylab tui --check`, `./bin/fortifylab doctor --check`, and `./bin/fortifylab status --check` passed.
+- `git diff --check` passed.
+- GitHub `offline-docs` passed on PR #502.
+
+Next:
+
+- Open the next focused submenu parity milestone after PM confirmation.
+- Continue adding to PR #479 through `migration/python-tui`; do not merge to `dev` yet.
+
+Blockers: none.
+
+Risks:
+
+- Full guided deployment remains outside M9.6 and should be handled as a separate milestone.
 
 ### 2026-08-25
 
