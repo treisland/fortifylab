@@ -191,11 +191,26 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         self.assertEqual(screen.stage, "cancelled")
         self.assertEqual(runner.calls, [])
 
-    def test_enter_from_plan_preview_autoruns_fake_runner_and_updates_colored_status_table(self) -> None:
+    def test_enter_from_plan_preview_starts_monitor_and_incremental_events_update_table(self) -> None:
         contract, runner, screen = self._screen()
         self._choose_sast_full_244(screen)
 
-        self.assertEqual(screen.handle_key("enter").message, "Guided deployment auto-run completed.")
+        self.assertEqual(screen.handle_key("enter").message, "Guided deployment auto-run started.")
+        self.assertEqual(screen.stage, "deployment_monitor")
+        self.assertEqual(runner.calls, [])
+
+        events = screen.iter_deployment_run_events()
+        first = next(events)
+        self.assertEqual(screen.apply_deployment_run_event(first).message, "Mysql running")
+        rendered = screen.render_status_table()
+        self.assertIn("Deployment state", rendered)
+        self.assertIn("[1/6] MySQL", rendered)
+        self.assertIn("in progress", rendered)
+        self.assertIn("[cyan]", rendered)
+
+        for event in events:
+            screen.apply_deployment_run_event(event)
+        self.assertEqual(screen.finish_deployment_plan().message, "Guided deployment auto-run completed.")
         self.assertEqual(runner.calls[0:3], ["mysql.start", "postgresql.start", "ssc.start"])
         self.assertEqual(screen.stage, "deployment_complete")
 
@@ -208,15 +223,15 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         self.assertIn("Component", rendered)
         self.assertIn("Operation", rendered)
         self.assertIn("Status", rendered)
-        self.assertIn("mysql", rendered)
-        self.assertIn("installed", rendered.lower())
+        self.assertIn("MySQL", rendered)
+        self.assertIn("complete", rendered.lower())
         self.assertIn("[green]", rendered)
         self.assertIn("Success: guided deployment complete.", screen.render())
 
     def test_logs_are_bounded_and_redacted_and_can_be_opened_from_deployment_view(self) -> None:
         _contract_obj, _runner, screen = self._screen(log_limit=3)
         self._choose_sast_full_244(screen)
-        screen.handle_key("enter")
+        screen.run_deployment_plan()
 
         logs = screen.deployment_logs
         self.assertLessEqual(len(logs), 3)
@@ -254,7 +269,7 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         _contract_obj, active_runner, screen = self._screen(runner=runner)
         self._choose_sast_full_244(screen)
 
-        self.assertEqual(screen.handle_key("enter").message, "Guided deployment stopped after SSC failed.")
+        self.assertEqual(screen.run_deployment_plan().message, "Guided deployment stopped after SSC failed.")
         self.assertIs(active_runner, runner)
         self.assertEqual(active_runner.calls, ["mysql.start", "postgresql.start", "ssc.start"])
         self.assertEqual(screen.stage, "deployment_failed")

@@ -643,6 +643,9 @@ class GuidedDeploymentScreen(WorkflowScreen):
         self.plan_builder = plan_builder
         self.log_limit = log_limit
         self.log_buffer = DeploymentLogBuffer(limit=log_limit)
+        self._run_rows: dict[str, DeploymentStatusRow] | None = None
+        self._run_failed = False
+        self._run_message = ""
         self.selected_profile_index = _index(profile_id or profiles[0].id, profiles)
         self.selected_mode_index = _index(mode_id, modes)
         self.selected_release_family_index = _index(release_family_id or self.release_families[0].id, self.release_families)
@@ -818,13 +821,13 @@ class GuidedDeploymentScreen(WorkflowScreen):
             if self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY:
                 return self.preview_plan()
             if self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW and self._m99_flow:
-                return self.run_deployment_plan()
+                return self.start_deployment_plan()
             if self.snapshot.phase is GuidedDeploymentPhase.MODE:
                 self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.STEPS, message=f"Selected {self.snapshot.mode.label} mode.")
                 return WorkflowKeyResult(self.snapshot.message)
             return WorkflowKeyResult("Press enter from the plan preview to start automatic deployment.") if self._m99_flow else self.confirm_step()
         if key == "c":
-            return self.run_deployment_plan() if self._m99_flow and self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW else (WorkflowKeyResult("Press enter from the plan preview to start automatic deployment.") if self._m99_flow else self.confirm_step())
+            return self.start_deployment_plan() if self._m99_flow and self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW else (WorkflowKeyResult("Press enter from the plan preview to start automatic deployment.") if self._m99_flow else self.confirm_step())
         if key == "DEPLOY":
             return WorkflowKeyResult("Press enter from the plan preview to start automatic deployment.") if self._m99_flow else self.run_deployment_plan()
         if key.lower() == "deploy":
@@ -958,26 +961,62 @@ class GuidedDeploymentScreen(WorkflowScreen):
         self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.CANCELLED, message="Guided deployment cancelled before execution.")
         return WorkflowKeyResult(self.snapshot.message)
 
-    def run_deployment_plan(self) -> WorkflowKeyResult:
+    def start_deployment_plan(self) -> WorkflowKeyResult:
         if self.snapshot.phase is not GuidedDeploymentPhase.PLAN_PREVIEW:
             return WorkflowKeyResult("Prepare and review a deployment plan before starting automatic deployment.")
         if self.current_plan is None:
             return WorkflowKeyResult("Prepare a deployment plan before running.")
-        self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.MONITOR, message="Guided deployment auto-run started.")
-        rows = {step.component: DeploymentStatusRow(step.component, step.operation_id or "unavailable", StepRuntimeState.PENDING, last_update="queued") for step in self.current_plan.steps}
+        self._run_rows = _initial_run_rows(self.current_plan)
+        self._run_failed = False
+        self._run_message = "Guided deployment auto-run started."
+        self._status_rows = tuple(self._run_rows[step.component] for step in self.current_plan.steps)
+        self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.MONITOR, message=self._run_message)
+        return WorkflowKeyResult(self._run_message)
+
+    def iter_deployment_run_events(self):  # type: ignore[no-untyped-def]
+        if self.current_plan is None:
+            return iter(())
+        return iter(self.runner(self.current_plan))
+
+    def apply_deployment_run_event(self, event) -> WorkflowKeyResult:  # type: ignore[no-untyped-def]
+        if self.current_plan is None:
+            return WorkflowKeyResult("Prepare a deployment plan before running.")
+        if self._run_rows is None:
+            self._run_rows = _initial_run_rows(self.current_plan)
+        self._record_run_event(event, self._run_rows)
+        self._status_rows = tuple(self._run_rows[step.component] for step in self.current_plan.steps)
+        self._run_message = event.message
+        if event.status is StepRuntimeState.FAILED:
+            self._run_failed = True
+            label = next((_canonical_step_label(step.step_id, step.label) for step in self.current_plan.steps if step.step_id == event.step_id), event.step_id)
+            self._run_message = f"Guided deployment stopped after {label} failed."
+            self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.DEPLOYMENT_FAILED, message=self._run_message)
+        else:
+            self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.MONITOR, message=self._run_message)
+        return WorkflowKeyResult(self._run_message)
+
+    def finish_deployment_plan(self) -> WorkflowKeyResult:
+        if self.current_plan is None:
+            return WorkflowKeyResult("Prepare a deployment plan before running.")
+        if self._run_rows is not None:
+            self._status_rows = tuple(self._run_rows[step.component] for step in self.current_plan.steps)
+        if self._run_failed:
+            message = self._run_message or "Guided deployment failed."
+            self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.DEPLOYMENT_FAILED, message=message)
+            return WorkflowKeyResult(message)
         message = "Guided deployment auto-run completed."
-        failed = False
-        for event in self.runner(self.current_plan):
-            self._record_run_event(event, rows)
-            if event.status is StepRuntimeState.FAILED:
-                failed = True
-                label = next((_canonical_step_label(step.step_id, step.label) for step in self.current_plan.steps if step.step_id == event.step_id), event.step_id)
-                message = f"Guided deployment stopped after {label} failed."
-                break
-        self._status_rows = tuple(rows[step.component] for step in self.current_plan.steps)
-        phase = GuidedDeploymentPhase.DEPLOYMENT_FAILED if failed else GuidedDeploymentPhase.DEPLOYMENT_COMPLETE
-        self.snapshot = _replace_snapshot(self.snapshot, phase=phase, message=message)
+        self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.DEPLOYMENT_COMPLETE, message=message)
         return WorkflowKeyResult(message)
+
+    def run_deployment_plan(self) -> WorkflowKeyResult:
+        start = self.start_deployment_plan()
+        if self.snapshot.phase is not GuidedDeploymentPhase.MONITOR:
+            return start
+        for event in self.iter_deployment_run_events():
+            self.apply_deployment_run_event(event)
+            if self._run_failed:
+                break
+        return self.finish_deployment_plan()
 
     def render_plan_preview(self) -> str:
         plan = self.current_plan
@@ -1003,9 +1042,13 @@ class GuidedDeploymentScreen(WorkflowScreen):
         return "\n".join(lines)
 
     def render_status_table(self) -> str:
-        lines = ["Component | Operation | Status | Duration | Last update"]
-        for row in self.status_rows:
-            lines.append(f"[{row.color.value}] {row.component} | {row.operation} | {row.state.value.lower()} | {row.duration} | {row.last_update}")
+        rows = self.status_rows
+        lines = ["Deployment state", "Component | Operation | Status | Duration | Last update"]
+        total = len(rows)
+        for index, row in enumerate(rows, start=1):
+            component = _canonical_step_label(row.component, row.component.replace("_", " ").title())
+            status = _status_label(row.state)
+            lines.append(f"[{row.color.value}] [{index}/{total}] {component} | {row.operation} | {status} | {row.duration} | {row.last_update}")
         return "\n".join(lines)
 
     def render_logs(self) -> str:
@@ -1032,6 +1075,33 @@ class GuidedDeploymentScreen(WorkflowScreen):
             self.log_buffer = self.log_buffer.append(DeploymentLogEvent(event.step_id, "stdout", stdout))
         if stderr:
             self.log_buffer = self.log_buffer.append(DeploymentLogEvent(event.step_id, "stderr", stderr))
+
+
+def _initial_run_rows(plan: DeploymentPlan) -> dict[str, DeploymentStatusRow]:
+    return {
+        step.component: DeploymentStatusRow(
+            step.component,
+            step.operation_id or "unavailable",
+            StepRuntimeState.PENDING if step.operation_id else StepRuntimeState.UNAVAILABLE,
+            last_update="queued" if step.operation_id else "operation adapter unavailable",
+        )
+        for step in plan.steps
+    }
+
+
+def _status_label(state: StepRuntimeState) -> str:
+    labels = {
+        StepRuntimeState.PENDING: "pending",
+        StepRuntimeState.RUNNING: "in progress",
+        StepRuntimeState.INSTALLED: "complete",
+        StepRuntimeState.SUCCESS: "complete",
+        StepRuntimeState.COMPLETE: "complete",
+        StepRuntimeState.FAILED: "failed",
+        StepRuntimeState.SKIPPED: "skipped",
+        StepRuntimeState.CANCELLED: "cancelled",
+        StepRuntimeState.UNAVAILABLE: "unavailable",
+    }
+    return labels.get(state, state.value.lower())
 
 
 def build_guided_deployment_workflow(**kwargs) -> GuidedDeploymentScreen:  # type: ignore[no-untyped-def]
@@ -1192,8 +1262,10 @@ def _would_complete(snapshot: GuidedDeploymentSnapshot) -> bool:
 
 def _canonical_step_label(step_id: str, label: str) -> str:
     canonical = {
+        "mysql": "MySQL",
         "postgresql": "PostgreSQL",
         "ssc": "SSC",
+        "lim": "LIM",
         "scancentral_sast": "ScanCentral SAST",
         "scancentral_dast": "ScanCentral DAST",
         "juice_shop": "Juice Shop",
