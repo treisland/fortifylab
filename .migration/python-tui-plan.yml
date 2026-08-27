@@ -787,7 +787,7 @@ milestones:
         submilestones:
           - id: M9.9.1
             name: Profile and release family contract
-            status: planned
+            status: in_review
           - id: M9.9.2
             name: Selection, plan preview, and auto-run confirmation prompt
             status: planned
@@ -819,6 +819,8 @@ milestones:
           - PM recommends one milestone split into reviewable submilestones so auto-run, status, logs, and inspection do not become a new monolith.
           - Existing M9.7 guided deployment work already provides a state-machine foundation with profile selection, modes, step preview, confirmation, fake-runner hooks, and completion handoffs.
           - M9.9 should reuse the M3 operation catalog/runner boundary and retained Bash scripts as low-level adapters only.
+          - Contract branch agent/deploy-M9.9-profile-family-contract defines release family, deployment plan, plan step, auto-run DEPLOY gate, status row/color, bounded log buffer, and inspection models.
+          - M9.9.1 plan generation uses existing operation catalog dry-run previews and remains clone-safe with injected providers in tests.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v

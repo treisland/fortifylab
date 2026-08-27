@@ -8,25 +8,31 @@ uses injected runners in tests.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
 from fortifylab.diagnostics import redact_diagnostic_text
 from fortifylab.operations import OperationRunResult, SensitiveRedactor, dry_run
+from fortifylab.operations.catalog import get_operation
 from fortifylab.tui.lifecycle import ExecutionResultDisplayModel, build_result_display
 from fortifylab.tui.workflows import WorkflowKeyResult, WorkflowScreen
 
 
-StageName = Literal["profile_selection", "deployment_mode_selection", "step_controls", "completion_handoff"]
+StageName = Literal["profile_selection", "release_family_selection", "deployment_mode_selection", "plan_preview", "step_controls", "deployment_monitor", "deployment_logs", "deployment_inspection", "completion_handoff"]
 
 
 class GuidedDeploymentPhase(str, Enum):
     PROFILE = "profile_selection"
+    RELEASE_FAMILY = "release_family_selection"
     MODE = "deployment_mode_selection"
+    PLAN_PREVIEW = "plan_preview"
     STEPS = "step_controls"
     PREVIEW = "step_controls"
     CONFIRM = "step_controls"
+    MONITOR = "deployment_monitor"
+    LOGS = "deployment_logs"
+    INSPECTION = "deployment_inspection"
     COMPLETE = "completion_handoff"
     CANCELLED = "step_controls"
     BLOCKED = "completion_handoff"
@@ -43,9 +49,35 @@ class StepRuntimeState(str, Enum):
     SKIPPED = "SKIPPED"
     CANCELLED = "CANCELLED"
     UNAVAILABLE = "UNAVAILABLE"
+    UNKNOWN = "UNKNOWN"
 
 
 GuidedStepStatus = StepRuntimeState
+
+
+class DeploymentStatusColor(str, Enum):
+    DIM = "dim"
+    CYAN = "cyan"
+    GREEN = "green"
+    YELLOW = "yellow"
+    RED = "red"
+    MAGENTA = "magenta"
+    GRAY = "gray"
+
+
+STATUS_COLOR_BY_STATE: dict[StepRuntimeState, DeploymentStatusColor] = {
+    StepRuntimeState.PENDING: DeploymentStatusColor.DIM,
+    StepRuntimeState.READY: DeploymentStatusColor.GRAY,
+    StepRuntimeState.PREVIEWED: DeploymentStatusColor.CYAN,
+    StepRuntimeState.RUNNING: DeploymentStatusColor.CYAN,
+    StepRuntimeState.SUCCESS: DeploymentStatusColor.GREEN,
+    StepRuntimeState.COMPLETE: DeploymentStatusColor.GREEN,
+    StepRuntimeState.SKIPPED: DeploymentStatusColor.YELLOW,
+    StepRuntimeState.FAILED: DeploymentStatusColor.RED,
+    StepRuntimeState.CANCELLED: DeploymentStatusColor.MAGENTA,
+    StepRuntimeState.UNAVAILABLE: DeploymentStatusColor.YELLOW,
+    StepRuntimeState.UNKNOWN: DeploymentStatusColor.GRAY,
+}
 
 
 @dataclass(frozen=True, init=False)
@@ -104,6 +136,26 @@ class GuidedDeploymentMode:
 
 
 DeploymentMode = GuidedDeploymentMode
+
+
+@dataclass(frozen=True)
+class ReleaseFamily:
+    id: str
+    label: str
+    summary: str
+    flight_plan: str
+    version_keys: tuple[str, ...] = (
+        "FORTIFY_FLIGHT_PLAN",
+        "FORTIFY_SSC_CHART_VERSION",
+        "FORTIFY_SSC_IMAGE_TAG",
+        "FORTIFY_SCSAST_CHART_VERSION",
+        "FORTIFY_SCDAST_CHART_VERSION",
+        "FORTIFY_LIM_CHART_VERSION",
+    )
+    recommended: bool = False
+
+
+GuidedReleaseFamily = ReleaseFamily
 
 
 @dataclass(frozen=True, init=False)
@@ -194,6 +246,97 @@ class CompletionHandoff:
 
 
 @dataclass(frozen=True)
+class DeploymentPlanStep:
+    step_id: str
+    label: str
+    operation_id: str | None
+    commands: tuple[str, ...]
+    required: bool
+    adapter_id: str | None
+    config_keys: tuple[str, ...]
+    confirmation_required: bool
+    summary: str
+
+
+@dataclass(frozen=True)
+class DeploymentPlan:
+    profile: GuidedDeploymentProfile
+    release_family: ReleaseFamily
+    mode: GuidedDeploymentMode
+    steps: tuple[DeploymentPlanStep, ...]
+    continue_prompt: str = "Continue with deployment? If you proceed, FortifyLab will automatically run the planned deployment steps."
+    confirmation_phrase: str = "DEPLOY"
+    mutating: bool = True
+    stop_on_failure: bool = True
+
+    @property
+    def operation_ids(self) -> tuple[str, ...]:
+        return tuple(step.operation_id for step in self.steps if step.operation_id is not None)
+
+    @property
+    def command_count(self) -> int:
+        return sum(len(step.commands) for step in self.steps)
+
+
+@dataclass(frozen=True)
+class DeploymentStatusRow:
+    component: str
+    operation: str
+    state: StepRuntimeState
+    duration: str = "--"
+    last_update: str = ""
+
+    @property
+    def color(self) -> DeploymentStatusColor:
+        return STATUS_COLOR_BY_STATE.get(self.state, DeploymentStatusColor.GRAY)
+
+
+@dataclass(frozen=True)
+class DeploymentLogEvent:
+    step_id: str
+    stream: Literal["stdout", "stderr", "system"]
+    message: str
+
+
+@dataclass(frozen=True)
+class DeploymentLogBuffer:
+    events: tuple[DeploymentLogEvent, ...] = ()
+    limit: int = 200
+
+    def append(self, event: DeploymentLogEvent) -> "DeploymentLogBuffer":
+        redacted = DeploymentLogEvent(event.step_id, event.stream, redact_diagnostic_text(event.message))
+        return DeploymentLogBuffer((*self.events, redacted)[-self.limit :], self.limit)
+
+    def render(self) -> tuple[str, ...]:
+        return tuple(f"{event.step_id} {event.stream}: {event.message}" for event in self.events)
+
+
+@dataclass(frozen=True)
+class DeploymentInspection:
+    profile_id: str
+    release_family_id: str
+    mode_id: str
+    current_step_id: str | None
+    adapter_id: str | None
+    command_preview: tuple[str, ...]
+    config_keys: tuple[str, ...]
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class GuidedDeploymentRunContract:
+    plan: DeploymentPlan
+    status_rows: tuple[DeploymentStatusRow, ...]
+    logs: DeploymentLogBuffer = field(default_factory=DeploymentLogBuffer)
+    inspection: DeploymentInspection | None = None
+    awaiting_deploy_confirmation: bool = False
+
+    @property
+    def confirmation_note(self) -> str:
+        return f"Type {self.plan.confirmation_phrase} to auto-run the planned deployment steps."
+
+
+@dataclass(frozen=True)
 class GuidedDeploymentSnapshot:
     phase: GuidedDeploymentPhase
     profile: GuidedDeploymentProfile
@@ -257,6 +400,26 @@ COMPLETION_HANDOFFS: tuple[CompletionHandoff, ...] = (
 )
 
 
+RELEASE_FAMILIES: tuple[ReleaseFamily, ...] = (
+    ReleaseFamily("current", "Current recommended", "Use the repository's recommended Fortify chart and image family.", "recommended", recommended=True),
+    ReleaseFamily("stable", "Stable pinned", "Use a pinned stable family for repeatable lab rebuilds.", "stable"),
+    ReleaseFamily("legacy", "Legacy compatibility", "Use older compatible values when validating upgrade or repair behavior.", "legacy"),
+)
+
+
+STEP_CONFIG_KEYS: dict[str, tuple[str, ...]] = {
+    "mysql": ("FORTIFY_MYSQL_CHART_VERSION", "FORTIFY_MYSQL_IMAGE_TAG"),
+    "postgresql": ("FORTIFY_POSTGRES_CHART_VERSION", "FORTIFY_POSTGRES_IMAGE_TAG"),
+    "ssc": ("FORTIFY_SSC_CHART_VERSION", "FORTIFY_SSC_IMAGE_TAG", "SSC_URL", "DEFAULT_ALIAS"),
+    "lim": ("FORTIFY_LIM_CHART_VERSION", "LIM_URL", "LIM_API_URL", "LIM_POOL_NAME"),
+    "scancentral_sast": ("FORTIFY_SCSAST_CHART_VERSION", "FORTIFY_SCSAST_CTRL_IMAGE_TAG", "FORTIFY_SCSAST_WORKER_IMAGE_TAG", "SCSAST_URL"),
+    "scancentral_dast": ("FORTIFY_SCDAST_CHART_VERSION", "SCDAST_URL", "SCDAST_SSC_USER"),
+    "juice_shop": ("JUICE_SHOP_URL",),
+    "webgoat": ("WEBGOAT_URL",),
+    "dvwa": ("DVWA_URL",),
+}
+
+
 def deployment_profile(profile_id: str, *, profiles: tuple[GuidedDeploymentProfile, ...] = DEPLOYMENT_PROFILES) -> GuidedDeploymentProfile:
     for profile in profiles:
         if profile.id == profile_id:
@@ -269,6 +432,100 @@ def deployment_mode(mode_id: str, *, modes: tuple[GuidedDeploymentMode, ...] = D
         if mode.id == mode_id:
             return mode
     raise KeyError(f"Unknown deployment mode: {mode_id}")
+
+
+def release_family(family_id: str, *, families: tuple[ReleaseFamily, ...] = RELEASE_FAMILIES) -> ReleaseFamily:
+    for family in families:
+        if family.id == family_id:
+            return family
+    raise KeyError(f"Unknown release family: {family_id}")
+
+
+def build_deployment_plan(
+    *,
+    profile_id: str = "core",
+    release_family_id: str = "current",
+    mode_id: str = "fresh",
+    profiles: tuple[GuidedDeploymentProfile, ...] = DEPLOYMENT_PROFILES,
+    families: tuple[ReleaseFamily, ...] = RELEASE_FAMILIES,
+    modes: tuple[GuidedDeploymentMode, ...] = DEPLOYMENT_MODES,
+    steps_provider: StepsProvider | None = None,
+) -> DeploymentPlan:
+    profile = deployment_profile(profile_id, profiles=profiles)
+    family = release_family(release_family_id, families=families)
+    mode = deployment_mode(mode_id, modes=modes)
+    provider = steps_provider or _default_steps_for_profile
+    steps = tuple(_plan_step(step) for step in provider(profile.id, mode.id))
+    return DeploymentPlan(profile, family, mode, steps)
+
+
+def build_deployment_status_rows(plan: DeploymentPlan) -> tuple[DeploymentStatusRow, ...]:
+    return tuple(
+        DeploymentStatusRow(
+            component=step.label,
+            operation=step.operation_id or "unavailable",
+            state=StepRuntimeState.PENDING if step.operation_id else StepRuntimeState.UNAVAILABLE,
+            last_update="queued" if step.operation_id else "operation adapter unavailable",
+        )
+        for step in plan.steps
+    )
+
+
+def build_deployment_inspection(plan: DeploymentPlan, *, current_step_id: str | None = None) -> DeploymentInspection:
+    selected = _find_plan_step(plan, current_step_id) if current_step_id else (plan.steps[0] if plan.steps else None)
+    return DeploymentInspection(
+        profile_id=plan.profile.id,
+        release_family_id=plan.release_family.id,
+        mode_id=plan.mode.id,
+        current_step_id=selected.step_id if selected else None,
+        adapter_id=selected.adapter_id if selected else None,
+        command_preview=selected.commands if selected else (),
+        config_keys=tuple(dict.fromkeys((*plan.release_family.version_keys, *(selected.config_keys if selected else ())))),
+        notes=(
+            "Clone-safe inspection only; no Kubernetes, Helm, Docker, network, scripts, or credentials are invoked.",
+            "Real execution wiring must use injected runners and preserve the DEPLOY confirmation gate.",
+        ),
+    )
+
+
+def build_guided_run_contract(plan: DeploymentPlan, *, current_step_id: str | None = None, log_limit: int = 200) -> GuidedDeploymentRunContract:
+    return GuidedDeploymentRunContract(
+        plan=plan,
+        status_rows=build_deployment_status_rows(plan),
+        logs=DeploymentLogBuffer(limit=log_limit),
+        inspection=build_deployment_inspection(plan, current_step_id=current_step_id),
+        awaiting_deploy_confirmation=True,
+    )
+
+
+def _plan_step(step: GuidedDeploymentStep) -> DeploymentPlanStep:
+    commands: tuple[str, ...] = ()
+    confirmation_required = False
+    summary = step.summary
+    if step.operation_id is not None and step.available and step.state is not StepRuntimeState.UNAVAILABLE:
+        operation = get_operation(step.operation_id)
+        preview = dry_run(operation.id)
+        commands = preview.commands
+        confirmation_required = preview.confirmation_required
+        summary = operation.description or step.summary
+    return DeploymentPlanStep(
+        step_id=step.id,
+        label=_display_label(step),
+        operation_id=step.operation_id,
+        commands=commands,
+        required=step.required,
+        adapter_id=step.operation_id,
+        config_keys=STEP_CONFIG_KEYS.get(step.id, ()),
+        confirmation_required=confirmation_required,
+        summary=summary,
+    )
+
+
+def _find_plan_step(plan: DeploymentPlan, step_id: str | None) -> DeploymentPlanStep:
+    for step in plan.steps:
+        if step.step_id == step_id:
+            return step
+    raise KeyError(f"Unknown deployment plan step: {step_id}")
 
 
 def deployment_steps_for_profile(profile_id: str) -> tuple[GuidedDeploymentStep, ...]:
