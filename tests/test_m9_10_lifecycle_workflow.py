@@ -53,8 +53,10 @@ class M910LifecycleWorkflowParityTests(unittest.TestCase):
 
         self.assertEqual(screen.handle_key("enter").message, "mysql.stop completed successfully.")
         self.assertEqual(calls, ["mysql.stop"])
-        self.assertIn("Handoffs:", screen.render())
-        self.assertIn("m. Main menu -> main", screen.render())
+        completed = screen.render()
+        self.assertIn("Lifecycle status", completed)
+        self.assertIn("Completion: lifecycle action finished.", completed)
+        self.assertIn("Actions: enter/m Main menu", completed)
 
     def test_destroy_requires_typed_phrase_not_yes(self) -> None:
         calls: list[str] = []
@@ -115,8 +117,11 @@ class M910LifecycleWorkflowParityTests(unittest.TestCase):
         self.assertEqual(screen.handle_key("enter").message, "Confirmation required before lifecycle execution.")
         self.assertEqual(screen.handle_key("enter").message, "Lifecycle execution started.")
         self.assertEqual(screen.stage, "lifecycle_monitor")
-        self.assertIn("Lifecycle status", screen.render())
-        self.assertIn("pending", screen.render())
+        monitor = screen.render()
+        self.assertIn("Lifecycle status", monitor)
+        self.assertIn("State: running", monitor)
+        self.assertIn("pending", monitor)
+        self.assertNotIn("Plan preview", monitor)
 
         events = screen.iter_lifecycle_run_events()
         first_event = next(events)
@@ -128,6 +133,10 @@ class M910LifecycleWorkflowParityTests(unittest.TestCase):
             screen.apply_lifecycle_run_event(event)
         self.assertEqual(screen.finish_lifecycle_plan().message, "Lifecycle plan completed successfully.")
         self.assertEqual(screen.stage, "lifecycle_complete")
+        completed = screen.render()
+        self.assertIn("Completion: lifecycle action finished.", completed)
+        self.assertIn("Actions: enter/m Main menu", completed)
+        self.assertEqual(screen.handle_key("enter").open_target, "main")
         self.assertEqual(calls, ["mysql.start", "postgresql.start", "ssc.start", "lim.start", "scancentral_sast.start", "scancentral_dast.start"])
 
     def test_lifecycle_monitor_stops_on_failure(self) -> None:

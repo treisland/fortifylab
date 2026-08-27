@@ -528,6 +528,13 @@ class LifecycleWorkflowScreen:
             lines.append(f"Unsupported: {self.contract.unsupported_reason}")
             return "\n".join(lines)
 
+        if self.stage == "lifecycle_inspection" and self.last_plan is not None:
+            return self._render_lifecycle_inspection()
+        if self.stage == "lifecycle_logs":
+            return self._render_lifecycle_logs()
+        if self.stage in {"lifecycle_monitor", "lifecycle_complete", "lifecycle_failed"}:
+            return self._render_lifecycle_monitor()
+
         scope = build_lifecycle_scope(self.contract.action_target)
         lines.append(f"Target: {scope.label}")
         lines.append(scope.description)
@@ -550,46 +557,8 @@ class LifecycleWorkflowScreen:
                 lines.append(f"Selected plan: {preview_plan.label}")
                 lines.append(f"Order: {preview_plan.order_note}")
 
-        if self.last_plan is not None and self.stage == "lifecycle_inspection":
-            lines.append("")
-            lines.append("Lifecycle inspection")
-            lines.append(f"Scope: {self.last_plan.scope.label}")
-            lines.append(f"Order: {self.last_plan.order_note}")
-            lines.append(f"Data impact: {self.last_plan.data_impact}")
-            lines.append("Adapters:")
-            for step in self.last_plan.steps:
-                preview = dry_run(step.operation_id)
-                commands = ", ".join(preview.commands)
-                lines.append(f"{step.order}. {step.label}: {step.operation_id} -> {commands}")
-            lines.append("Pod logs: use Diagnostics or Logs handoff for live environment inspection.")
-
-        if self.log_lines and self.stage == "lifecycle_logs":
-            lines.append("")
-            lines.append("Lifecycle logs")
-            lines.extend(self.log_lines[-12:])
-
         if self.last_plan is not None:
-            lines.append("")
-            lines.append("Plan preview")
-            lines.append(f"Scope: {self.last_plan.scope.label}")
-            lines.append(f"Action: {self.last_plan.label}")
-            lines.append(f"Data impact: {self.last_plan.data_impact}")
-            lines.append("Steps that will run:")
-            for step in self.last_plan.steps:
-                lines.append(f"{step.order}. {step.label}")
-            if self.last_plan.destructive:
-                lines.append(f"Confirm by typing: {self.last_plan.confirmation_phrase}")
-            else:
-                lines.append("Continue: press enter to run this lifecycle plan.")
-            lines.append("Inspect: press i to review adapters, commands, and handoffs.")
-            lines.append("Cancel: press n before execution starts.")
-
-        if self.status_rows:
-            lines.append("")
-            lines.append("Lifecycle status")
-            lines.append("Component | Status | Last update")
-            for row in self.status_rows:
-                lines.append(_format_lifecycle_status_row(row))
+            lines.extend(("", *self._render_plan_preview_lines(self.last_plan)))
 
         if self.last_preview is not None:
             lines.append("")
@@ -598,25 +567,103 @@ class LifecycleWorkflowScreen:
             if self.last_preview.confirmation_prompt:
                 lines.append(f"Confirm: {self.last_preview.confirmation_prompt}")
         if self.last_result is not None:
-            lines.append("")
-            lines.append(f"Status: {self.last_result.status}")
-            lines.append(self.last_result.message)
-            if self.last_result.exit_code is not None:
-                lines.append(f"Exit code: {self.last_result.exit_code}")
-            if self.last_result.stdout_summary:
-                lines.append(f"stdout: {self.last_result.stdout_summary}")
-            if self.last_result.stderr_summary:
-                lines.append(f"stderr: {self.last_result.stderr_summary}")
-            if self.last_result.redacted_output:
-                lines.append("Output:")
-                lines.extend(f"  {line}" for line in self.last_result.redacted_output[:12])
-                if len(self.last_result.redacted_output) > 12:
-                    lines.append("  ...")
+            lines.extend(("", *self._render_result_lines()))
+        return "\n".join(line for line in lines if line is not None)
+
+    def _render_lifecycle_inspection(self) -> str:
+        assert self.last_plan is not None
+        lines = [self.summary, "", "Lifecycle inspection"]
+        lines.append(f"Scope: {self.last_plan.scope.label}")
+        lines.append(f"Order: {self.last_plan.order_note}")
+        lines.append(f"Data impact: {self.last_plan.data_impact}")
+        lines.append("Adapters:")
+        for step in self.last_plan.steps:
+            preview = dry_run(step.operation_id)
+            commands = ", ".join(preview.commands)
+            lines.append(f"{step.order}. {step.label}: {step.operation_id} -> {commands}")
+        lines.append("Pod logs: use Diagnostics or Logs handoff for live environment inspection.")
+        lines.append("")
+        lines.append("Actions: l Logs | b Back | m Main menu")
+        return "\n".join(lines)
+
+    def _render_lifecycle_logs(self) -> str:
+        lines = [self.summary, "", "Lifecycle logs"]
+        if self.log_lines:
+            lines.extend(self.log_lines[-12:])
+        else:
+            lines.append("No lifecycle log lines have been captured yet.")
+        lines.append("")
+        lines.append("Actions: i Inspection | b Back | m Main menu")
+        return "\n".join(lines)
+
+    def _render_lifecycle_monitor(self) -> str:
+        lines = [self.summary, "", "Lifecycle status"]
+        if self.last_plan is not None:
+            lines.append(f"Action: {self.last_plan.label}")
+            lines.append(f"Scope: {self.last_plan.scope.label}")
+        if self.stage == "lifecycle_monitor":
+            lines.append("State: running")
+        elif self.stage == "lifecycle_complete":
+            lines.append("State: complete")
+        elif self.stage == "lifecycle_failed":
+            lines.append("State: failed")
+        if self._run_message:
+            lines.append(f"Latest: {self._run_message}")
+        lines.append("")
+        lines.append("Component | Status | Last update")
+        for row in self.status_rows:
+            lines.append(_format_lifecycle_status_row(row))
+        if self.last_result is not None:
+            lines.extend(("", *self._render_result_lines(include_handoffs=False)))
+        lines.append("")
+        if self.stage == "lifecycle_complete":
+            lines.append("Completion: lifecycle action finished.")
+            lines.append("Actions: enter/m Main menu | 1 Logs | 2 Diagnostics | 3 Status | i Inspection")
+        elif self.stage == "lifecycle_failed":
+            lines.append("Completion: lifecycle action stopped before all steps finished.")
+            lines.append("Actions: enter/m Main menu | 1 Logs | 2 Diagnostics | 3 Status | i Inspection")
+        else:
+            lines.append("Actions: l Logs | i Inspection | 1 Logs | 2 Diagnostics | 3 Status | m Main menu")
+        return "\n".join(lines)
+
+    def _render_plan_preview_lines(self, plan: LifecyclePlan) -> tuple[str, ...]:
+        lines = [
+            "Plan preview",
+            f"Scope: {plan.scope.label}",
+            f"Action: {plan.label}",
+            f"Data impact: {plan.data_impact}",
+            "Steps that will run:",
+        ]
+        lines.extend(f"{step.order}. {step.label}" for step in plan.steps)
+        if plan.destructive:
+            lines.append(f"Confirm by typing: {plan.confirmation_phrase}")
+        else:
+            lines.append("Continue: press enter to run this lifecycle plan.")
+        lines.append("Inspect: press i to review adapters, commands, and handoffs.")
+        lines.append("Cancel: press n before execution starts.")
+        return tuple(lines)
+
+    def _render_result_lines(self, *, include_handoffs: bool = True) -> tuple[str, ...]:
+        if self.last_result is None:
+            return ()
+        lines = [f"Status: {self.last_result.status}", self.last_result.message]
+        if self.last_result.exit_code is not None:
+            lines.append(f"Exit code: {self.last_result.exit_code}")
+        if self.last_result.stdout_summary:
+            lines.append(f"stdout: {self.last_result.stdout_summary}")
+        if self.last_result.stderr_summary:
+            lines.append(f"stderr: {self.last_result.stderr_summary}")
+        if self.last_result.redacted_output:
+            lines.append("Output:")
+            lines.extend(f"  {line}" for line in self.last_result.redacted_output[:12])
+            if len(self.last_result.redacted_output) > 12:
+                lines.append("  ...")
+        if include_handoffs:
             lines.append("")
             lines.append("Handoffs:")
             for handoff in _LIFECYCLE_HANDOFFS:
                 lines.append(f"{handoff.key}. {handoff.label} -> {handoff.workflow_target}")
-        return "\n".join(line for line in lines if line is not None)
+        return tuple(lines)
 
     def handle_key(self, key: str) -> WorkflowKeyResult:
         if key in {"back", "b", "escape"}:
@@ -631,6 +678,8 @@ class LifecycleWorkflowScreen:
             self.stage = "lifecycle_inspection"
             return WorkflowKeyResult("Opened lifecycle inspection.")
         if self.stage in {"lifecycle_monitor", "lifecycle_complete", "lifecycle_failed", "lifecycle_logs", "lifecycle_inspection"}:
+            if key == "enter" and self.stage in {"lifecycle_complete", "lifecycle_failed"}:
+                return WorkflowKeyResult("Return to main menu.", open_target="main")
             handoff = _handoff_for_key(key)
             if handoff is not None:
                 return WorkflowKeyResult(f"Open workflow target: {handoff.workflow_target}.", open_target=handoff.workflow_target)
@@ -707,12 +756,20 @@ class LifecycleWorkflowScreen:
             self._run_message = "Lifecycle execution started."
             self.last_result = None
             return WorkflowKeyResult(self._run_message)
-        results = [_execute_with_runner(self.runner, step.operation_id) for step in self.last_plan.steps]
-        failure = next((result for result in results if result.status != "success"), None)
-        if failure is not None:
-            self.last_result = failure
-            self.stage = "lifecycle_failed"
-            return WorkflowKeyResult(failure.message)
+        rows: list[LifecycleStatusRow] = []
+        results = []
+        for step in self.last_plan.steps:
+            result = _execute_with_runner(self.runner, step.operation_id)
+            results.append(result)
+            rows.append(LifecycleStatusRow(step.component_id, step.label, step.operation_id, result.status, result.message))
+            if result.status != "success":
+                self.status_rows = tuple(rows)
+                self.last_result = result
+                self.stage = "lifecycle_failed"
+                self._run_failed = True
+                self._run_message = f"Lifecycle stopped after {step.label} failed."
+                return WorkflowKeyResult(result.message)
+        self.status_rows = tuple(rows)
         self.last_result = results[-1]
         if len(results) == 1:
             self.stage = "lifecycle_complete"
