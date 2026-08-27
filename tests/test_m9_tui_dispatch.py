@@ -43,6 +43,22 @@ class M9TuiDispatchTests(unittest.TestCase):
                 self.assertEqual(result.screen.title, title)
                 self.assertIn("workflow boundary", result.screen.render())
 
+
+    def test_setup_readiness_actions_open_registered_workflow_screen(self) -> None:
+        for menu_id in ("main", "more_tools"):
+            with self.subTest(menu_id=menu_id):
+                selected = find_item(menu_id, "0")
+                assert selected is not None
+
+                result = dispatch_menu_item(selected)
+
+                self.assertEqual(result.kind, "screen")
+                self.assertIsNotNone(result.screen)
+                assert result.screen is not None
+                self.assertEqual(result.screen.id, "setup_readiness")
+                self.assertEqual(result.screen.title, "Initial setup and readiness")
+                self.assertIn("Overall readiness:", result.screen.render())
+
     def test_registered_lifecycle_placeholder_action_opens_contract_screen(self) -> None:
         selected = find_item("lifecycle", "1")
         assert selected is not None

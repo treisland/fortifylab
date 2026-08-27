@@ -18,6 +18,7 @@ class WorkflowKeyResult:
 
     message: str
     exit_screen: bool = False
+    open_target: str | None = None
 
 
 @dataclass
@@ -62,6 +63,8 @@ def _static_screen(screen_id: str, title: str, summary: str, *lines: str) -> Wor
 
 DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
     "setup_readiness": lambda _selected: _build_setup_readiness_screen(),
+    "setup_readiness.guided_steps": lambda _selected: _build_setup_readiness_screen(),
+    "setup_readiness.reset_tiers": lambda _selected: _build_reset_tiers_screen(),
     "configuration_editor": lambda _selected: _build_config_editor_screen(),
     "diagnostics": lambda _selected: _build_diagnostics_screen(),
     "cluster_snapshot": lambda _selected: _build_status_screen(),
@@ -80,21 +83,22 @@ DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
 }
 
 
+def build_setup_readiness_workflow(**kwargs) -> WorkflowScreen:
+    from fortifylab.tui.readiness import build_setup_readiness_workflow as build
+
+    return build(**kwargs)
+
+
+def build_reset_tiers_workflow() -> WorkflowScreen:
+    from fortifylab.tui.readiness import build_reset_tiers_workflow
+
+    return build_reset_tiers_workflow()
+
+
 def build_config_workflow(env_file=None) -> WorkflowScreen:
     from fortifylab.tui.config import ConfigEditorScreen
 
     return ConfigEditorScreen(env_file=env_file)
-
-
-def build_setup_readiness_workflow(snapshot_provider=None, env_file=None, doctor_report_provider=None, status_provider=None) -> WorkflowScreen:
-    from fortifylab.tui.readiness import SetupReadinessScreen
-
-    return SetupReadinessScreen(
-        snapshot_provider=snapshot_provider,
-        env_file=env_file,
-        doctor_report_provider=doctor_report_provider,
-        status_provider=status_provider,
-    )
 
 
 def build_help_workflow(help_root=None) -> WorkflowScreen:
@@ -139,12 +143,16 @@ def build_wizard_log_workflow(log_sources=None) -> WorkflowScreen:
     return WizardLogWorkflowScreen(log_sources=log_sources)
 
 
-def _build_config_editor_screen() -> WorkflowScreen:
-    return build_config_workflow()
-
-
 def _build_setup_readiness_screen() -> WorkflowScreen:
     return build_setup_readiness_workflow()
+
+
+def _build_reset_tiers_screen() -> WorkflowScreen:
+    return build_reset_tiers_workflow()
+
+
+def _build_config_editor_screen() -> WorkflowScreen:
+    return build_config_workflow()
 
 
 def _build_diagnostics_screen() -> WorkflowScreen:
@@ -195,12 +203,7 @@ def dispatch_menu_item(
 
     action = selected.action
     factory = workflows.get(action.target)
-    if factory is not None and action.kind in {
-        ActionKind.VIEW,
-        ActionKind.WORKFLOW,
-        ActionKind.COMMAND,
-        ActionKind.PLACEHOLDER,
-    }:
+    if factory is not None and action.kind == ActionKind.WORKFLOW:
         screen = factory(selected)
         return WorkflowDispatchResult(
             "screen",
@@ -221,6 +224,20 @@ def dispatch_menu_item(
                 menu=menu,
                 selected_item=selected,
             )
+
+    if factory is not None and action.kind in {
+        ActionKind.VIEW,
+        ActionKind.WORKFLOW,
+        ActionKind.COMMAND,
+        ActionKind.PLACEHOLDER,
+    }:
+        screen = factory(selected)
+        return WorkflowDispatchResult(
+            "screen",
+            f"Opened {screen.title}.",
+            screen=screen,
+            selected_item=selected,
+        )
 
     if action.kind in {ActionKind.VIEW, ActionKind.WORKFLOW, ActionKind.COMMAND, ActionKind.PLACEHOLDER}:
         lifecycle_screen = _build_lifecycle_screen_if_supported(selected)
