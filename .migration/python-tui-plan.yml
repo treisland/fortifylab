@@ -31,25 +31,23 @@ heartbeat:
   stale_after_days: 3
   last_updated: 2026-08-27
   milestone: M9.9
-  workstream: pm-open-M9.9-functional-guided-deployment
-  branch: agent/pm-open-M9.9-functional-guided-deployment
+  workstream: pm-M9.9-closeout-open-next
+  branch: agent/pm-M9.9-closeout-open-next
   status: active
   changed:
-    - User redirected M9.9 from Samples and Training Apps to Functional Guided Deployment in the Python TUI.
-    - M9.9 will make Guided Deployment functional with deployment profile selection, release family selection, an auto-run continue prompt, status table monitoring, logs, and inspection affordances.
+    - M9.9 Functional Guided Deployment completed on migration/python-tui.
+    - Guided Deployment now supports Python TUI profile selection, release family selection, plan preview, auto-run warning, DEPLOY confirmation, adapter-backed execution, status table, bounded logs, and inspection.
     - PR #479 remains open and held out of dev while focused parity work continues.
   next:
-    - Define profile, release family, deployment plan, status row, event, log buffer, and inspection contracts.
-    - Implement plan preview and high-friction auto-run confirmation before any mutating deployment executes.
-    - Add status table, deployment log, and inspection surfaces around the operation adapter boundary.
+    - Await user direction for the next parity slice.
+    - Manual TUI smoke is recommended before using the real auto-run path against a live lab.
   blockers: []
   risks:
-    - Auto-run must not weaken safety; real mutation requires explicit confirmation and injected/fake runners in default tests.
-    - Streaming logs/status can grow scope; keep runner events, bounded logs, and status rows modular.
-    - Default tests must not require live lab state, Kubernetes, Helm, Docker, network, scripts, or credentials.
+    - Live lab deployment through the Python TUI has not been manually validated in this closeout.
+    - Operation adapter behavior is trusted through the M3 boundary; default tests mock real execution.
 
   needs_decision:
-    - Whether M9.9.5 should enable real auto-run once status/log/inspection is in place, or stop at fake-runner execution plus manual wiring plan.
+    - Select the next focused parity slice or approve preparing PR #479 for merge to dev.
 
 
 open_decisions:
@@ -777,32 +775,35 @@ milestones:
           - Verification on migration/python-tui passed: python3 -m unittest discover tests, python3 -m compileall -q fortifylab tests, ./bin/fortifylab tui --check, ./bin/fortifylab doctor --check, ./bin/fortifylab status --check, and git diff --check.
       - id: M9.9
         name: Functional guided deployment
-        status: in_progress
+        status: completed
         branches:
           - agent/pm-open-M9.9-functional-guided-deployment
           - agent/deploy-M9.9-profile-family-contract
           - agent/test-M9.9-guided-auto-run
           - agent/tui-M9.9-guided-auto-run
           - agent/docs-M9.9-guided-auto-run-closeout
+          - agent/deploy-M9.9-real-run-wiring
+          - agent/docs-M9.9-guided-deployment
+          - agent/pm-M9.9-closeout-open-next
         submilestones:
           - id: M9.9.1
             name: Profile and release family contract
-            status: in_review
+            status: completed
           - id: M9.9.2
             name: Selection, plan preview, and auto-run confirmation prompt
-            status: planned
+            status: completed
           - id: M9.9.3
             name: Execution orchestrator and colored status table
-            status: planned
+            status: completed
           - id: M9.9.4
             name: Deployment logs and inspection view
-            status: planned
+            status: completed
           - id: M9.9.5
             name: Safe real-run wiring and manual smoke gate
-            status: planned
+            status: completed
           - id: M9.9.6
             name: Docs and closeout
-            status: planned
+            status: completed
         acceptance:
           - Guided Deployment remains a Python TUI workflow preserving the current Deploy navigation structure.
           - Users can select a deployment profile and release family with arrow keys and jump-to-number selections.
@@ -819,6 +820,13 @@ milestones:
           - PM recommends one milestone split into reviewable submilestones so auto-run, status, logs, and inspection do not become a new monolith.
           - Existing M9.7 guided deployment work already provides a state-machine foundation with profile selection, modes, step preview, confirmation, fake-runner hooks, and completion handoffs.
           - M9.9 should reuse the M3 operation catalog/runner boundary and retained Bash scripts as low-level adapters only.
+          - PR #512 merged the M9.9 kickoff and user-refocused guardrails into migration/python-tui at d6249f7.
+          - PR #514 merged profile/release-family, plan, status, log, and inspection contracts at 84959cf.
+          - PR #513 merged the auto-run workflow implementation and fixture-only tests at a1e68b4.
+          - PR #515 merged real-run adapter wiring behind DEPLOY confirmation at c5e9295.
+          - PR #516 merged user and migration docs for the functional guided deployment flow at b07f5e8.
+          - Verification on migration/python-tui passed: python3 -m unittest discover tests with 284 tests, python3 -m compileall -q fortifylab tests, ./bin/fortifylab tui --check, ./bin/fortifylab doctor --check, ./bin/fortifylab status --check, and git diff --check.
+          - Manual TUI smoke is recommended before using real auto-run against a live lab; default CI uses fake runners/mocks only.
           - Contract branch agent/deploy-M9.9-profile-family-contract defines release family, deployment plan, plan step, auto-run DEPLOY gate, status row/color, bounded log buffer, and inspection models.
           - M9.9.1 plan generation uses existing operation catalog dry-run previews and remains clone-safe with injected providers in tests.
     verification_gates:
