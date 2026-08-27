@@ -39,7 +39,7 @@ def render_check() -> str:
 
 
 def workflow_key_from_event(event) -> str | None:  # type: ignore[no-untyped-def]
-    """Return printable workflow key input from a Textual key event."""
+    """Return normalized workflow key input from a Textual key event."""
 
     key = getattr(event, "key", None)
     if isinstance(key, str) and key.isdigit():
@@ -47,6 +47,10 @@ def workflow_key_from_event(event) -> str | None:  # type: ignore[no-untyped-def
     character = getattr(event, "character", None)
     if isinstance(character, str) and len(character) == 1 and character.isprintable():
         return character
+    if isinstance(key, str):
+        normalized = normalize_menu_key(key)
+        if normalized in {"enter", "up", "down", "back", "quit", "help"}:
+            return normalized
     return None
 
 
