@@ -152,7 +152,7 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
     def _choose_sast_full_244(self, screen) -> None:
         self.assertEqual(screen.handle_key("2").message, "Selected profile SAST full.")
         self.assertEqual(screen.handle_key("enter").message, "Selected SAST full profile.")
-        self.assertEqual(screen.handle_key("2").message, "Selected release family Fortify 24.4.")
+        self.assertEqual(screen.handle_key("2").message, "Selected Flight Plan Fortify 24.4.")
         self.assertEqual(screen.handle_key("enter").message, "Prepared deployment plan for SAST full on Fortify 24.4.")
 
     def test_profile_release_family_selection_and_plan_preview_use_arrows_and_numbers(self) -> None:
@@ -165,16 +165,20 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         self.assertEqual(screen.handle_key("enter").message, "Selected SAST full profile.")
 
         self.assertEqual(screen.stage, "release_family_selection")
-        self.assertIn("Release family selection", screen.render())
-        self.assertEqual(screen.handle_key("2").message, "Selected release family Fortify 24.4.")
+        rendered = screen.render()
+        self.assertIn("Flight Plan selection", rendered)
+        self.assertEqual(screen.handle_key("2").message, "Selected Flight Plan Fortify 24.4.")
         self.assertEqual(screen.selected_release_family_id, "24.4")
         self.assertEqual(screen.handle_key("enter").message, "Prepared deployment plan for SAST full on Fortify 24.4.")
 
         rendered = screen.render()
         self.assertEqual(screen.stage, "plan_preview")
         self.assertIn("Plan preview", rendered)
-        self.assertIn("bash apps/scancentral_sast/start.sh --family 24.4", rendered)
-        self.assertIn("deployment will auto-run", rendered)
+        self.assertIn("ScanCentral SAST", rendered)
+        self.assertNotIn("bash apps/scancentral_sast/start.sh --family 24.4", rendered)
+        self.assertIn("Continue: press c", rendered)
+        self.assertIn("Inspect: press i", rendered)
+        self.assertIn("will auto-run the deployment", rendered)
         self.assertEqual(runner.calls, [])
 
     def test_continue_prompt_requires_uppercase_deploy_and_cancel_executes_nothing(self) -> None:
@@ -213,6 +217,7 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         self.assertIn("mysql", rendered)
         self.assertIn("installed", rendered.lower())
         self.assertIn("[green]", rendered)
+        self.assertIn("Success: guided deployment complete.", screen.render())
 
     def test_logs_are_bounded_and_redacted_and_can_be_opened_from_deployment_view(self) -> None:
         _contract_obj, _runner, screen = self._screen(log_limit=3)
@@ -240,7 +245,7 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         inspection = screen.render_inspection()
         self.assertIn("Inspection", inspection)
         self.assertIn("Profile: SAST full", inspection)
-        self.assertIn("Release family: Fortify 24.4", inspection)
+        self.assertIn("Flight Plan: Fortify 24.4", inspection)
         self.assertIn("Adapter: mysql.start", inspection)
         self.assertIn("bash apps/mysql/start.sh --family 24.4", inspection)
         self.assertNotIn("password=", inspection)
@@ -285,7 +290,10 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         self.assertIn("Profile selection", screen.render())
         self.assertIn("Selected", screen.handle_key("enter").message)
         self.assertEqual(screen.stage, "release_family_selection")
-        self.assertIn("Release family selection", screen.render())
+        rendered = screen.render()
+        self.assertIn("Flight Plan selection", rendered)
+        self.assertIn("Fortify 26.2", rendered)
+        self.assertNotIn("Current recommended", rendered)
 
     def test_real_guided_runner_delegates_to_operation_runner_after_confirmation(self) -> None:
         contract = _contract()

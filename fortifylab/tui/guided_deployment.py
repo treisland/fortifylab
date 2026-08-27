@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Literal
 
 from fortifylab.diagnostics import redact_diagnostic_text
+from fortifylab.flight_plans import FlightPlanCatalogError, load_flight_plan_catalog
 from fortifylab.operations import OperationRunResult, SensitiveRedactor, dry_run, run_operation
 from fortifylab.operations.catalog import get_operation
 from fortifylab.tui.lifecycle import ExecutionResultDisplayModel, build_result_display
@@ -159,6 +160,11 @@ class ReleaseFamily:
         "FORTIFY_LIM_CHART_VERSION",
     )
     recommended: bool = False
+    status: str = "unknown"
+    family: str = ""
+    components: dict[str, str] = field(default_factory=dict)
+    repositories: dict[str, str] = field(default_factory=dict)
+    source: str = "repo"
 
 
 GuidedReleaseFamily = ReleaseFamily
@@ -426,11 +432,45 @@ COMPLETION_HANDOFFS: tuple[CompletionHandoff, ...] = (
 )
 
 
-RELEASE_FAMILIES: tuple[ReleaseFamily, ...] = (
-    ReleaseFamily("current", "Current recommended", "Use the repository's recommended Fortify chart and image family.", "recommended", recommended=True),
-    ReleaseFamily("stable", "Stable pinned", "Use a pinned stable family for repeatable lab rebuilds.", "stable"),
-    ReleaseFamily("legacy", "Legacy compatibility", "Use older compatible values when validating upgrade or repair behavior.", "legacy"),
+FALLBACK_RELEASE_FAMILIES: tuple[ReleaseFamily, ...] = (
+    ReleaseFamily("fortify-26.2", "Fortify 26.2", "Recommended repository Flight Plan.", "fortify-26.2", recommended=True, status="recommended", family="26.2"),
 )
+
+
+def release_families_from_flight_plans() -> tuple[ReleaseFamily, ...]:
+    catalog = load_flight_plan_catalog()
+    families = []
+    for plan in catalog.flight_plans:
+        version_keys = tuple(dict.fromkeys(("FORTIFY_FLIGHT_PLAN", *catalog.database_defaults.keys(), *plan.components.keys())))
+        status = plan.status.replace("-", " ")
+        source_note = "local Flight Plan" if plan.source == "local" else "repo Flight Plan"
+        summary = f"{status}; {source_note}; family {plan.family}. {plan.notes}"
+        families.append(
+            ReleaseFamily(
+                plan.id,
+                plan.label,
+                summary,
+                plan.id,
+                version_keys=version_keys,
+                recommended=plan.id == catalog.default_flight_plan or plan.recommended,
+                status=plan.status,
+                family=plan.family,
+                components=plan.components,
+                repositories=plan.repositories,
+                source=plan.source,
+            )
+        )
+    return tuple(families)
+
+
+def default_release_families() -> tuple[ReleaseFamily, ...]:
+    try:
+        return release_families_from_flight_plans()
+    except FlightPlanCatalogError:
+        return FALLBACK_RELEASE_FAMILIES
+
+
+RELEASE_FAMILIES: tuple[ReleaseFamily, ...] = default_release_families()
 
 
 STEP_CONFIG_KEYS: dict[str, tuple[str, ...]] = {
@@ -667,7 +707,7 @@ class GuidedDeploymentScreen(WorkflowScreen):
             f"Stage: {self.stage}",
             f"Profile: {self.snapshot.profile.label}",
             f"Mode: {self.snapshot.mode.label}",
-            f"Release family: {self.release_families[self.selected_release_family_index].label}",
+            f"Flight Plan: {self.release_families[self.selected_release_family_index].label}",
             f"Message: {self.snapshot.message}",
             "",
         ]
@@ -677,10 +717,11 @@ class GuidedDeploymentScreen(WorkflowScreen):
                 marker = ">" if index - 1 == self.selected_profile_index else " "
                 lines.append(f"{marker} {index}. {profile.label} - {profile.summary}")
         elif self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY:
-            lines.append("Release family selection:")
+            lines.append("Flight Plan selection:")
             for index, family in enumerate(self.release_families, start=1):
                 marker = ">" if index - 1 == self.selected_release_family_index else " "
-                lines.append(f"{marker} {index}. {family.label} - {family.summary}")
+                badge = " recommended" if family.recommended else ""
+                lines.append(f"{marker} {index}. {family.label}{badge} - {family.summary}")
         elif self.snapshot.phase is GuidedDeploymentPhase.MODE:
             lines.append("Deployment mode selection:")
             for index, mode in enumerate(self.modes, start=1):
@@ -691,6 +732,10 @@ class GuidedDeploymentScreen(WorkflowScreen):
         elif self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION:
             lines.append(self.render_continue_prompt())
         elif self.snapshot.phase in {GuidedDeploymentPhase.MONITOR, GuidedDeploymentPhase.DEPLOYMENT_COMPLETE, GuidedDeploymentPhase.DEPLOYMENT_FAILED}:
+            if self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_COMPLETE:
+                lines.append("Success: guided deployment complete.")
+            elif self.snapshot.phase is GuidedDeploymentPhase.DEPLOYMENT_FAILED:
+                lines.append("Guided deployment needs attention.")
             lines.append(self.render_status_table())
             lines.append("Handoffs:")
             lines.append("1  Logs -> logs")
@@ -723,7 +768,11 @@ class GuidedDeploymentScreen(WorkflowScreen):
             lines.extend(("", f"Result: {self.last_result.message}"))
             if self.last_result.display is not None:
                 lines.extend(self.last_result.display.redacted_output)
-        lines.extend(("", "Actions:", "up/down  Select", "number  Jump", "enter/c  Confirm", "p/v  Preview", "y  Run confirmed", "n  Cancel", "m  Mode selection", "s  Step controls", "r  Refresh", "b  Back", "q  Quit"))
+        lines.extend(("", "Actions:"))
+        if self._m99_flow:
+            lines.extend(("up/down  Select", "number  Jump", "enter  Select / prepare plan", "c  Continue from plan preview", "DEPLOY  Start automatic deployment", "i  Inspection", "l  Logs", "n  Cancel before deploy", "r  Refresh", "b  Back", "q  Quit"))
+        else:
+            lines.extend(("up/down  Select", "number  Jump", "enter/c  Confirm", "p/v  Preview", "y  Run confirmed", "n  Cancel", "m  Mode selection", "s  Step controls", "r  Refresh", "b  Back", "q  Quit"))
         return redact_diagnostic_text("\n".join(lines))
 
     @property
@@ -740,9 +789,13 @@ class GuidedDeploymentScreen(WorkflowScreen):
         if key in {"r", "refresh"}:
             return WorkflowKeyResult("Refreshed guided deployment workflow.")
         if key == "m":
+            if self._m99_flow:
+                return WorkflowKeyResult("Deployment mode is handled by the guided auto-run plan.")
             self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.MODE, message="Select a deployment mode.")
             return WorkflowKeyResult("Deployment mode selection.")
         if key == "s":
+            if self._m99_flow:
+                return WorkflowKeyResult("Step controls are replaced by the automatic deployment status screen.")
             self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.STEPS, message="Select a deployment step.")
             return WorkflowKeyResult("Per-step controls.")
         if key in {"up", "k", "down", "j"}:
@@ -756,7 +809,9 @@ class GuidedDeploymentScreen(WorkflowScreen):
             self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.LOGS, message="Opened deployment logs.")
             return WorkflowKeyResult("Opened deployment logs.")
         if key in {"p", "v"}:
-            return self.preview_plan() if self._m99_flow else self.preview_step()
+            if self._m99_flow:
+                return self.preview_plan() if self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY else WorkflowKeyResult("Use c to continue from plan preview or i for inspection details.")
+            return self.preview_step()
         if key == "enter":
             if self.snapshot.phase is GuidedDeploymentPhase.PROFILE:
                 next_phase = GuidedDeploymentPhase.RELEASE_FAMILY if self._m99_flow else GuidedDeploymentPhase.MODE
@@ -764,18 +819,20 @@ class GuidedDeploymentScreen(WorkflowScreen):
                 return WorkflowKeyResult(self.snapshot.message)
             if self.snapshot.phase is GuidedDeploymentPhase.RELEASE_FAMILY:
                 return self.preview_plan()
+            if self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW and self._m99_flow:
+                return self.confirm_deployment_plan()
             if self.snapshot.phase is GuidedDeploymentPhase.MODE:
                 self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.STEPS, message=f"Selected {self.snapshot.mode.label} mode.")
                 return WorkflowKeyResult(self.snapshot.message)
-            return self.confirm_step()
+            return WorkflowKeyResult("Use c to continue from plan preview or DEPLOY after confirmation.") if self._m99_flow else self.confirm_step()
         if key == "c":
-            return self.confirm_deployment_plan() if self._m99_flow and self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW else self.confirm_step()
+            return self.confirm_deployment_plan() if self._m99_flow and self.snapshot.phase is GuidedDeploymentPhase.PLAN_PREVIEW else (WorkflowKeyResult("Prepare a plan before continuing.") if self._m99_flow else self.confirm_step())
         if key == "DEPLOY":
             return self.run_deployment_plan()
         if key.lower() == "deploy":
             return WorkflowKeyResult("Type DEPLOY to start automatic deployment.")
         if key == "y":
-            return self.run_confirmed_step()
+            return WorkflowKeyResult("Use DEPLOY to start the automatic guided deployment.") if self._m99_flow else self.run_confirmed_step()
         if key in {"n", "cancel"}:
             return self.cancel_deployment_plan() if self._m99_flow and self.snapshot.phase in {GuidedDeploymentPhase.PLAN_PREVIEW, GuidedDeploymentPhase.DEPLOYMENT_CONFIRMATION} else self.cancel_step()
         if key == "o":
@@ -837,6 +894,8 @@ class GuidedDeploymentScreen(WorkflowScreen):
         if self.snapshot.phase is GuidedDeploymentPhase.COMPLETE:
             self.selected_handoff_index = (self.selected_handoff_index + offset) % len(COMPLETION_HANDOFFS)
             return WorkflowKeyResult(f"Selected handoff: {COMPLETION_HANDOFFS[self.selected_handoff_index].label}.")
+        if self._m99_flow:
+            return WorkflowKeyResult("Use c to continue from plan preview or i for inspection details.")
         index = (self.snapshot.current_step_index + offset) % len(self.snapshot.steps)
         self.snapshot = _replace_snapshot(self.snapshot, current_step_index=index, phase=GuidedDeploymentPhase.STEPS, message=f"Selected step {_display_label(self.snapshot.steps[index])}.")
         return WorkflowKeyResult(self.snapshot.message)
@@ -857,6 +916,8 @@ class GuidedDeploymentScreen(WorkflowScreen):
         if self.snapshot.phase is GuidedDeploymentPhase.COMPLETE and 0 <= index < len(COMPLETION_HANDOFFS):
             self.selected_handoff_index = index
             return self.open_selected_handoff()
+        if self._m99_flow:
+            return WorkflowKeyResult(f"No guided deployment selection is bound to {key!r} in this view.")
         if 0 <= index < len(self.snapshot.steps):
             self.snapshot = _replace_snapshot(self.snapshot, current_step_index=index, phase=GuidedDeploymentPhase.STEPS, message=f"Selected step {_display_label(self.snapshot.steps[index])}.")
             return WorkflowKeyResult(self.snapshot.message)
@@ -872,7 +933,7 @@ class GuidedDeploymentScreen(WorkflowScreen):
     def _select_release_family(self, index: int) -> WorkflowKeyResult:
         family = self.release_families[index]
         self.selected_release_family_index = index
-        message = f"Selected release family {family.label}."
+        message = f"Selected Flight Plan {family.label}."
         self.snapshot = _replace_snapshot(self.snapshot, phase=GuidedDeploymentPhase.RELEASE_FAMILY, message=message)
         return WorkflowKeyResult(message)
 
@@ -927,11 +988,23 @@ class GuidedDeploymentScreen(WorkflowScreen):
         plan = self.current_plan
         if plan is None:
             return "Plan preview unavailable."
-        lines = ["Plan preview", plan.continue_prompt, "If you proceed, deployment will auto-run after confirmation."]
+        lines = [
+            "Plan preview",
+            f"Profile: {plan.profile.label}",
+            f"Flight Plan: {plan.release_family.label}",
+            "Deployments that will run:",
+        ]
         for step in plan.steps:
-            lines.append(f"- {step.label}: {step.operation_id or 'unavailable'}")
-            lines.extend(f"  {command}" for command in step.commands)
-        lines.append(f"Type {plan.confirmation_phrase} after continuing to auto-run.")
+            marker = "required" if step.required else "optional"
+            operation = step.operation_id or "unavailable"
+            label = _canonical_step_label(step.step_id, step.label)
+            lines.append(f"- {label} ({marker}) -> {operation}")
+        lines.extend((
+            "",
+            "Continue: press c to review the final DEPLOY prompt.",
+            "Inspect: press i to see adapters, commands, and config keys.",
+            "After continuing, type DEPLOY and FortifyLab will auto-run the deployment.",
+        ))
         return "\n".join(lines)
 
     def render_continue_prompt(self) -> str:
@@ -953,7 +1026,7 @@ class GuidedDeploymentScreen(WorkflowScreen):
         if self.current_plan is None:
             return "Inspection\nNo deployment plan prepared."
         inspection = build_deployment_inspection(self.current_plan)
-        lines = ["Inspection", f"Profile: {self.current_plan.profile.label}", f"Release family: {self.current_plan.release_family.label}"]
+        lines = ["Inspection", f"Profile: {self.current_plan.profile.label}", f"Flight Plan: {self.current_plan.release_family.label}"]
         for step in self.current_plan.steps:
             lines.append(f"Adapter: {step.adapter_id or step.operation_id or 'unavailable'}")
             lines.extend(f"Command: {redact_diagnostic_text(command)}" for command in step.commands)
@@ -974,14 +1047,16 @@ class GuidedDeploymentScreen(WorkflowScreen):
 
 def build_guided_deployment_workflow(**kwargs) -> GuidedDeploymentScreen:  # type: ignore[no-untyped-def]
     if not kwargs:
-        kwargs = {"release_families": RELEASE_FAMILIES, "runner": _real_guided_plan_runner}
+        kwargs = {"release_families": default_release_families(), "runner": _real_guided_plan_runner}
     return GuidedDeploymentScreen(**kwargs)
 
 
 def build_guided_deployment_plan(profile: GuidedDeploymentProfile, release_family: ReleaseFamily, *, mode: GuidedDeploymentMode | None = None, plan_builder=None) -> DeploymentPlan:  # type: ignore[no-untyped-def]
     if plan_builder is not None:
         return plan_builder(profile, release_family)
-    return build_deployment_plan(profile_id=profile.id, release_family_id=release_family.id, mode_id=(mode.id if mode else "fresh"))
+    selected_mode = mode or deployment_mode("fresh")
+    steps = tuple(_plan_step(step) for step in _default_steps_for_profile(profile.id, selected_mode.id))
+    return DeploymentPlan(profile=profile, release_family=release_family, steps=steps, mode=selected_mode)
 
 
 GuidedDeploymentPlan = DeploymentPlan
