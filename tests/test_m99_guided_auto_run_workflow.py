@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import importlib
 import unittest
+from unittest.mock import patch
+
+from fortifylab.operations import CommandExecutionResult, OperationRunResult
 
 
 REQUIRED_CONTRACT = (
@@ -271,6 +274,49 @@ class M99GuidedAutoRunWorkflowTests(unittest.TestCase):
         self.assertEqual(screen.handle_key("1").open_target, "logs")
         self.assertEqual(screen.handle_key("2").open_target, "diagnostics")
         self.assertEqual(screen.handle_key("3").open_target, "status")
+
+
+    def test_default_workflow_uses_release_family_path_for_python_tui(self) -> None:
+        contract = _contract()
+
+        screen = contract.build_guided_deployment_workflow()
+
+        self.assertEqual(screen.stage, "profile_selection")
+        self.assertIn("Profile selection", screen.render())
+        self.assertIn("Selected", screen.handle_key("enter").message)
+        self.assertEqual(screen.stage, "release_family_selection")
+        self.assertIn("Release family selection", screen.render())
+
+    def test_real_guided_runner_delegates_to_operation_runner_after_confirmation(self) -> None:
+        contract = _contract()
+        profile = contract.GuidedDeploymentProfile("one", "One", "One step", ("mysql",))
+        family = contract.GuidedReleaseFamily("26.2", "Fortify 26.2", "Recommended", "fortify-26.2")
+        plan = contract.GuidedDeploymentPlan(
+            profile=profile,
+            release_family=family,
+            steps=(
+                contract.GuidedDeploymentPlanStep(
+                    step_id="mysql",
+                    label="MySQL",
+                    component="mysql",
+                    operation_id="mysql.start",
+                    commands=("bash apps/mysql/start.sh",),
+                ),
+            ),
+        )
+        operation_result = OperationRunResult(
+            "mysql.start",
+            0,
+            (CommandExecutionResult(("bash", "apps/mysql/start.sh"), 0, "mysql ready\n", "", 0.2),),
+        )
+
+        with patch("fortifylab.tui.guided_deployment.run_operation", return_value=operation_result) as run_operation:
+            events = list(contract._real_guided_plan_runner(plan))
+
+        run_operation.assert_called_once_with("mysql.start", confirmed=True)
+        self.assertEqual(events[0].status, contract.GuidedDeploymentRunStatus.RUNNING)
+        self.assertEqual(events[-1].status, contract.GuidedDeploymentRunStatus.INSTALLED)
+        self.assertIn("mysql ready", events[-1].stdout)
 
     def test_plan_builder_function_is_fixture_only_and_contains_selected_profile_family(self) -> None:
         contract = _contract()
