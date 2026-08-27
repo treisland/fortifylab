@@ -393,6 +393,9 @@ Ordered submilestones:
 6. `M9.6 Setup And Readiness Workflow` - wire the Initial setup and readiness
    path to a real read-only overview with diagnostics/status/config signals,
    safe next actions, refresh/back behavior, and no deployment mutation.
+7. `M9.7 Guided Deployment Workflow` - implement guided deployment as an
+   explicit TUI state machine with profile/mode selection, preview/confirmation
+   gates, fake-runner tests, progress/results, and completion handoffs.
 
 Verification after every M9 slice:
 
@@ -489,6 +492,15 @@ recommended actions into existing Config, Doctor, Status, Help, Lifecycle, and
 Logs workflows. Reset tier guidance remains read-only and routes destructive work
 through lifecycle controls.
 
+### M9.7 Active Slice
+
+M9.7 owns Guided Deployment workflow parity. The slice should make the Deploy
+path functional as an explicit state machine: choose profile, choose mode, review
+guided steps, preview mutating operations, require confirmation before execution,
+show progress/results, and hand completion to Diagnostics/Status, Logs, Help, and
+Lifecycle. Tests must use injected fake runners only and must not require live
+Kubernetes, Helm, Docker, network, credentials, or lab state.
+
 ## Decision Log
 
 | Date | Decision | Status |
@@ -510,6 +522,35 @@ through lifecycle controls.
 | Branch upstream | Push `migration/python-tui` and track `origin/migration/python-tui` | M0 - accepted |
 
 ## Heartbeat Log
+
+### 2026-08-27
+
+Milestone: M9.7
+
+Workstream: Guided Deployment Workflow Kickoff
+
+Branch: `agent/pm-open-M9.7-guided-deployment`
+
+Status: active
+
+Changed:
+
+- Opened M9.7 after M9.6 closeout as the next focused submenu parity milestone.
+- Scoped guided deployment to a TUI state machine backed by existing operation adapters and fake runners in tests.
+- Kept PR #479 open and held out of `dev` for continued focused parity work.
+
+Next:
+
+- Contract agent defines deployment workflow state, profile/mode/step models, adapter boundary, and fake-runner test hooks.
+- Test agent covers selection, preview/confirmation/cancel, redaction, completion handoffs, and unavailable resume/repair states.
+- TUI agent wires Deploy menu actions after the contract stabilizes.
+
+Blockers: none.
+
+Risks:
+
+- Guided deployment can sprawl; keep this milestone to guided deployment only.
+- No default test may touch Kubernetes, Helm, Docker, network, credentials, or live lab state.
 
 ### 2026-08-27
 
