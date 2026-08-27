@@ -217,6 +217,8 @@ _PROFILE_SCOPE_LABELS: Mapping[str, str] = {
     "ssc_only": "SSC Only",
 }
 
+_PROFILE_SCOPE_IDS: tuple[str, ...] = ("core", "sast_full", "dast_full", "ssc_only")
+
 _LIFECYCLE_ACTIONS: tuple[LifecycleActionOption, ...] = (
     LifecycleActionOption(
         "start",
@@ -500,6 +502,8 @@ class LifecycleWorkflowScreen:
         self._async_run = runner is None
         self.runner = runner or _confirmed_operation_runner
         self.action_options = _screen_action_options(action_target)
+        self.profile_options = _screen_profile_options(action_target)
+        self.selected_profile_index = 0
         self.selected_action_index = 0
         self.selected_operation_id = self._selected_default_operation_id()
         self.awaiting_confirmation = False
@@ -522,6 +526,19 @@ class LifecycleWorkflowScreen:
             return None
         return self.action_options[self.selected_action_index]
 
+    @property
+    def selected_profile_id(self) -> str | None:
+        if not self.profile_options:
+            return None
+        return self.profile_options[self.selected_profile_index]
+
+    @property
+    def selected_profile_label(self) -> str | None:
+        profile_id = self.selected_profile_id
+        if profile_id is None:
+            return None
+        return _PROFILE_SCOPE_LABELS.get(profile_id, profile_id)
+
     def render(self) -> str:
         lines = [self.summary]
         if not self.contract.supported:
@@ -535,9 +552,16 @@ class LifecycleWorkflowScreen:
         if self.stage in {"lifecycle_monitor", "lifecycle_complete", "lifecycle_failed"}:
             return self._render_lifecycle_monitor()
 
-        scope = build_lifecycle_scope(self.contract.action_target)
+        scope = build_lifecycle_scope(self.contract.action_target, profile_id=self.selected_profile_id)
         lines.append(f"Target: {scope.label}")
         lines.append(scope.description)
+        if self.profile_options:
+            lines.append("This selects the component scope for this lifecycle action only; saved deployment config is unchanged.")
+            lines.append("")
+            lines.append("Lifecycle scope:")
+            for index, profile_id in enumerate(self.profile_options, start=1):
+                marker = ">" if index - 1 == self.selected_profile_index else " "
+                lines.append(f"{marker} {index}. {_PROFILE_SCOPE_LABELS.get(profile_id, profile_id)}")
         lines.append("")
         lines.append("Actions:")
         for index, action in enumerate(self.action_options, start=1):
@@ -545,12 +569,15 @@ class LifecycleWorkflowScreen:
             status = "" if action.available else f" [{action.unavailable_reason}]"
             lines.append(f"{marker} {index}. {action.label} - {action.description}{status}")
         lines.append("")
-        lines.append("Use up/down or number to select. Press enter to review the plan. b backs out.")
+        if self.profile_options:
+            lines.append("Use up/down or number to select lifecycle scope. Press enter to review the plan. b backs out.")
+        else:
+            lines.append("Use up/down or number to select. Press enter to review the plan. b backs out.")
 
         action = self.selected_action
         if action is not None and action.available:
             try:
-                preview_plan = build_lifecycle_plan(self.contract.action_target, action.id)
+                preview_plan = build_lifecycle_plan(self.contract.action_target, action.id, profile_id=self.selected_profile_id)
             except ValueError:
                 preview_plan = None
             if preview_plan is not None:
@@ -685,9 +712,14 @@ class LifecycleWorkflowScreen:
                 return WorkflowKeyResult(f"Open workflow target: {handoff.workflow_target}.", open_target=handoff.workflow_target)
         if key in {"up", "down"}:
             self._move_selection(-1 if key == "up" else 1)
+            if self.profile_options:
+                return WorkflowKeyResult(f"Selected lifecycle scope: {self.selected_profile_label}.")
             return WorkflowKeyResult(f"Selected {self._selected_operation_label()}.")
         if key in {"1", "2", "3", "4", "5", "6"}:
             index = int(key) - 1
+            if self.profile_options and index < len(self.profile_options):
+                self._select_profile(index)
+                return WorkflowKeyResult(f"Selected lifecycle scope: {self.selected_profile_label}.")
             if index < len(self.action_options):
                 self._select_action(index)
                 return WorkflowKeyResult(f"Selected {self._selected_operation_label()}.")
@@ -738,7 +770,7 @@ class LifecycleWorkflowScreen:
             raise ValueError("No lifecycle action is selected")
         if not action.available:
             raise ValueError(action.unavailable_reason or f"Lifecycle action {action.id} is unavailable")
-        self.last_plan = build_lifecycle_plan(self.contract.action_target, action.id)
+        self.last_plan = build_lifecycle_plan(self.contract.action_target, action.id, profile_id=self.selected_profile_id)
         self.selected_operation_id = self.last_plan.operation_ids[0] if self.last_plan.operation_ids else None
         self.last_preview = None
         self.last_result = None
@@ -839,7 +871,21 @@ class LifecycleWorkflowScreen:
         self.log_lines = ()
         self.stage = "action_selection"
 
+    def _select_profile(self, index: int) -> None:
+        self.selected_profile_index = index
+        self.selected_operation_id = self._selected_default_operation_id()
+        self.awaiting_confirmation = False
+        self.last_result = None
+        self.last_preview = None
+        self.last_plan = None
+        self.status_rows = ()
+        self.log_lines = ()
+        self.stage = "action_selection"
+
     def _move_selection(self, delta: int) -> None:
+        if self.profile_options:
+            self._select_profile((self.selected_profile_index + delta) % len(self.profile_options))
+            return
         if not self.action_options:
             return
         self._select_action((self.selected_action_index + delta) % len(self.action_options))
@@ -849,7 +895,7 @@ class LifecycleWorkflowScreen:
         if action is None or not action.available:
             return self.contract.default_operation_id
         try:
-            plan = build_lifecycle_plan(self.contract.action_target, action.id)
+            plan = build_lifecycle_plan(self.contract.action_target, action.id, profile_id=self.selected_profile_id)
         except ValueError:
             return self.contract.default_operation_id
         return plan.operation_ids[0] if plan.operation_ids else self.contract.default_operation_id
@@ -873,6 +919,12 @@ def _handoff_for_key(key: str) -> LifecycleHandoff | None:
         if handoff.key == key:
             return handoff
     return None
+
+
+def _screen_profile_options(action_target: str) -> tuple[str, ...]:
+    if action_target in {"lifecycle.start_lab", "lifecycle.stop_lab"}:
+        return _PROFILE_SCOPE_IDS
+    return ()
 
 
 def _screen_action_options(action_target: str) -> tuple[LifecycleActionOption, ...]:

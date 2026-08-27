@@ -105,6 +105,44 @@ class M910LifecycleWorkflowParityTests(unittest.TestCase):
         )
 
 
+    def test_all_lab_lifecycle_can_select_profile_scope_without_config_mutation(self) -> None:
+        calls: list[str] = []
+
+        def runner(operation_id: str) -> OperationRunResult:
+            calls.append(operation_id)
+            return _result(operation_id)
+
+        screen = LifecycleWorkflowScreen("lifecycle.start_lab", runner=runner)
+        rendered = screen.render()
+        self.assertIn("Lifecycle scope:", rendered)
+        self.assertIn("1. Core Fortify Lab", rendered)
+        self.assertIn("4. SSC Only", rendered)
+        self.assertIn("saved deployment config is unchanged", rendered)
+
+        self.assertEqual(screen.handle_key("4").message, "Selected lifecycle scope: SSC Only.")
+        self.assertEqual(screen.handle_key("enter").message, "Confirmation required before lifecycle execution.")
+        rendered = screen.render()
+        self.assertIn("Scope: Selected profile: SSC Only", rendered)
+        self.assertIn("1. MySQL", rendered)
+        self.assertIn("2. SSC", rendered)
+        self.assertNotIn("PostgreSQL", rendered)
+
+        self.assertEqual(screen.handle_key("enter").message, "Lifecycle plan completed successfully.")
+        self.assertEqual(calls, ["mysql.start", "ssc.start"])
+
+    def test_all_lab_lifecycle_arrows_select_profile_scope(self) -> None:
+        screen = LifecycleWorkflowScreen("lifecycle.stop_lab")
+
+        self.assertEqual(screen.handle_key("down").message, "Selected lifecycle scope: SAST Full Lab.")
+        self.assertEqual(screen.handle_key("down").message, "Selected lifecycle scope: DAST Full Lab.")
+        self.assertEqual(screen.handle_key("up").message, "Selected lifecycle scope: SAST Full Lab.")
+        self.assertEqual(screen.handle_key("enter").message, "Confirmation required before lifecycle execution.")
+        rendered = screen.render()
+        self.assertIn("Scope: Selected profile: SAST Full Lab", rendered)
+        self.assertIn("1. Juice Shop", rendered)
+        self.assertIn("6. MySQL", rendered)
+
+
     def test_default_lifecycle_run_streams_monitor_events(self) -> None:
         calls: list[str] = []
 
