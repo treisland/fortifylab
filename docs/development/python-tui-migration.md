@@ -676,6 +676,12 @@ implementation. Default tests must use injected fake runners/status/log provider
 and must not invoke Kubernetes, Helm, Docker, network calls, credentials, live lab
 state, or repository lifecycle scripts.
 
+The M9.10 contract slice defines clone-safe lifecycle scope, action, plan step,
+handoff, and plan models. Contract tests pin forward start order, reverse
+stop/destroy order, selected-profile scope, component/sample isolation,
+destructive confirmation phrases, and completion handoffs before the runtime TUI
+workflow is rewritten.
+
 Default tests remain clone-safe. They use fake runners or mock the operation
 runner and do not invoke Kubernetes, Helm, Docker, network, lifecycle scripts,
 or credentials. Manual TUI smoke is recommended before using the real auto-run

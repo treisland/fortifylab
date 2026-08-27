@@ -845,10 +845,10 @@ milestones:
         submilestones:
           - id: M9.10.1
             name: Bash parity mapping and UX contract
-            status: in_progress
+            status: completed
           - id: M9.10.2
             name: Clone-safe lifecycle parity tests
-            status: planned
+            status: in_progress
           - id: M9.10.3
             name: Lifecycle target/action screens
             status: planned
@@ -874,6 +874,8 @@ milestones:
           - Bash parity references include selected-profile lifecycle scripts, all-lab start/stop/destroy, reverse-order shutdown/destroy, typed full-lab destroy confirmation, app/sample isolation, and logs/diagnostics/help handoffs.
           - Existing Python lifecycle implementation is currently a thin operation wrapper with preview/confirm/run behavior and synchronous result rendering.
           - PM recommends beginning with M9.10.1 mapping/contract before implementation.
+          - Contract branch agent/lifecycle-M9.10-contract adds clone-safe lifecycle scope, action, plan step, handoff, and plan models.
+          - Contract tests pin user-facing lifecycle actions, all-lab forward start, reverse stop/destroy, selected-profile scope, component/sample isolation, destructive confirmation phrases, and completion handoffs.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v

@@ -12,12 +12,14 @@ from fortifylab.operations import (
     OperationRunResult,
     SensitiveRedactor,
     dry_run,
+    get_operation,
     run_operation,
 )
 from fortifylab.tui.workflows import WorkflowKeyResult
 
 
 LifecycleStatus = Literal["preview", "requires_confirmation", "success", "failure", "blocked", "unsupported"]
+LifecycleDataImpact = Literal["none", "retained", "review", "deleted"]
 LifecycleRunner = Callable[[str], OperationRunResult]
 
 
@@ -62,6 +64,71 @@ class ExecutionResultDisplayModel:
     message: str
 
 
+@dataclass(frozen=True)
+class LifecycleScope:
+    """A lifecycle target scope before it is expanded into operations."""
+
+    id: str
+    label: str
+    component_ids: tuple[str, ...]
+    profile_id: str | None = None
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class LifecycleActionOption:
+    """User-facing lifecycle action available for a target scope."""
+
+    id: str
+    label: str
+    description: str
+    data_impact: LifecycleDataImpact
+    destructive: bool = False
+    available: bool = True
+    unavailable_reason: str | None = None
+    confirmation_phrase: str | None = None
+
+
+@dataclass(frozen=True)
+class LifecyclePlanStep:
+    """One operation step in a lifecycle plan."""
+
+    component_id: str
+    label: str
+    operation_id: str
+    order: int
+    data_impact: LifecycleDataImpact
+
+
+@dataclass(frozen=True)
+class LifecycleHandoff:
+    """Post-run or inspection handoff shown from lifecycle screens."""
+
+    key: str
+    label: str
+    workflow_target: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class LifecyclePlan:
+    """Clone-safe lifecycle plan contract; building it never executes scripts."""
+
+    action_id: str
+    label: str
+    scope: LifecycleScope
+    steps: tuple[LifecyclePlanStep, ...]
+    data_impact: LifecycleDataImpact
+    destructive: bool
+    confirmation_phrase: str | None
+    order_note: str
+    handoffs: tuple[LifecycleHandoff, ...]
+
+    @property
+    def operation_ids(self) -> tuple[str, ...]:
+        return tuple(step.operation_id for step in self.steps)
+
+
 _COMPONENT_TARGETS: Mapping[str, str] = {
     "mysql": "MySQL",
     "postgresql": "PostgreSQL",
@@ -76,6 +143,188 @@ _SAMPLE_TARGETS: Mapping[str, str] = {
     "webgoat": "WebGoat",
     "dvwa": "DVWA",
 }
+
+
+_FULL_LAB_COMPONENT_ORDER: tuple[str, ...] = (
+    "mysql",
+    "postgresql",
+    "ssc",
+    "lim",
+    "scancentral_sast",
+    "scancentral_dast",
+)
+
+_PROFILE_SCOPE_COMPONENTS: Mapping[str, tuple[str, ...]] = {
+    "core": _FULL_LAB_COMPONENT_ORDER,
+    "sast_full": ("mysql", "postgresql", "ssc", "lim", "scancentral_sast", "juice_shop"),
+    "dast_full": ("mysql", "postgresql", "ssc", "lim", "scancentral_dast", "juice_shop", "webgoat", "dvwa"),
+    "ssc_only": ("mysql", "ssc"),
+}
+
+_PROFILE_SCOPE_LABELS: Mapping[str, str] = {
+    "core": "Core Fortify Lab",
+    "sast_full": "SAST Full Lab",
+    "dast_full": "DAST Full Lab",
+    "ssc_only": "SSC Only",
+}
+
+_LIFECYCLE_ACTIONS: tuple[LifecycleActionOption, ...] = (
+    LifecycleActionOption(
+        "start",
+        "Start / upgrade",
+        "Apply lifecycle adapters in dependency order and verify selected workloads.",
+        "retained",
+    ),
+    LifecycleActionOption(
+        "stop",
+        "Stop",
+        "Scale workloads down in reverse dependency order while preserving persistent data.",
+        "retained",
+    ),
+    LifecycleActionOption(
+        "destroy",
+        "Destroy (deletes data)",
+        "Remove releases/resources; database and LIM destroy paths can delete persistent claims.",
+        "deleted",
+        destructive=True,
+        confirmation_phrase="DESTROY",
+    ),
+    LifecycleActionOption(
+        "restart",
+        "Restart",
+        "Deferred until Python has an ordered stop/start sequence with health gates.",
+        "retained",
+        available=False,
+        unavailable_reason="Restart needs an ordered stop/start sequence screen before it is safe.",
+    ),
+    LifecycleActionOption(
+        "repair",
+        "Repair / retry",
+        "Deferred until Python can select and retry a failed lifecycle step with diagnostics context.",
+        "retained",
+        available=False,
+        unavailable_reason="Repair needs failed-step selection and diagnostics context before it is safe.",
+    ),
+    LifecycleActionOption(
+        "reset",
+        "Reset scope",
+        "Deferred until Python has explicit destructive scope selection.",
+        "deleted",
+        destructive=True,
+        available=False,
+        unavailable_reason="Reset needs explicit destructive scope selection before it can execute.",
+        confirmation_phrase="DESTROY FORTIFY LAB",
+    ),
+)
+
+_LIFECYCLE_HANDOFFS: tuple[LifecycleHandoff, ...] = (
+    LifecycleHandoff("1", "Logs", "logs", "Review bounded redacted lifecycle and application logs."),
+    LifecycleHandoff("2", "Diagnostics", "diagnostics", "Inspect doctor and live status context."),
+    LifecycleHandoff("3", "Status", "status", "Refresh the read-only lab status summary."),
+    LifecycleHandoff("i", "Inspection", "inspection", "Inspect adapters, command previews, data impact, and ordering."),
+    LifecycleHandoff("m", "Main menu", "main", "Return to the main FortifyLab menu."),
+)
+
+
+def lifecycle_action_options() -> tuple[LifecycleActionOption, ...]:
+    """Return the Bash-parity lifecycle actions the Python TUI should expose."""
+
+    return _LIFECYCLE_ACTIONS
+
+
+def lifecycle_completion_handoffs() -> tuple[LifecycleHandoff, ...]:
+    """Return post-lifecycle handoffs shared by complete and failure screens."""
+
+    return _LIFECYCLE_HANDOFFS
+
+
+def build_lifecycle_scope(action_target: str, *, profile_id: str | None = None) -> LifecycleScope:
+    """Build a target scope for lifecycle plan previews without executing scripts."""
+
+    if action_target.startswith("app_lifecycle."):
+        component_id = action_target.removeprefix("app_lifecycle.")
+        return LifecycleScope(component_id, _target_label(component_id), (component_id,), description="Single application lifecycle target.")
+    if action_target.startswith("sample_apps."):
+        component_id = action_target.removeprefix("sample_apps.")
+        return LifecycleScope(component_id, _target_label(component_id), (component_id,), description="Single sample application lifecycle target.")
+    if action_target.startswith("lifecycle."):
+        if profile_id is not None:
+            try:
+                component_ids = _PROFILE_SCOPE_COMPONENTS[profile_id]
+            except KeyError as exc:
+                raise ValueError(f"Unknown lifecycle profile: {profile_id}") from exc
+            return LifecycleScope(
+                f"profile:{profile_id}",
+                f"Selected profile: {_PROFILE_SCOPE_LABELS.get(profile_id, profile_id)}",
+                component_ids,
+                profile_id=profile_id,
+                description="Selected deployment profile workload scope.",
+            )
+        return LifecycleScope("all", "All lab deployments", _FULL_LAB_COMPONENT_ORDER, description="Full core lab lifecycle scope.")
+    raise KeyError(f"Unknown lifecycle action target: {action_target}")
+
+
+def build_lifecycle_plan(action_target: str, action_id: str, *, profile_id: str | None = None) -> LifecyclePlan:
+    """Build a Bash-parity lifecycle plan; this is a dry contract, not execution."""
+
+    scope = build_lifecycle_scope(action_target, profile_id=profile_id)
+    action = _find_lifecycle_action(action_id)
+    if not action.available:
+        raise ValueError(action.unavailable_reason or f"Lifecycle action {action_id} is unavailable")
+
+    component_ids = scope.component_ids
+    order_note = "Start runs in dependency order."
+    if action.id in {"stop", "destroy"}:
+        component_ids = tuple(reversed(component_ids))
+        order_note = "Stop and destroy run in reverse dependency order."
+
+    confirmation_phrase = action.confirmation_phrase
+    if action.id == "destroy" and scope.id == "all":
+        confirmation_phrase = "DESTROY FORTIFY LAB"
+    elif action.id == "destroy" and scope.profile_id is not None:
+        confirmation_phrase = "DESTROY SELECTED PROFILE"
+
+    steps = tuple(
+        LifecyclePlanStep(
+            component_id=component_id,
+            label=_target_label(component_id),
+            operation_id=_operation_id_for(component_id, action.id),
+            order=index,
+            data_impact=action.data_impact,
+        )
+        for index, component_id in enumerate(component_ids, start=1)
+    )
+    for step in steps:
+        get_operation(step.operation_id)
+
+    return LifecyclePlan(
+        action_id=action.id,
+        label=f"{action.label} - {scope.label}",
+        scope=scope,
+        steps=steps,
+        data_impact=action.data_impact,
+        destructive=action.destructive,
+        confirmation_phrase=confirmation_phrase,
+        order_note=order_note,
+        handoffs=_LIFECYCLE_HANDOFFS,
+    )
+
+
+def _find_lifecycle_action(action_id: str) -> LifecycleActionOption:
+    for action in _LIFECYCLE_ACTIONS:
+        if action.id == action_id:
+            return action
+    raise ValueError(f"Unknown lifecycle action: {action_id}")
+
+
+def _operation_id_for(component_id: str, action_id: str) -> str:
+    if component_id == "scancentral_dast":
+        return f"scancentral_dast.{action_id}"
+    return f"{component_id}.{action_id}"
+
+
+def _target_label(component_id: str) -> str:
+    return _COMPONENT_TARGETS.get(component_id) or _SAMPLE_TARGETS.get(component_id) or component_id.replace("_", " ").title()
 
 
 def _app_contract(prefix: str, app_id: str, label: str) -> LifecycleActionContract:
