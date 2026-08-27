@@ -92,19 +92,30 @@ From the main menu, choose **1. Deploy**, then pick one deployment mode:
 
 === "Guided (recommended)"
 
-    Choose **1. Guided deployment**. First choose the deployment profile you
-    want: SSC only, SAST controller only, SAST full with SSC, DAST full, Full
-    lab, or Custom. The wizard expands required dependencies and shows the active
-    plan before you choose interactive or auto-advance mode. It then shows one
-    numbered step at a time, including current status, expected duration, and
-    mutation impact. Required steps cannot be skipped. Enter `?` for contextual
-    help, or quit safely and return later.
+    Choose **1. Guided deployment**. The Python TUI first asks for the
+    deployment profile, then the release family/Flight Plan baseline. Use arrow
+    keys or number keys to choose, then review the generated plan preview. The
+    preview shows the ordered operation adapters and redacted command previews
+    that will run for the selected profile and release family.
 
-    The guided flow is expected to wait through lifecycle verification after
-    each operation. While work is still starting, the wait screen should show
-    gradual readiness updates instead of requiring repeated menu refreshes.
-    Interactive mode pauses after a verified step; auto-advance mode continues
-    after a 5-second countdown unless you take control.
+    When the plan is ready, the TUI shows a continue prompt explaining that the
+    deployment will auto-run if you proceed. Mutating execution still requires
+    the high-friction `DEPLOY` confirmation phrase. Cancel before that prompt
+    executes nothing. After confirmation, the Python TUI runs the planned steps
+    through the operation adapter layer and shows a status table with component,
+    operation, status, duration, and latest update. Status values include
+    pending, running, installed/ready, skipped, warning, failed, cancelled, and
+    unknown.
+
+    During or after the run, open the deployment logs view for bounded redacted
+    output, or open inspection to see the selected profile, release family,
+    adapter IDs, command previews, config inputs, mutation impact, and current
+    step details. The monitor is designed to preserve lifecycle verification,
+    gradual readiness updates, contextual pod logs, and auto-advance mode with a
+    countdown where the operator can take control. CI and default tests use
+    mocked runners and do not run Kubernetes, Helm, Docker, network calls,
+    lifecycle scripts, or credentials. Manual TUI smoke is recommended before
+    any live lab deployment.
 
     The prerequisite screen shows readiness indicators for JDK, Docker login,
     mkcert, and MicroK8s access. Installing Docker or MicroK8s from that
