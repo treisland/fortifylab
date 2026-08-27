@@ -742,6 +742,7 @@ milestones:
         evidence:
           - M9.7 opened after M9.6 closeout as the next focused parity gap before any dev merge.
           - PR #479 remains held out of dev unless the user explicitly changes the release strategy.
+          - agent/deploy-M9.7-contract defines the guided deployment profile/mode/step state-machine contract with fake-runner-only execution boundaries.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v

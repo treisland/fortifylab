@@ -65,6 +65,11 @@ DEFAULT_WORKFLOWS: Mapping[str, WorkflowFactory] = {
     "setup_readiness": lambda _selected: _build_setup_readiness_screen(),
     "setup_readiness.guided_steps": lambda _selected: _build_setup_readiness_screen(),
     "setup_readiness.reset_tiers": lambda _selected: _build_reset_tiers_screen(),
+    "guided_deployment": lambda _selected: _build_guided_deployment_screen(),
+    "guided_deployment.profile_selection": lambda _selected: _build_guided_deployment_screen(),
+    "guided_deployment.deployment_mode": lambda _selected: _build_guided_deployment_screen(),
+    "guided_deployment.step_controls": lambda _selected: _build_guided_deployment_screen(),
+    "guided_deployment.completion_handoff": lambda _selected: _build_guided_deployment_screen(),
     "configuration_editor": lambda _selected: _build_config_editor_screen(),
     "diagnostics": lambda _selected: _build_diagnostics_screen(),
     "cluster_snapshot": lambda _selected: _build_status_screen(),
@@ -93,6 +98,12 @@ def build_reset_tiers_workflow() -> WorkflowScreen:
     from fortifylab.tui.readiness import build_reset_tiers_workflow
 
     return build_reset_tiers_workflow()
+
+
+def build_guided_deployment_workflow(**kwargs) -> WorkflowScreen:
+    from fortifylab.tui.guided_deployment import build_guided_deployment_workflow as build
+
+    return build(**kwargs)
 
 
 def build_config_workflow(env_file=None) -> WorkflowScreen:
@@ -149,6 +160,10 @@ def _build_setup_readiness_screen() -> WorkflowScreen:
 
 def _build_reset_tiers_screen() -> WorkflowScreen:
     return build_reset_tiers_workflow()
+
+
+def _build_guided_deployment_screen() -> WorkflowScreen:
+    return build_guided_deployment_workflow()
 
 
 def _build_config_editor_screen() -> WorkflowScreen:
