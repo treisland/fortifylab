@@ -2,7 +2,7 @@ program: fortifylab-python-tui-migration
 branch: migration/python-tui
 base_branch: dev
 current_milestone: M9
-overall_status: ready_for_dev_merge
+overall_status: active
 
 goal:
   primary_objective: >-
@@ -33,23 +33,25 @@ heartbeat:
   milestone: M9
   workstream: pm-M9-closeout-dev-merge-readiness
   branch: agent/pm-M9-closeout-dev-merge-readiness
-  status: ready_for_dev_merge
+  status: active
   changed:
     - Closed M9.1 through M9.5 TUI submenu workflow parity on migration/python-tui.
     - Functional workflows now cover Help/Runbooks, Configuration, Diagnostics/Status, Lifecycle Operations, and Logs/Wizard Log.
     - Manual testing checkpoint was confirmed after M9.5.
-    - PR #479 remains the merge-back PR from migration/python-tui to dev.
+    - User chose to keep PR #479 open and continue adding focused parity work before dev merge.
+    - Opened M9.6 Setup and Readiness workflow as the next focused slice.
   next:
-    - Refresh PR #479 with this final readiness commit.
-    - Merge PR #479 into dev after GitHub checks and the final local verification gate remain green.
-    - Track any remaining submenu parity gaps as focused post-merge follow-up PRs.
+    - Define and implement a read-only readiness overview that aggregates existing config, diagnostics, status, help, and lifecycle handoffs.
+    - Keep PR #479 held out of dev while M9.6 remains active.
+    - Reassess dev merge readiness or M9.7 guided deployment after M9.6 closeout.
   blockers: []
   risks:
-    - PR #479 is a broad migration diff; review should focus on documented architecture, entrypoints, tests, and retained Bash adapter boundaries.
-    - Older PR #436 targets dev separately; if it lands first, refresh migration/python-tui against dev and rerun checks before merging #479.
+    - Scope creep into full guided deployment; M9.6 should remain setup/readiness only.
+    - Live cluster checks must stay optional, skipped, or fixture-backed in default tests.
+    - Recommended actions should hand off to existing workflows and must not mutate state without those workflows' confirmation gates.
 
   needs_decision:
-    - None; PM recommends proceeding with the dev merge strategy after user-confirmed manual testing.
+    - None; M9.6 Setup and Readiness sequencing is approved.
 
 
 open_decisions:
@@ -693,6 +695,24 @@ milestones:
           - python3 -m unittest discover -s tests -q passed with 229 tests.
           - ./bin/fortifylab tui --check, doctor --check, and status --check passed.
           - git diff --check passed.
+      - id: M9.6
+        name: Setup and readiness workflow
+        status: in_progress
+        branches:
+          - agent/pm-open-M9.6-readiness-workflow
+          - agent/readiness-M9.6-contract
+          - agent/tui-M9.6-readiness-workflow
+          - agent/test-M9.6-readiness-workflow
+          - agent/docs-M9.6-readiness-workflow
+        acceptance:
+          - Initial setup/readiness opens a functional TUI workflow screen.
+          - Readiness overview aggregates existing diagnostics/status/config signals without duplicating domain logic.
+          - Config, license, prerequisite, and live-lab unavailable states are visible and redacted.
+          - Recommended actions hand off to existing Config, Help, Doctor/Status, Lifecycle, or Logs workflows.
+          - Refresh/back/quit behavior works.
+          - Tests use fixtures/mocks only and require no live lab state.
+        evidence:
+          - M9.6 opened after PM recommendation as the safer start-here workflow before full guided deployment.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v

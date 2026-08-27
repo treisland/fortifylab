@@ -390,6 +390,9 @@ Ordered submilestones:
 5. `M9.5 Logs And Wizard Log Workflow` - wire log and wizard-log menu actions
    to read-only TUI screens with listing, detail, refresh, unavailable states,
    and redacted bounded output.
+6. `M9.6 Setup And Readiness Workflow` - wire the Initial setup and readiness
+   path to a real read-only overview with diagnostics/status/config signals,
+   safe next actions, refresh/back behavior, and no deployment mutation.
 
 Verification after every M9 slice:
 
@@ -473,9 +476,16 @@ has passed. PR #479 is the merge-back PR from `migration/python-tui` to `dev`.
 The migration is ready to land in `dev` after the final local verification gate
 and GitHub `offline-docs` check remain green.
 
-Future submenu parity gaps should be handled as normal focused follow-up PRs
-after the Python CLI/TUI foundation lands, rather than keeping the migration
-branch open indefinitely.
+User review after this checkpoint chose to keep PR #479 open and continue adding
+focused workflow parity before merging to `dev`.
+
+### M9.6 Active Slice
+
+M9.6 owns Setup and Readiness workflow parity. The slice should make the `0`
+Initial setup and readiness path useful before full guided deployment lands:
+show a read-only readiness overview, aggregate existing diagnostics/status/config
+signals, surface safe next actions into existing workflows, and keep live cluster
+or deployment mutation out of default tests.
 
 ## Decision Log
 
