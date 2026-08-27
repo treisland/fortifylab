@@ -30,25 +30,26 @@ heartbeat:
   cadence: daily
   stale_after_days: 3
   last_updated: 2026-08-27
-  milestone: M9.8
-  workstream: pm-M9.8-closeout-open-next
-  branch: agent/pm-M9.8-closeout-open-next
+  milestone: M9.9
+  workstream: pm-open-M9.9-functional-guided-deployment
+  branch: agent/pm-open-M9.9-functional-guided-deployment
   status: active
   changed:
-    - M9.8 Dashboard Access, URLs, and Credentials workflow completed on migration/python-tui.
-    - PR #508 opened the milestone guardrails, PR #510 landed the contract/workflow implementation, and PR #509 landed workflow test coverage.
+    - User redirected M9.9 from Samples and Training Apps to Functional Guided Deployment in the Python TUI.
+    - M9.9 will make Guided Deployment functional with deployment profile selection, release family selection, an auto-run continue prompt, status table monitoring, logs, and inspection affordances.
     - PR #479 remains open and held out of dev while focused parity work continues.
   next:
-    - Open M9.9 Samples And Training Apps Workflow as the next focused parity slice.
-    - Preserve read-only previews by default and require explicit confirmation before sample app mutations.
-    - Reuse operation catalog/runner abstractions with fixture-only default tests.
+    - Define profile, release family, deployment plan, status row, event, log buffer, and inspection contracts.
+    - Implement plan preview and high-friction auto-run confirmation before any mutating deployment executes.
+    - Add status table, deployment log, and inspection surfaces around the operation adapter boundary.
   blockers: []
   risks:
-    - Sample app actions can be mutating; previews and confirmation gates must stay explicit.
-    - Default tests must not require live lab state, Kubernetes, Helm, Docker, network, or credentials.
+    - Auto-run must not weaken safety; real mutation requires explicit confirmation and injected/fake runners in default tests.
+    - Streaming logs/status can grow scope; keep runner events, bounded logs, and status rows modular.
+    - Default tests must not require live lab state, Kubernetes, Helm, Docker, network, scripts, or credentials.
 
   needs_decision:
-    - None; M9.9 is PM-recommended follow-up work and remains on migration/python-tui.
+    - Whether M9.9.5 should enable real auto-run once status/log/inspection is in place, or stop at fake-runner execution plus manual wiring plan.
 
 
 open_decisions:
@@ -775,20 +776,49 @@ milestones:
           - PR #509 merged the M9.8 workflow coverage into migration/python-tui at 4618000.
           - Verification on migration/python-tui passed: python3 -m unittest discover tests, python3 -m compileall -q fortifylab tests, ./bin/fortifylab tui --check, ./bin/fortifylab doctor --check, ./bin/fortifylab status --check, and git diff --check.
       - id: M9.9
-        name: Samples and training apps workflow
-        status: planned
+        name: Functional guided deployment
+        status: in_progress
         branches:
-          - agent/pm-open-M9.9-samples-training-apps
+          - agent/pm-open-M9.9-functional-guided-deployment
+          - agent/deploy-M9.9-profile-family-contract
+          - agent/test-M9.9-guided-auto-run
+          - agent/tui-M9.9-guided-auto-run
+          - agent/docs-M9.9-guided-auto-run-closeout
+        submilestones:
+          - id: M9.9.1
+            name: Profile and release family contract
+            status: planned
+          - id: M9.9.2
+            name: Selection, plan preview, and auto-run confirmation prompt
+            status: planned
+          - id: M9.9.3
+            name: Execution orchestrator and colored status table
+            status: planned
+          - id: M9.9.4
+            name: Deployment logs and inspection view
+            status: planned
+          - id: M9.9.5
+            name: Safe real-run wiring and manual smoke gate
+            status: planned
+          - id: M9.9.6
+            name: Docs and closeout
+            status: planned
         acceptance:
-          - Sample Apps / training app menu paths open functional TUI workflow screens while preserving the current navigation structure.
-          - Juice Shop, WebGoat, and DVWA entries expose list/detail views with safe status and unavailable states.
-          - Deploy/start/stop actions render dry-run previews before any operation executes.
-          - Mutating actions require explicit confirmation and can be cancelled without running operations.
-          - Workflow screens provide handoffs to Logs, Diagnostics/Status, and URLs/Credentials.
-          - Tests use injected fake runners/status providers only and require no live lab state.
+          - Guided Deployment remains a Python TUI workflow preserving the current Deploy navigation structure.
+          - Users can select a deployment profile and release family with arrow keys and jump-to-number selections.
+          - Selected profile and release family generate a concrete ordered deployment plan from existing operation catalog/adapters.
+          - The TUI shows a continue prompt noting that deployment will auto-run if the user proceeds.
+          - Real mutation requires a high-friction confirmation such as typing DEPLOY before auto-running planned steps.
+          - During execution, the TUI exposes a colored status table with component, operation, status, duration, and last update.
+          - Status rows support pending, running, installed/ready, skipped, warning, failed, cancelled, and unknown states.
+          - Users can view bounded redacted deployment logs and inspect command previews, adapter IDs, config inputs, and current step details.
+          - Cancelled runs execute nothing; failed steps stop by default unless an approved plan marks them safe to continue.
+          - Tests use injected fake runners/status/event providers only and require no live lab state.
         evidence:
-          - PM recommended M9.9 after M9.8 because sample/training apps are the next high-value parity area after readiness, deployment, diagnostics, logs, config, and access workflows.
-          - M9.9 should reuse existing operation catalog and runner abstractions rather than invoking Kubernetes, Helm, Docker, or network directly from default tests.
+          - User redirected M9.9 from Samples and Training Apps to Functional Guided Deployment in the Python TUI.
+          - PM recommends one milestone split into reviewable submilestones so auto-run, status, logs, and inspection do not become a new monolith.
+          - Existing M9.7 guided deployment work already provides a state-machine foundation with profile selection, modes, step preview, confirmation, fake-runner hooks, and completion handoffs.
+          - M9.9 should reuse the M3 operation catalog/runner boundary and retained Bash scripts as low-level adapters only.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
