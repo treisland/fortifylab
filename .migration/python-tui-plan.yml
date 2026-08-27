@@ -713,6 +713,7 @@ milestones:
           - Tests use fixtures/mocks only and require no live lab state.
         evidence:
           - M9.6 opened after PM recommendation as the safer start-here workflow before full guided deployment.
+          - agent/readiness-M9.6-contract defines the setup readiness snapshot, signal states, recommended workflow handoffs, refresh/back contract, and clone-safe provider injection boundary.
     verification_gates:
       - python3 -m compileall -q fortifylab
       - python3 -m unittest discover -s tests -v
