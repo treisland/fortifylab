@@ -1121,15 +1121,77 @@ configure_dns() {
   Traefik, or other reverse-proxy endpoint without matching routes, browsers
   commonly show TRAEFIK DEFAULT CERT and then a plain 404 page.
 
+  The local hosts assistant can update this machine's /etc/hosts with a
+  FortifyLab-managed block and refresh it whenever DOMAIN changes.
+
   -- In-cluster side --------------------------------------------
   Pods inside the cluster need to resolve $DOMAIN themselves
   (e.g. ScanCentral SAST workers call https://sast.$DOMAIN/scancentral-ctrl).
   We patch CoreDNS's hosts plugin so they resolve to this node's IP.
 
 EOF
+    if confirm "Update this machine's /etc/hosts now?"; then
+        local_hosts_assistant || return 1
+    fi
     if confirm "Apply CoreDNS hosts override now?"; then
         fortify_ensure_coredns_lab_hosts || return 1
     fi
+}
+
+local_hosts_assistant() {
+    local choice ip detected_ip hosts file current patched
+    file="${FORTIFY_HOSTS_FILE:-/etc/hosts}"
+    detected_ip=$(fortify_lab_node_ip)
+    hosts=$(fortify_lab_hostnames_inline)
+    while true; do
+        title "Local hosts assistant"
+        cat <<EOF
+
+  Managed file: $file
+  Active domain: ${DOMAIN:-fortifydemo.com}
+  Detected lab node IP: ${detected_ip:-<unknown>}
+
+  FortifyLab hostnames:
+    $hosts
+
+  1. Preview using detected lab node IP
+  2. Preview using 127.0.0.1 for this machine only
+  3. Preview using a manual IP address
+  4. Remove FortifyLab hosts block
+
+  r. Return
+EOF
+        echo
+        ask choice "Select:"
+        case "$choice" in
+            1) ip="$detected_ip" ;;
+            2) ip="127.0.0.1" ;;
+            3) ask ip "IP address for FortifyLab hostnames:" ;;
+            4)
+                if confirm "Remove only the FortifyLab-managed block from $file?"; then
+                    fortify_remove_local_hosts || return 1
+                fi
+                press_any
+                continue
+                ;;
+            [Rr]|"") return 0 ;;
+            *) error "Invalid selection"; sleep 1; continue ;;
+        esac
+        [ -n "$ip" ] || { error "No IP address is available; choose manual IP."; sleep 1; continue; }
+        current=$(cat "$file" 2>/dev/null) || { error "Could not read $file."; press_any; continue; }
+        patched=$(printf '%s\n' "$current" | fortify_patch_local_hosts_file "$ip" "$hosts")
+        section "Preview"
+        fortify_local_hosts_block "$ip" "$hosts" | sed 's/^/  /'
+        echo
+        if [ "$patched" = "$current" ]; then
+            note "$file already contains the current FortifyLab hosts block."
+        elif confirm "Apply this FortifyLab-managed block to $file with a backup first?"; then
+            fortify_local_hosts_apply_file "$file" "$patched" || return 1
+        else
+            note "Hosts update cancelled."
+        fi
+        press_any
+    done
 }
 
 configure_ssc_token() {
@@ -3518,6 +3580,11 @@ EOF
     echo
     if confirm "Apply domain and URL changes with a backup first?"; then
         env_apply_updates domain-url "${updates[@]}"
+        # shellcheck disable=SC1090
+        source "$ENV_FILE"
+        if confirm "Update this machine's /etc/hosts for ${DOMAIN:-$domain} now?"; then
+            local_hosts_assistant || return 1
+        fi
     else
         note "Domain changes cancelled."
     fi

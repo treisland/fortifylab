@@ -561,7 +561,8 @@ class GuidedWizardTests(unittest.TestCase):
             user_input="new.test\nn\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Domain and derived URL changes staged", result.stdout)
+        self.assertIn("Domain, derived URL, and local hosts update changes staged", result.stdout)
+        self.assertIn("update-local-hosts", result.stdout)
         self.assertIn("Setup changes cancelled", result.stdout)
         self.assertIn("DOMAIN=old.test", result.stdout)
 
@@ -890,7 +891,7 @@ class GuidedWizardTests(unittest.TestCase):
             'tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; ENV_FILE="$tmp/.env"; ENV_BACKUP_DIR="$tmp/.env.backups"; '
             'printf "%s\n" "export DOMAIN=\"old.test\"" "export SSC=\"ssc.$DOMAIN\"" "export SSC_URL=\"https://$SSC\"" >"$ENV_FILE"; '
             'ask() { local _v="$1"; shift; printf -v "$_v" "%s" "FortifyDemo.COM"; }; '
-            'confirm() { return 0; }; press_any() { :; }; '
+            'confirm() { return 0; }; press_any() { :; }; local_hosts_assistant() { :; }; '
             'domain_url_assistant >/dev/null; source "$ENV_FILE"; printf "%s|%s|%s\n" "$DOMAIN" "$SSC" "$SSC_URL"',
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -969,6 +970,65 @@ class GuidedWizardTests(unittest.TestCase):
         self.assertIn("TRAEFIK DEFAULT CERT", result.stdout)
         self.assertIn("404", result.stdout)
 
+
+    def test_local_hosts_patch_replaces_only_managed_block(self) -> None:
+        helper = ROOT / "scripts/lib/coredns-lab-hosts.sh"
+        hosts_file = "127.0.0.1 localhost\n# BEGIN FORTIFYLAB\n10.0.0.4 ssc.old.test sast.old.test\n# END FORTIFYLAB\n10.0.0.2 keep.example\n"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; printf "%s" "$2" | fortify_patch_local_hosts_file 10.0.0.5 "ssc.new.test sast.new.test dast.new.test lim.new.test dashboard.new.test"',
+                "hosts-test",
+                str(helper),
+                hosts_file,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("127.0.0.1 localhost", result.stdout)
+        self.assertIn("10.0.0.2 keep.example", result.stdout)
+        self.assertIn("# BEGIN FORTIFYLAB", result.stdout)
+        self.assertIn("10.0.0.5 ssc.new.test sast.new.test dast.new.test lim.new.test dashboard.new.test", result.stdout)
+        self.assertNotIn("old.test", result.stdout)
+
+    def test_local_hosts_remove_deletes_only_managed_block(self) -> None:
+        helper = ROOT / "scripts/lib/coredns-lab-hosts.sh"
+        hosts_file = "127.0.0.1 localhost\n# BEGIN FORTIFYLAB\n10.0.0.4 ssc.old.test sast.old.test\n# END FORTIFYLAB\n10.0.0.2 keep.example\n"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; printf "%s" "$2" | fortify_remove_local_hosts_block',
+                "hosts-test",
+                str(helper),
+                hosts_file,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("127.0.0.1 localhost", result.stdout)
+        self.assertIn("10.0.0.2 keep.example", result.stdout)
+        self.assertNotIn("FORTIFYLAB", result.stdout)
+        self.assertNotIn("old.test", result.stdout)
+
+    def test_local_hosts_assistant_updates_temp_hosts_file_with_preview(self) -> None:
+        result = self.run_wizard_functions(
+            'tmp=$(mktemp -d); FORTIFY_HOSTS_FILE="$tmp/hosts"; printf "127.0.0.1 localhost\n" > "$FORTIFY_HOSTS_FILE"; '
+            'DOMAIN=example.test; fortify_lab_node_ip() { printf "10.0.0.5"; }; local_hosts_assistant; '
+            'printf "HOSTS_FILE_START\n"; cat "$FORTIFY_HOSTS_FILE"',
+            user_input="1\ny\n\nr\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("# BEGIN FORTIFYLAB", result.stdout)
+        self.assertIn("10.0.0.5 ssc.example.test sast.example.test dast.example.test lim.example.test dashboard.example.test juice-shop.example.test webgoat.example.test dvwa.example.test", result.stdout)
+        self.assertIn("backup saved", result.stdout)
 
     def test_coredns_patch_refreshes_legacy_lab_hosts_block(self) -> None:
         helper = ROOT / "scripts/lib/coredns-lab-hosts.sh"

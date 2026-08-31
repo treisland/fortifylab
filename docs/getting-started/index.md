@@ -176,20 +176,22 @@ Do not delete PVCs, rotate credentials, regenerate TLS, or replace SSC
 The configured domain produces these names:
 
 ```text
-ssc.<domain> sast.<domain> dast.<domain> lim.<domain> dashboard.<domain>
+ssc.<domain> sast.<domain> dast.<domain> lim.<domain> dashboard.<domain> juice-shop.<domain> webgoat.<domain> dvwa.<domain>
 ```
 
-Point all five names at the lab node in your client DNS, or add one line to the
-client hosts file using the node address that the browser can reach:
+Point those names at the lab node in your client DNS, or use the Local hosts
+assistant to maintain a Fortify Lab-managed block in this machine's `/etc/hosts`:
 
 ```text
-<lab-node-ip>  ssc.<domain> sast.<domain> dast.<domain> lim.<domain> dashboard.<domain>
+\# BEGIN FORTIFYLAB
+<lab-node-ip>  ssc.<domain> sast.<domain> dast.<domain> lim.<domain> dashboard.<domain> juice-shop.<domain> webgoat.<domain> dvwa.<domain>
+\# END FORTIFYLAB
 ```
 
 Then choose **Advanced setup and configuration → Configure DNS, SSC token,
-LIM, and Dashboard access → DNS**. With confirmation, this patches CoreDNS so
-pods can resolve the same hostnames through ingress. The wizard prints the
-client entry but cannot change your laptop's DNS or hosts file.
+LIM, and Dashboard access → DNS**. With confirmation, this can update local
+`/etc/hosts` and patch CoreDNS so pods resolve the same hostnames through
+ingress. Remote clients still need DNS, Pi-hole, or their own hosts-file entry.
 
 Import the public `certs/rootCA.pem` into the trust store of a dedicated lab
 client. Never bypass TLS verification. Regenerating certificates rotates the
