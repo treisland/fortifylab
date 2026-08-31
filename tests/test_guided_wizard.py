@@ -1238,16 +1238,23 @@ class GuidedWizardTests(unittest.TestCase):
 
     def test_prerequisite_menu_shows_completion_indicators(self) -> None:
         self.assertIn("prereqs_status_table()", WIZARD)
-        self.assertIn('"Host prerequisites: $ready/5 ready."', WIZARD)
+        self.assertIn('"Host prerequisites: $ready/6 ready."', WIZARD)
+        self.assertIn('"Host CLI helpers"', WIZARD)
         self.assertIn("All prerequisite indicators are complete", WIZARD)
         self.assertIn("Next missing: group access in this shell", WIZARD)
         self.assertIn("Refresh group access (microk8s/docker) now", WIZARD)
 
-    def test_prerequisite_probe_requires_microk8s_access(self) -> None:
+    def test_prerequisite_probe_matches_visible_readiness_helpers(self) -> None:
+        self.assertIn("host_cli_tools_ready()", WIZARD)
         self.assertIn("microk8s_access_ready()", WIZARD)
         self.assertIn("id -nG | grep -qw microk8s", WIZARD)
         self.assertIn("microk8s status --wait-ready", WIZARD)
-        self.assertIn("java_ready && docker_ready && mkcert_ready && microk8s_access_ready", WIZARD)
+        self.assertIn("java_ready && host_cli_tools_ready && docker_ready && mkcert_ready && microk8s_access_ready", WIZARD)
+        self.assertIn('for command in openssl curl envsubst; do', WIZARD)
+        self.assertIn('command -v sg >/dev/null 2>&1 || command -v newgrp >/dev/null 2>&1 || return 1', WIZARD)
+        self.assertIn('packages+=("gettext-base")', WIZARD)
+        self.assertIn('packages+=("util-linux-extra")', WIZARD)
+        self.assertIn('if [ "$(prereqs_ready_count)" -lt 6 ] || ! inputs_complete; then', WIZARD)
 
     def test_group_activation_is_automatic_not_menu_gated(self) -> None:
         # install_docker and install_microk8s both auto-activate group access

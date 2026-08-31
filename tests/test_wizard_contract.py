@@ -344,6 +344,7 @@ exit 1
 
     def test_microk8s_installer_adds_group_and_guides_shell_refresh(self) -> None:
         installer = (ROOT / "scripts" / "install_microk8s.sh").read_text(encoding="utf-8")
+        self.assertIn('sudo apt install -y util-linux-extra', installer)
         self.assertIn('sudo usermod -aG microk8s "$target_user"', installer)
         self.assertIn('sudo chown -R "$target_user:$target_user" "$target_home/.kube"', installer)
         self.assertIn("newgrp microk8s", installer)
