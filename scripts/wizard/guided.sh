@@ -397,11 +397,7 @@ guided_repair_recommendation() {
 }
 
 prereqs_complete() {
-    local command
-    for command in openssl envsubst curl; do
-        command -v "$command" >/dev/null 2>&1 || return 1
-    done
-    java_ready && docker_ready && mkcert_ready && microk8s_access_ready || return 1
+    java_ready && host_cli_tools_ready && docker_ready && mkcert_ready && microk8s_access_ready || return 1
     return 0
 }
 
@@ -1861,7 +1857,7 @@ EOF
                 note "Auto-advance readiness:"
                 prereqs_status_table
                 printf '  %-24s %s\n' "Configuration and license" "$(prereq_status inputs_complete)"
-                if [ "$(prereqs_ready_count)" -lt 4 ] || ! inputs_complete; then
+                if [ "$(prereqs_ready_count)" -lt 6 ] || ! inputs_complete; then
                     printf '\n'
                     note "Auto-advance will pause for interactive input until the items above are ready."
                 fi

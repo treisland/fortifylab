@@ -10,6 +10,7 @@ fi
 # Load the environment variables.
 source "$FORTIFY_HOME_K8S/.env"
 
+sudo apt install -y util-linux-extra
 sudo snap install microk8s --classic
 
 target_user="${SUDO_USER:-$USER}"

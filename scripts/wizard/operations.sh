@@ -13,6 +13,10 @@ status_prereqs() {
     command -v docker   &>/dev/null || missing+=("docker")
     command -v microk8s &>/dev/null || missing+=("microk8s")
     command -v mkcert   &>/dev/null || missing+=("mkcert")
+    command -v openssl  &>/dev/null || missing+=("openssl")
+    command -v curl     &>/dev/null || missing+=("curl")
+    command -v envsubst &>/dev/null || missing+=("envsubst")
+    command -v sg       &>/dev/null || command -v newgrp &>/dev/null || missing+=("sg/newgrp")
     if [ ${#missing[@]} -eq 0 ]; then
         printf '%s Prerequisites installed\n' "$OK_MARK"
     else
@@ -3682,7 +3686,7 @@ prereqs_menu() {
             3) install_docker;     prereqs_install_summary ;;
             4) install_mkcert;     prereqs_install_summary ;;
             5) install_microk8s;   prereqs_install_summary ;;
-            6) install_jdk; install_maven; install_docker; install_mkcert; install_microk8s; prereqs_install_summary ;;
+            6) install_jdk; install_maven; install_host_cli_tools; install_docker; install_mkcert; install_microk8s; prereqs_install_summary ;;
             [Gg]) prereqs_refresh_group_access ;;
             [Rr]) return ;;
             *) error "Invalid"; sleep 1 ;;
@@ -3814,7 +3818,20 @@ EOF
 install_jdk()      { command -v java   &>/dev/null && note "Already installed."  || sudo apt install -y openjdk-17-jre-headless; }
 install_maven()    { command -v mvn    &>/dev/null && note "Already installed."  || sudo apt install -y maven; }
 install_mkcert()   { command -v mkcert &>/dev/null && note "Already installed."  || sudo apt install -y mkcert; }
+install_host_cli_tools() {
+    local packages=()
+    command -v openssl >/dev/null 2>&1 || packages+=("openssl")
+    command -v curl >/dev/null 2>&1 || packages+=("curl")
+    command -v envsubst >/dev/null 2>&1 || packages+=("gettext-base")
+    command -v sg >/dev/null 2>&1 || command -v newgrp >/dev/null 2>&1 || packages+=("util-linux-extra")
+    if [ "${#packages[@]}" -eq 0 ]; then
+        note "Already installed."
+        return 0
+    fi
+    sudo apt install -y "${packages[@]}"
+}
 install_docker()   {
+    install_host_cli_tools
     if command -v docker &>/dev/null; then
         note "Already installed."
     else
@@ -3838,6 +3855,7 @@ ensure_registry_credentials() {
     esac
 }
 install_microk8s() {
+    install_host_cli_tools
     if command -v microk8s &>/dev/null; then
         note "Already installed."
     else
@@ -3862,6 +3880,14 @@ docker_ready() {
     [ -s "$HOME/.docker/config.json" ] || return 1
 }
 
+host_cli_tools_ready() {
+    local command
+    for command in openssl curl envsubst; do
+        command -v "$command" >/dev/null 2>&1 || return 1
+    done
+    command -v sg >/dev/null 2>&1 || command -v newgrp >/dev/null 2>&1 || return 1
+}
+
 mkcert_ready() { command -v mkcert >/dev/null 2>&1; }
 java_ready() { command -v java >/dev/null 2>&1 && command -v keytool >/dev/null 2>&1; }
 maven_ready() { command -v mvn >/dev/null 2>&1; }
@@ -3875,6 +3901,7 @@ microk8s_access_ready() {
 prereqs_status_table() {
     printf '  %-24s %s\n' "JDK 17" "$(prereq_status java_ready)"
     printf '  %-24s %s\n' "Maven" "$(prereq_status maven_ready)"
+    printf '  %-24s %s\n' "Host CLI helpers" "$(prereq_status host_cli_tools_ready)"
     printf '  %-24s %s\n' "Docker + login" "$(prereq_status docker_ready)"
     printf '  %-24s %s\n' "mkcert" "$(prereq_status mkcert_ready)"
     printf '  %-24s %s\n' "MicroK8s access" "$(prereq_status microk8s_access_ready)"
@@ -3884,6 +3911,7 @@ prereqs_ready_count() {
     local ready=0
     java_ready && ready=$((ready + 1))
     maven_ready && ready=$((ready + 1))
+    host_cli_tools_ready && ready=$((ready + 1))
     docker_ready && ready=$((ready + 1))
     mkcert_ready && ready=$((ready + 1))
     microk8s_access_ready && ready=$((ready + 1))
@@ -3894,8 +3922,8 @@ prereqs_install_summary() {
     local ready pending
     ready=$(prereqs_ready_count)
     printf '\n'
-    note "Host prerequisites: $ready/5 ready."
-    if [ "$ready" -eq 5 ]; then
+    note "Host prerequisites: $ready/6 ready."
+    if [ "$ready" -eq 6 ]; then
         note "All prerequisite indicators are complete."
     else
         pending="$(fortify_groups_pending_activation)"
@@ -3958,8 +3986,16 @@ ensure_active_groups() {
     fi
 
     if ! command -v sg >/dev/null 2>&1; then
+        if command -v apt >/dev/null 2>&1; then
+            note "Installing util-linux-extra so the wizard can refresh group access automatically..."
+            sudo apt install -y util-linux-extra || return 1
+        fi
+    fi
+
+    if ! command -v sg >/dev/null 2>&1; then
         error "Could not find sg to refresh group access automatically."
-        note "Run this in your shell (one group per newgrp), then relaunch the wizard:"
+        note "Install util-linux-extra, then relaunch the wizard."
+        note "If newgrp is available, run this in your shell first (one group per newgrp):"
         while IFS= read -r group; do
             note "  newgrp $group"
         done <<< "$pending"
