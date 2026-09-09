@@ -50,6 +50,19 @@ class DependencyHealthTests(unittest.TestCase):
             with self.subTest(script=relative):
                 self.assertLess(script.index(gate), script.index("microk8s helm"))
 
+    def test_ssc_pod_waits_for_mysql_after_cluster_restart(self) -> None:
+        start = (ROOT / "apps/ssc/start.sh").read_text(encoding="utf-8")
+        patch = (ROOT / "apps/ssc/mysql-readiness-patch.yaml").read_text(encoding="utf-8")
+
+        self.assertIn("mysql-readiness-patch.yaml", start)
+        self.assertIn("patch statefulset ssc-webapp", start)
+        self.assertIn("--type=strategic --patch-file=/dev/stdin", start)
+        self.assertIn("name: wait-for-mysql", patch)
+        self.assertIn("--host=mysql", patch)
+        self.assertIn('--execute="SELECT 1"', patch)
+        self.assertIn("name: mysql", patch)
+        self.assertIn("key: mysql-root-password", patch)
+
     def test_database_probes_are_authenticated_and_suppress_output(self) -> None:
         helper = HELPER.read_text(encoding="utf-8")
         self.assertIn('MYSQL_ROOT_PASSWORD_FILE:-', helper)

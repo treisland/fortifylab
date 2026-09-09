@@ -66,6 +66,14 @@ microk8s helm -n "$NAMESPACE" upgrade -i ssc \
 		--set service.type=ClusterIP \
 		"${RELEASE_OVERLAY_HELM_ARGS[@]}"
 
+# The Bash health gate above protects an operator-driven deployment, but it is
+# not present when Kubernetes automatically restarts workloads after a host
+# reboot. Persist the same dependency in the SSC pod template so every new SSC
+# pod waits until MySQL accepts an authenticated query.
+envsubst '${FORTIFY_MYSQL_IMAGE_TAG}' < "$CURRENT_DIR/mysql-readiness-patch.yaml" \
+	| microk8s kubectl -n "$NAMESPACE" patch statefulset ssc-webapp \
+		--type=strategic --patch-file=/dev/stdin
+
 if microk8s kubectl get crd middlewares.traefik.io >/dev/null 2>&1; then
 	envsubst '${NAMESPACE}' < "$CURRENT_DIR/traefik-upload-middleware.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
 fi
