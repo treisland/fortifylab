@@ -1,0 +1,34 @@
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: bitnamilegacy/mysql:${FORTIFY_MYSQL_IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until MYSQL_PWD="$MYSQL_ROOT_PASSWORD" /opt/bitnami/mysql/bin/mysql \
+                --host=mysql \
+                --port=3306 \
+                --user=root \
+                --connect-timeout=5 \
+                --batch \
+                --skip-column-names \
+                --execute="SELECT 1" >/dev/null 2>&1; do
+                echo "Waiting for MySQL to accept authenticated connections..."
+                sleep 5
+              done
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql
+                  key: mysql-root-password
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
