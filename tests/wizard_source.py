@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 def read_wizard_source(root: Path) -> str:
@@ -19,5 +20,14 @@ def read_wizard_source(root: Path) -> str:
     ):
         module = module_dir / module_name
         if module.exists():
-            parts.append(module.read_text(encoding="utf-8"))
+            source = module.read_text(encoding="utf-8")
+            parts.append(source)
+            if module_name == "operations.sh":
+                nested_modules = re.findall(
+                    r"^\s*((?:operations|flight-plans)/[a-z0-9-]+\.sh)\s*$",
+                    source,
+                    re.MULTILINE,
+                )
+                for relative_path in nested_modules:
+                    parts.append((module_dir / relative_path).read_text(encoding="utf-8"))
     return "\n".join(parts)
