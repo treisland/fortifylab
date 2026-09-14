@@ -13,7 +13,7 @@ flight_plan_tool() {
     local tool root
     tool="$FORTIFY_HOME_K8S/scripts/tools/flight-plans.py"
     if [ ! -f "$tool" ]; then
-        root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+        root="${FORTIFY_WIZARD_SOURCE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
         tool="$root/scripts/tools/flight-plans.py"
     fi
     python3 "$tool" "$@"

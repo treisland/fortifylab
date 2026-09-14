@@ -9,6 +9,10 @@
 
 [ -n "${FORTIFY_WIZARD_OPERATIONS_LOADED:-}" ] && return 0
 
+# Keep the source checkout stable even when tests or callers point
+# FORTIFY_HOME_K8S at a temporary lab directory after the wizard is loaded.
+FORTIFY_WIZARD_SOURCE_ROOT="${FORTIFY_WIZARD_SOURCE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
 source_wizard_operation_module() {
     local relative_path="$1"
     if [[ ! "$relative_path" =~ ^(operations|flight-plans)/[a-z0-9-]+\.sh$ ]]; then
