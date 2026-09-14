@@ -12,6 +12,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from tests.wizard_source import read_wizard_source
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "config/flight-plans.toml"
@@ -570,7 +572,7 @@ class FlightPlansTests(unittest.TestCase):
 
     def test_deployment_inputs_and_diagnostics_surface_flight_plan_context(self) -> None:
         guided = (ROOT / "scripts/wizard/guided.sh").read_text(encoding="utf-8")
-        operations = (ROOT / "scripts/wizard/operations.sh").read_text(encoding="utf-8")
+        operations = read_wizard_source(ROOT)
         self.assertIn("Deployment versions and Flight Plan", guided)
         self.assertIn("Flight Plan:", guided)
         self.assertIn('section "Flight Plan"', guided)
@@ -588,7 +590,7 @@ class FlightPlansTests(unittest.TestCase):
         # options, even though it's often the first thing a user wants to do
         # (a new release just dropped). It must now have its own section,
         # placed ahead of the advanced/expert group.
-        operations = (ROOT / "scripts/wizard/operations.sh").read_text(encoding="utf-8")
+        operations = read_wizard_source(ROOT)
         menu = operations.split("flight_plan_versions_menu()", 1)[1].split("versions_menu()", 1)[0]
         self.assertIn('section "Core actions"', menu)
         self.assertIn('section "Discover new releases"', menu)
