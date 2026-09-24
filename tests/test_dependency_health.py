@@ -50,6 +50,19 @@ class DependencyHealthTests(unittest.TestCase):
             with self.subTest(script=relative):
                 self.assertLess(script.index(gate), script.index("microk8s helm"))
 
+    def test_ssc_start_adds_a_restart_safe_mysql_gate(self) -> None:
+        script = (ROOT / "apps/ssc/start.sh").read_text(encoding="utf-8")
+        self.assertIn("wait-for-mysql", script)
+        self.assertIn("mysql-root-password", script)
+        self.assertIn('--execute=\\\"SELECT 1\\\"', script)
+        self.assertLess(script.index("wait-for-mysql"), script.index("kubectl get crd"))
+
+    def test_mysql_start_restores_replica_after_lifecycle_stop(self) -> None:
+        script = (ROOT / "apps/mysql/start.sh").read_text(encoding="utf-8")
+        self.assertIn('scale statefulset mysql --replicas=1', script)
+        self.assertGreater(script.index("scale statefulset mysql"), script.index("microk8s helm"))
+        self.assertGreater(script.index("health_mysql_ready"), script.index("scale statefulset mysql"))
+
     def test_database_probes_are_authenticated_and_suppress_output(self) -> None:
         helper = HELPER.read_text(encoding="utf-8")
         self.assertIn('MYSQL_ROOT_PASSWORD_FILE:-', helper)

@@ -5,6 +5,7 @@ certs/*.pfx
 certs/*.jks
 certs/*.p12
 certs/truststore
+certs/fcli-truststore
 certs/*.crt
 
 # User-provided files (licenses, etc.)
@@ -13,6 +14,7 @@ secrets/input/*
 
 # Build artifacts (created by scripts/create-secrets.sh + create-certs.sh)
 secrets/generated/
+tmp/
 __pycache__/
 *.py[cod]
 
@@ -47,6 +49,7 @@ apps/scdast/scanner/values_test.yaml
 # Your own local Flight Plans (never shared/committed)
 config/flight-plans.local.toml
 config/flight-plans.local.toml.bak
+config/flight-plans.toml.bak
 # Local/private runbooks
 runbooks/local/*
 !runbooks/local/README.md
