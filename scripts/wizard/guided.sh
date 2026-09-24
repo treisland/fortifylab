@@ -1476,10 +1476,7 @@ guided_wait_for_step() {
                     return 3
                     ;;
                 *)
-                    guided_wait_screen_leave
-                    error "Unrecognized key; see options above."
-                    sleep 1
-                    guided_wait_screen_enter
+                    :
                     ;;
             esac
         fi
@@ -1700,7 +1697,7 @@ guided_countdown() {
                     ;;
                 *)
                     printf '\r\033[K'
-                    error "Unrecognized key; see options above."
+                    :
                     ;;
             esac
         fi
