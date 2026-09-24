@@ -66,6 +66,20 @@ microk8s helm -n "$NAMESPACE" upgrade -i ssc \
 		--set service.type=ClusterIP \
 		"${RELEASE_OVERLAY_HELM_ARGS[@]}"
 
+if ! microk8s kubectl -n "$NAMESPACE" get statefulset ssc-webapp \
+	-o jsonpath='{range .spec.template.spec.initContainers[*]}{.name}{"\n"}{end}' \
+	| grep -Fxq wait-for-mysql; then
+	INIT_CONTAINER='{"name":"wait-for-mysql","image":"bitnamilegacy/mysql:'"$FORTIFY_MYSQL_IMAGE_TAG"'","imagePullPolicy":"IfNotPresent","command":["sh","-ec","until MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" /opt/bitnami/mysql/bin/mysql --protocol=tcp --host=mysql --user=root --connect-timeout=5 --batch --skip-column-names --execute=\"SELECT 1\" >/dev/null 2>&1; do sleep 5; done"],"env":[{"name":"MYSQL_ROOT_PASSWORD","valueFrom":{"secretKeyRef":{"name":"mysql","key":"mysql-root-password"}}}]}'
+	if microk8s kubectl -n "$NAMESPACE" get statefulset ssc-webapp \
+		-o jsonpath='{.spec.template.spec.initContainers}' | grep -q .; then
+		microk8s kubectl -n "$NAMESPACE" patch statefulset ssc-webapp --type=json \
+			-p='[{"op":"add","path":"/spec/template/spec/initContainers/-","value":'"$INIT_CONTAINER"'}]'
+	else
+		microk8s kubectl -n "$NAMESPACE" patch statefulset ssc-webapp --type=json \
+			-p='[{"op":"add","path":"/spec/template/spec/initContainers","value":['"$INIT_CONTAINER"']}]'
+	fi
+fi
+
 if microk8s kubectl get crd middlewares.traefik.io >/dev/null 2>&1; then
 	envsubst '${NAMESPACE}' < "$CURRENT_DIR/traefik-upload-middleware.yaml" | microk8s kubectl -n "$NAMESPACE" apply -f -
 fi

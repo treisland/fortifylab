@@ -8,6 +8,8 @@ if [ -z "$FORTIFY_HOME_K8S" ]; then
 fi
 
 source "$FORTIFY_HOME_K8S/.env"
+# shellcheck source=../../scripts/lib/dependency-health.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
 
 CURRENT_DIR="$( dirname "${BASH_SOURCE[0]}" )"
 
@@ -18,3 +20,6 @@ microk8s helm -n "$NAMESPACE" upgrade -i mysql oci://registry-1.docker.io/bitnam
 --set image.tag="$FORTIFY_MYSQL_IMAGE_TAG" \
 --set auth.rootPassword="$DEFAULT_PASS" \
 -f $CURRENT_DIR/values.yaml
+
+microk8s kubectl -n "$NAMESPACE" scale statefulset mysql --replicas=1
+health_mysql_ready
