@@ -60,7 +60,7 @@ DISCOVERY_REPOSITORIES = {
 HELP_EPILOG = """
 Command groups:
   Lab operators:
-    list, show, compare-env
+    list, show, compare-env, relation, match-running
 
   Wizard and automation helpers:
     default, env-updates, validate
@@ -258,10 +258,21 @@ def print_list(catalog: Catalog, include_candidates: bool) -> int:
     return 0
 
 
-def print_show(catalog: Catalog, plan_id: str) -> int:
+def plan_source(base_path: Path, plan_id: str) -> str:
+    local = load_local_catalog(base_path)
+    if plan_id not in local.flight_plans:
+        return "curated catalog"
+    if plan_id in load_catalog(base_path).flight_plans:
+        return "local catalog (overrides the curated plan with the same id)"
+    return "local catalog"
+
+
+def print_show(catalog: Catalog, plan_id: str, source: str = "") -> int:
     plan = plan_record(catalog, plan_id)
     print(f"Flight Plan: {plan.get('label', plan_id)}")
     print(f"ID:          {plan_id}")
+    if source:
+        print(f"Source:      {source}")
     print(f"Status:      {plan.get('status', '<unknown>')}")
     print(f"Family:      {plan.get('family', '<unknown>')}")
     print(f"Notes:       {plan.get('notes', '')}")
@@ -281,6 +292,35 @@ def print_env_updates(catalog: Catalog, plan_id: str, include_empty: bool) -> in
         if value or include_empty:
             print(f"{key}={value}")
     return 0
+
+
+def plan_relation(catalog: Catalog, from_plan: str, to_plan: str) -> str:
+    """Classify moving from one plan to another by release family:
+    same, upgrade, downgrade, or unknown when either family is missing."""
+    plans = catalog.flight_plans
+    if from_plan not in plans or to_plan not in plans:
+        return "unknown"
+    current = str(plans[from_plan].get("family", ""))
+    target = str(plans[to_plan].get("family", ""))
+    if not re.fullmatch(r"\d{2,4}(\.\d+)?", current) or not re.fullmatch(r"\d{2,4}(\.\d+)?", target):
+        return "unknown"
+    if current == target:
+        return "same"
+    return "upgrade" if version_sort_key(target) > version_sort_key(current) else "downgrade"
+
+
+def match_running(catalog: Catalog, running: dict[str, str]) -> str:
+    """Name the plan whose components match every running value given.
+    Keys missing from running (component not deployed) are ignored.
+    Prints unknown when nothing is running and custom when no plan matches."""
+    observed = {key: value for key, value in running.items() if key in FORTIFY_KEYS and value}
+    if not observed:
+        return "unknown"
+    for plan_id, plan in catalog.flight_plans.items():
+        components = plan.get("components", {})
+        if all(str(components.get(key, "")) == value for key, value in observed.items()):
+            return plan_id
+    return "custom"
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -489,11 +529,17 @@ def version_sort_key(tag: str) -> tuple[Any, ...]:
     return tuple(result)
 
 
+def tag_in_family(tag: str, family: str) -> bool:
+    """True when tag belongs to the release family: 26.2 matches 26.2, 26.2.0-1
+    and 26.2-ubi, but never 26.20.0; family 25 matches 25.2.0 but not 250.1."""
+    return tag == family or (tag.startswith(family) and tag[len(family)] in ".-_")
+
+
 def family_tag_candidates(tags: list[dict[str, Any]], family: str) -> set[str]:
     candidates: set[str] = set()
     for record in tags:
         name = str(record.get("name", ""))
-        if name and name != "latest" and name.startswith(family):
+        if name and name != "latest" and tag_in_family(name, family):
             candidates.add(name)
     return candidates
 
@@ -724,9 +770,10 @@ def render_catalog(data: dict[str, Any]) -> str:
         lines.extend(render_toml_table("database_defaults", data["database_defaults"]))
     for plan_id, plan in data.get("flight_plans", {}).items():
         lines.extend(["", f"[flight_plans.{toml_quote(plan_id)}]"])
-        for key in ("label", "status", "family", "notes"):
-            if key in plan:
-                lines.append(f"{key} = {toml_quote(str(plan[key]))}")
+        ordered = [key for key in ("label", "status", "family", "notes") if key in plan]
+        ordered += [key for key in plan if key not in ordered and not isinstance(plan[key], dict)]
+        for key in ordered:
+            lines.append(f"{key} = {toml_quote(str(plan[key]))}")
         lines.extend(["", f"[flight_plans.{toml_quote(plan_id)}.components]"])
         for key in FORTIFY_KEYS:
             lines.append(f"{key} = {toml_quote(str(plan.get('components', {}).get(key, '')))}")
@@ -1035,6 +1082,35 @@ Safety:
     promote_local_parser.add_argument("candidate", type=Path)
     promote_local_parser.add_argument("--status", choices=sorted(LOCAL_STATUSES), default="candidate")
     promote_local_parser.add_argument("--yes", action="store_true")
+    relation_parser = sub.add_parser(
+        "relation",
+        help="Classify a plan change as same, upgrade, downgrade, or unknown",
+        description="Compare the release families of two Flight Plans. The wizard uses this to guard downgrades.",
+        epilog="""Example:
+  flight-plans.py relation fortify-26.2 fortify-25.2
+
+Safety:
+  Read-only.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    relation_parser.add_argument("from_plan")
+    relation_parser.add_argument("to_plan")
+    match_parser = sub.add_parser(
+        "match-running",
+        help="Name the Flight Plan matching the versions running in the cluster",
+        description=(
+            "Read KEY=VALUE lines of running component versions (as collected by the wizard) "
+            "and print the Flight Plan whose components match all of them, 'custom' when none "
+            "does, or 'unknown' when no versions were given."
+        ),
+        epilog="""Example:
+  flight-plans.py match-running --values-file .fortifylab/deployed-versions
+
+Safety:
+  Read-only.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    match_parser.add_argument("--values-file", type=Path, required=True)
     remove_local_parser = sub.add_parser(
         "remove-local",
         help="Remove a Flight Plan from your own local Flight Plans",
@@ -1091,11 +1167,17 @@ Safety:
             return print_list(load_local_catalog(args.catalog), True)
         return print_list(merged_read_catalog(args.catalog), args.include_candidates)
     if args.command == "show":
-        return print_show(merged_read_catalog(args.catalog), args.plan_id)
+        return print_show(merged_read_catalog(args.catalog), args.plan_id, plan_source(args.catalog, args.plan_id))
     if args.command == "env-updates":
         return print_env_updates(merged_read_catalog(args.catalog), args.plan_id, args.include_empty)
     if args.command == "compare-env":
         return compare_env(merged_read_catalog(args.catalog), args.plan_id, args.env_file)
+    if args.command == "relation":
+        print(plan_relation(merged_read_catalog(args.catalog), args.from_plan, args.to_plan))
+        return 0
+    if args.command == "match-running":
+        print(match_running(merged_read_catalog(args.catalog), parse_env_file(args.values_file)))
+        return 0
     if args.command == "discover":
         out = args.output or candidate_output_path(args.release)
         return discover(catalog, args.release, out, args.fixture_dir)

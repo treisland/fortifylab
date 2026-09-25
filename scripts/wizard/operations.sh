@@ -1868,7 +1868,63 @@ flight_plan_current_status() {
     local plan_id="${1:-$(flight_plan_selected_id)}"
     printf '  Flight Plan:        %s\n' "$plan_id"
     printf '  Alignment:          %s\n' "$(flight_plan_alignment_summary "$plan_id")"
+    printf '  Deployed:           %s\n' "$(flight_plan_deployed_summary)"
     printf '  Deployment profile: %s\n' "${GUIDED_DEPLOYMENT_PROFILE_LABEL:-$(guided_profile_label "${FORTIFY_DEPLOYMENT_PROFILE:-full_lab}")}"
+}
+
+# One line: which plan the cluster runs and how many products lag .env.
+# Reads the cached versions; flight_plan_deployed_report refreshes them.
+flight_plan_deployed_summary() {
+    local deployed stale=() component
+    case "$(deployed_versions_state)" in
+        ok) ;;
+        unreachable) printf 'unknown (cluster unreachable, %s)\n' "$(deployed_age_text)"; return 0 ;;
+        *) printf 'not checked yet\n'; return 0 ;;
+    esac
+    deployed=$(deployed_flight_plan)
+    [ "$deployed" = custom ] && deployed="custom versions"
+    [ "$deployed" = unknown ] && deployed="no Fortify products deployed"
+    mapfile -t stale < <(deployed_components_needing_redeploy)
+    if [ "${#stale[@]}" -eq 0 ]; then
+        printf '%s (%s)\n' "$deployed" "$(deployed_age_text)"
+    else
+        printf '%s; needs redeploy: %s (%s)\n' "$deployed" "$(printf '%s\n' "${stale[@]}" | tr 'a-z' 'A-Z' | paste -sd, - | sed 's/,/, /g')" "$(deployed_age_text)"
+    fi
+}
+
+flight_plan_deployed_status_label() {
+    case "$1" in
+        current) printf '%s\n' "current" ;;
+        needs-redeploy) printf '%s\n' "needs redeploy" ;;
+        not-deployed) printf '%s\n' "not deployed" ;;
+        *) printf '%s\n' "unknown" ;;
+    esac
+}
+
+# Per-product selected vs deployed table. Refreshes the cluster lookup.
+flight_plan_deployed_report() {
+    local component status
+    section "Deployed vs configured versions"
+    if ! deployed_versions_refresh >/dev/null 2>&1; then
+        note "Could not read deployed versions: the cluster is unreachable or lookups are disabled."
+        return 1
+    fi
+    printf '  Selected Flight Plan: %s\n' "$(flight_plan_selected_id)"
+    printf '  Running Flight Plan:  %s\n\n' "$(deployed_flight_plan)"
+    printf '  %-36s %-16s %s\n' "Product" "State" "Detail"
+    while IFS= read -r component; do
+        status=$(deployed_status_for "$component")
+        printf '  %-36s %-16s %s\n' "$(flight_plan_component_label "$component")" \
+            "$(flight_plan_deployed_status_label "$status")" "$(deployed_stale_detail "$component")"
+    done < <(deployed_components_in_order)
+}
+
+# Non-interactive `./start_wizard.sh flight-plan-status`. Exit 0 when every
+# deployed product is current, 1 when a redeploy is needed or state is unknown.
+wizard_flight_plan_status() {
+    wizard_doctor_load_env
+    flight_plan_deployed_report || return 1
+    [ -z "$(deployed_components_needing_redeploy)" ]
 }
 
 flight_plan_show_comparison() {
@@ -2021,30 +2077,87 @@ flight_plan_print_component_impact() {
     done < <(flight_plan_component_keys "$component")
 }
 
-flight_plan_print_upgrade_impact() {
-    local target_plan="$1" current_plan current_family target_family relation="upgrade/change" output rc=0 drift=0 unknown=0
-    current_plan="$(flight_plan_selected_id)"
-    current_family=$(flight_plan_tool show "$current_plan" 2>/dev/null | awk -F: '/^Family:/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit }')
-    target_family=$(flight_plan_tool show "$target_plan" 2>/dev/null | awk -F: '/^Family:/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit }')
-    if [ -n "$current_family" ] && [ -n "$target_family" ]; then
-        if [ "$target_family" = "$current_family" ]; then
-            relation="same release family"
-        elif printf '%s\n%s\n' "$target_family" "$current_family" | sort -V | tail -1 | grep -qx "$target_family"; then
-            relation="upgrade"
-        else
-            relation="downgrade or rollback"
-        fi
+# The plan a change is measured from: the plan the cluster runs when the
+# running versions match one, otherwise the selected plan in .env. Measuring
+# from the deployed plan catches a downgrade even after .env was edited.
+flight_plan_change_baseline() {
+    local deployed
+    deployed_versions_ensure_fresh 60 >/dev/null 2>&1 || true
+    deployed=$(deployed_flight_plan 2>/dev/null || true)
+    case "$deployed" in
+        ""|custom|unknown) flight_plan_selected_id ;;
+        *) printf '%s\n' "$deployed" ;;
+    esac
+}
+
+# same | upgrade | downgrade | unknown
+flight_plan_change_relation() {
+    local target_plan="$1" baseline="${2:-$(flight_plan_change_baseline)}"
+    flight_plan_tool relation "$baseline" "$target_plan" 2>/dev/null || printf 'unknown\n'
+}
+
+flight_plan_relation_label() {
+    case "$1" in
+        same) printf '%s\n' "same release family" ;;
+        upgrade) printf '%s\n' "upgrade" ;;
+        downgrade) printf '%s\n' "downgrade or rollback" ;;
+        *) printf '%s\n' "upgrade/change" ;;
+    esac
+}
+
+flight_plan_downgrade_warning() {
+    local baseline="$1" target_plan="$2"
+    cat <<EOF
+
+Downgrade warning
+  $target_plan is an older release family than $baseline. SSC, LIM, and
+  ScanCentral migrate their databases on upgrade, and older versions usually
+  cannot start against migrated data. Restore from a snapshot or backup
+  instead unless you are sure no data was migrated.
+EOF
+}
+
+# Returns 0 when the change may proceed. Interactive callers must type the
+# target plan id to confirm a downgrade; non-interactive callers must pass
+# allow_downgrade=1 (--allow-downgrade).
+flight_plan_confirm_downgrade() {
+    local target_plan="$1" interactive="${2:-1}" allow_downgrade="${3:-0}" baseline typed
+    baseline=$(flight_plan_change_baseline)
+    [ "$(flight_plan_change_relation "$target_plan" "$baseline")" = downgrade ] || return 0
+    flight_plan_downgrade_warning "$baseline" "$target_plan"
+    if [ "$allow_downgrade" = 1 ]; then
+        note "Downgrade allowed explicitly."
+        return 0
     fi
+    if [ "$interactive" != 1 ]; then
+        error "Refusing to downgrade from $baseline to $target_plan without --allow-downgrade."
+        return 1
+    fi
+    echo
+    ask typed "Type $target_plan to confirm the downgrade (anything else cancels):"
+    if [ "$typed" = "$target_plan" ]; then
+        return 0
+    fi
+    note "Downgrade cancelled. Nothing was staged."
+    return 1
+}
+
+flight_plan_print_upgrade_impact() {
+    local target_plan="$1" current_plan baseline relation output rc=0 drift=0 unknown=0
+    current_plan="$(flight_plan_selected_id)"
+    baseline="$(flight_plan_change_baseline)"
+    relation=$(flight_plan_relation_label "$(flight_plan_change_relation "$target_plan" "$baseline")")
     output=$(flight_plan_tool compare-env "$target_plan" --env-file "$ENV_FILE" 2>/dev/null) || rc=$?
     drift=$(printf '%s\n' "$output" | awk -F'\t' '$2=="drifted" {c++} END{print c+0}')
     unknown=$(printf '%s\n' "$output" | awk -F'\t' '$2=="unknown" {c++} END{print c+0}')
     printf '  Current Flight Plan: %s\n' "$current_plan"
+    [ "$baseline" = "$current_plan" ] || printf '  Running Flight Plan: %s\n' "$baseline"
     printf '  Target Flight Plan:  %s\n' "$target_plan"
     printf '  Change type:         %s\n' "$relation"
     printf '  Target differences:  %d drifted, %d unknown\n' "$drift" "$unknown"
     printf '  Database versions:   managed separately; not changed by Flight Plan upgrades\n'
     printf '\nTarget release overlays:\n'
-    FORTIFY_FLIGHT_PLAN="$target_plan" release_overlay_report
+    FORTIFY_FLIGHT_PLAN="$target_plan" RELEASE_OVERLAY_ASSUME_PLAN=1 release_overlay_report
     [ "$rc" -eq 0 ] || true
 }
 
@@ -2083,6 +2196,10 @@ flight_plan_stage_updates() {
         return 1
     fi
     env_pending_set "$array_name" FORTIFY_FLIGHT_PLAN "$plan_id"
+    # A full plan realigns every component, so earlier overrides are gone.
+    if [ -n "$(flight_plan_pending_drift_components "${pending_ref[@]}")" ]; then
+        env_pending_set "$array_name" FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS ""
+    fi
 }
 
 
@@ -2134,6 +2251,10 @@ flight_plan_select_menu() {
     FLIGHT_PLAN_CHOICE_LABEL=""
     flight_plan_choose_menu plan_id "$include_candidates" || return $?
     [ -n "$plan_id" ] || return 0
+    if ! flight_plan_confirm_downgrade "$plan_id"; then
+        press_any
+        return 0
+    fi
     if flight_plan_stage_updates "$array_name" "$plan_id"; then
         note "Flight Plan staged: ${FLIGHT_PLAN_CHOICE_LABEL:-$(flight_plan_label_for_id "$plan_id")}"
         flight_plan_upgrade_safety_note
@@ -2154,6 +2275,7 @@ flight_plan_full_upgrade_flow() {
     flight_plan_print_upgrade_impact "$target_plan"
     flight_plan_upgrade_safety_note
     if confirm "Stage full Flight Plan upgrade to $target_plan?"; then
+        flight_plan_confirm_downgrade "$target_plan" || return 0
         flight_plan_stage_updates "$array_name" "$target_plan"
         section "Pending .env changes"
         local -n pending_ref="$array_name"
@@ -2174,7 +2296,7 @@ flight_plan_upgrade_menu() {
 # never prompts and never blocks on stdin. Without --yes this is a dry run,
 # matching the promote/promote-local CLI convention.
 wizard_apply_flight_plan() {
-    local plan_id="$1" auto_yes="${2:-0}" pending=() line count=0
+    local plan_id="$1" auto_yes="${2:-0}" redeploy="${3:-0}" allow_downgrade="${4:-0}" pending=() line count=0 relation
     wizard_doctor_load_env
     if [ ! -s "$ENV_FILE" ]; then
         error ".env does not exist yet. Create one (cp .env.example .env) before applying a Flight Plan."
@@ -2190,17 +2312,116 @@ wizard_apply_flight_plan() {
         return 1
     fi
     pending+=("FORTIFY_FLIGHT_PLAN=$plan_id")
+    [ -z "$(env_current_value FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS)" ] || pending+=("FORTIFY_FLIGHT_PLAN_DRIFT_COMPONENTS=")
     section "Flight Plan upgrade impact"
     flight_plan_print_upgrade_impact "$plan_id"
     flight_plan_upgrade_safety_note
     section "Pending .env changes"
     env_preview_changes "${pending[@]}"
+    relation=$(flight_plan_change_relation "$plan_id")
     if [ "$auto_yes" -ne 1 ]; then
         echo
+        if [ "$relation" = downgrade ] && [ "$allow_downgrade" != 1 ]; then
+            note "This is a downgrade: applying it will also require --allow-downgrade."
+        fi
         note "Dry run only. Re-run with --yes to write .env (a backup is created first)."
         return 0
     fi
-    env_apply_updates flight-plan "${pending[@]}"
+    flight_plan_confirm_downgrade "$plan_id" 0 "$allow_downgrade" || return 1
+    env_apply_updates flight-plan "${pending[@]}" || return 1
+    if [ "$redeploy" = 1 ]; then
+        flight_plan_redeploy_stale yes
+    else
+        flight_plan_redeploy_hint
+    fi
+}
+
+# ---- Redeploy after a Flight Plan change -------------------------------------
+# Changing .env does not change the cluster. These helpers find the products
+# whose running chart/image differs from .env and redeploy only those, in
+# dependency order (SSC, LIM, SAST, DAST), verifying each before the next.
+
+# Guided steps that redeploy a component. SAST and DAST redeploy their sensor
+# and scanner too when those are part of the running lab.
+flight_plan_redeploy_steps() {
+    case "$1" in
+        ssc) printf '%s\n' ssc ;;
+        lim) printf '%s\n' lim ;;
+        sast)
+            if [ "$(deployed_check_status sast_worker_image)" = not-deployed ]; then
+                printf '%s\n' sast_controller
+            else
+                printf '%s\n' sast
+            fi
+            ;;
+        dast)
+            printf '%s\n' dast_core
+            [ "$(deployed_check_status dast_scanner_chart)" = not-deployed ] || printf '%s\n' dast_scanner
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+flight_plan_redeploy_step_label() {
+    local idx
+    if idx=$(guided_step_index "$1" 2>/dev/null); then
+        printf '%s\n' "${GUIDED_STEP_LABEL[$idx]}"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+flight_plan_print_stale_components() {
+    local component
+    for component in "$@"; do
+        printf '  %-36s %s\n' "$(flight_plan_component_label "$component")" "$(deployed_stale_detail "$component")"
+    done
+}
+
+flight_plan_redeploy_hint() {
+    local stale=()
+    deployed_versions_refresh >/dev/null 2>&1 || return 0
+    mapfile -t stale < <(deployed_components_needing_redeploy)
+    [ "${#stale[@]}" -gt 0 ] || return 0
+    section "Products that now need a redeploy"
+    flight_plan_print_stale_components "${stale[@]}"
+    note "Re-run with --redeploy, or use Deployment versions -> Redeploy products that need it."
+}
+
+# mode: prompt (default) asks first; yes redeploys without asking.
+flight_plan_redeploy_stale() {
+    local mode="${1:-prompt}" stale=() component step label names
+    if ! deployed_versions_refresh >/dev/null 2>&1; then
+        note "Could not read deployed versions (cluster unreachable). Redeploy changed products from the guided deployment once the cluster is reachable."
+        return 0
+    fi
+    mapfile -t stale < <(deployed_components_needing_redeploy)
+    if [ "${#stale[@]}" -eq 0 ]; then
+        note "Every deployed Fortify product already runs the configured versions. Nothing to redeploy."
+        return 0
+    fi
+    section "Products that need a redeploy"
+    flight_plan_print_stale_components "${stale[@]}"
+    names=$(printf '%s\n' "${stale[@]}" | tr 'a-z' 'A-Z' | paste -sd, - | sed 's/,/, /g')
+    if [ "$mode" != yes ]; then
+        echo
+        if ! confirm "Redeploy $names now, in this order?"; then
+            note "Not redeployed. The banner and guided deployment show these products as needing redeploy."
+            return 0
+        fi
+    fi
+    wizard_log_event "action=flight_plan_redeploy components=${stale[*]}"
+    for component in "${stale[@]}"; do
+        for step in $(flight_plan_redeploy_steps "$component"); do
+            label=$(flight_plan_redeploy_step_label "$step")
+            if ! guided_run_and_verify "$step" "$label"; then
+                error "Redeploy stopped at $label. Products after it were not redeployed."
+                return 1
+            fi
+        done
+    done
+    deployed_versions_refresh >/dev/null 2>&1 || true
+    note "Redeploy complete: $names now run the configured versions."
 }
 
 flight_plan_show_candidates() {
@@ -2344,7 +2565,7 @@ EOF
         flight_plan_promote_local_menu "$family"
         return 0
     fi
-    note "You can add it later from 'Add a discovered candidate to my local Flight Plans' (option 9)."
+    note "You can add it later from 'Add a discovered candidate to my local Flight Plans' (option 6)."
     press_any
 }
 
@@ -2483,6 +2704,9 @@ EOF
         echo "  11. Compare .env to selected Flight Plan"
         echo "  12. Preview pending .env changes"
         echo "  13. Apply pending version changes"
+        section "Deployed lab"
+        echo "  14. Show deployed vs configured versions"
+        echo "  15. Redeploy products that need it"
         echo
         echo "   r. Return"
         echo "   q. Quit safely"
@@ -2502,6 +2726,15 @@ EOF
             11) flight_plan_show_comparison; press_any ;;
             12) [ "${#pending_updates[@]}" -gt 0 ] && env_preview_changes "${pending_updates[@]}" || note "No pending changes."; press_any ;;
             13) env_section_apply_pending flight-plan pending_updates; press_any ;;
+            14) flight_plan_deployed_report; press_any ;;
+            15)
+                if [ "${#pending_updates[@]}" -gt 0 ]; then
+                    note "Apply or discard pending .env changes first; redeploy uses the applied .env."
+                else
+                    flight_plan_redeploy_stale
+                fi
+                press_any
+                ;;
             [Rr]) env_section_prompt_return pending_updates && return 0 ;;
             [Qq]) env_section_prompt_return pending_updates && return 130 ;;
             *) error "Invalid selection"; sleep 1 ;;
@@ -3212,6 +3445,10 @@ env_section_apply_pending() {
         echo
         if confirm "Roll back this change now?"; then
             env_rollback_last
+        else
+            case "$reason" in
+                flight-plan|flight-plan-component|versions) flight_plan_redeploy_stale ;;
+            esac
         fi
     else
         note "Configuration changes remain pending."

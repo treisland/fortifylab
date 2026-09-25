@@ -43,6 +43,47 @@ release_overlay_selected_release() {
     return 1
 }
 
+release_overlay_component_key() {
+    case "$1" in
+        ssc) printf '%s\n' FORTIFY_SSC_CHART_VERSION ;;
+        lim) printf '%s\n' FORTIFY_LIM_CHART_VERSION ;;
+        scsast) printf '%s\n' FORTIFY_SCSAST_CHART_VERSION ;;
+        scdast/*) printf '%s\n' FORTIFY_SCDAST_CHART_VERSION ;;
+        *) return 1 ;;
+    esac
+}
+
+release_overlay_plan_value() {
+    local plan_id="$1" key="$2" line
+    while IFS= read -r line; do
+        [ "${line%%=*}" = "$key" ] || continue
+        printf '%s\n' "${line#*=}"
+        return 0
+    done < <(python3 "$(release_overlay_tool_path)" env-updates "$plan_id" 2>/dev/null)
+    return 1
+}
+
+# The release whose overlay an app needs. Normally the selected Flight Plan's
+# release. When .env overrides the app's chart version away from the plan
+# (for example SSC 25.2.0-1 inside a 26.2 lab), the overlay follows the chart
+# actually being deployed, because overlays adapt to chart contracts.
+# RELEASE_OVERLAY_ASSUME_PLAN=1 ignores .env overrides (used when previewing
+# a plan whose values are not applied yet).
+release_overlay_release_for_app() {
+    local app_id="$1" plan_id="${2:-$(release_overlay_selected_plan)}" key configured planned release
+    release=$(release_overlay_selected_release "$plan_id" 2>/dev/null || true)
+    if [ "${RELEASE_OVERLAY_ASSUME_PLAN:-0}" != 1 ] && key=$(release_overlay_component_key "$app_id"); then
+        configured="${!key:-}"
+        planned=$(release_overlay_plan_value "$plan_id" "$key" 2>/dev/null || true)
+        if [ -n "$configured" ] && [ "$configured" != "$planned" ] &&
+            [[ "$configured" =~ ^([0-9]{2,4}\.[0-9]+)([.-]|$) ]]; then
+            release="${BASH_REMATCH[1]}"
+        fi
+    fi
+    [ -n "$release" ] || return 1
+    printf '%s\n' "$release"
+}
+
 release_overlay_path() {
     local app_id="$1" release="${2:-$(release_overlay_selected_release 2>/dev/null || true)}"
     [ -n "$release" ] || return 1
@@ -59,7 +100,7 @@ release_overlay_log() {
 
 release_overlay_status() {
     local app_id="$1" release path
-    release=$(release_overlay_selected_release 2>/dev/null || true)
+    release=$(release_overlay_release_for_app "$app_id" 2>/dev/null || true)
     if [ -z "$release" ]; then
         printf 'no-release\n'
         return 0
@@ -79,7 +120,7 @@ release_overlay_status() {
 release_overlay_status_line() {
     local app_id="$1" label="${2:-$1}" release path display_path status root
     root="${FORTIFY_HOME_K8S:-$(pwd)}"
-    release=$(release_overlay_selected_release 2>/dev/null || true)
+    release=$(release_overlay_release_for_app "$app_id" 2>/dev/null || true)
     if [ -z "$release" ]; then
         printf '  %-28s no release baseline selected\n' "$label"
         return 0
@@ -144,7 +185,7 @@ release_overlay_load() {
     local app_id="$1" release path status
     RELEASE_OVERLAY_HELM_ARGS=()
     export RELEASE_OVERLAY_APP_ID="$app_id"
-    release=$(release_overlay_selected_release 2>/dev/null || true)
+    release=$(release_overlay_release_for_app "$app_id" 2>/dev/null || true)
     export RELEASE_OVERLAY_RELEASE="$release"
     if [ -z "$release" ]; then
         RELEASE_OVERLAY_STATUS="no-release"

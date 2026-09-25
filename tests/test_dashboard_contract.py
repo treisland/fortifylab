@@ -7,8 +7,11 @@ import unittest
 from pathlib import Path
 
 from tests.wizard_source import read_wizard_source
+import os
 
 
+# Never let sourced wizard code query a real cluster for deployed versions.
+os.environ.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
 ROOT = Path(__file__).resolve().parents[1]
 
 

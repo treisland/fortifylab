@@ -50,13 +50,28 @@ FORTIFY_RECOMMENDED_FCLI_VERSION="${FORTIFY_RECOMMENDED_FCLI_VERSION:-3.23.3}"
 FORTIFY_FCLI_INSTALL_DIR="${FORTIFY_FCLI_INSTALL_DIR:-$HOME/fortify/tools/bin}"
 
 hr()       { printf '%s\n' "────────────────────────────────────────────────────────────"; }
-title()    { clear; printf '\n%s%s%s\n' "$BOLD" "$1" "$RESET"; hr; }
+title()    { clear; wizard_banner; printf '\n%s%s%s\n' "$BOLD" "$1" "$RESET"; hr; }
 section()  { printf '\n%s%s%s\n' "$BOLD" "$1" "$RESET"; }
 press_any(){ printf '\n'; read -rp "Press Enter to continue... " _; }
 ask()      { local _v="$1"; shift; read -rp "$* " "$_v"; }
 confirm()  { local r; read -rp "$1 [y/N] " r; [[ "$r" =~ ^[Yy]$ ]]; }
 error()    { printf '%s %s\n' "$FAIL_MARK" "$*" >&2; }
 note()     { printf '%s %s\n' "$INFO_MARK" "$*"; }
+
+# Deployed Flight Plan banner shown above every screen title. It reads cached
+# cluster versions only (scripts/lib/deployed-versions.sh); the main menu
+# refreshes that cache. FORTIFY_WIZARD_BANNER=off hides it.
+wizard_banner() {
+    local line color="$DIM"
+    [ "${FORTIFY_WIZARD_BANNER:-on}" = off ] && return 0
+    declare -F deployed_versions_banner >/dev/null 2>&1 || return 0
+    line=$(deployed_versions_banner 2>/dev/null) || return 0
+    [ -n "$line" ] || return 0
+    case "$line" in
+        *"need redeploy"*|*unknown*) color="$YELLOW" ;;
+    esac
+    printf '%s%s%s\n' "$color" "$line" "$RESET"
+}
 
 # shellcheck source=scripts/lib/help.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/help.sh"
@@ -66,6 +81,8 @@ source "$FORTIFY_HOME_K8S/scripts/lib/lab-disclaimer.sh"
 source "$FORTIFY_HOME_K8S/scripts/lib/operational-help.sh"
 # shellcheck source=scripts/lib/flight-plans.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/flight-plans.sh"
+# shellcheck source=scripts/lib/deployed-versions.sh
+source "$FORTIFY_HOME_K8S/scripts/lib/deployed-versions.sh"
 # shellcheck source=scripts/lib/release-overlays.sh
 source "$FORTIFY_HOME_K8S/scripts/lib/release-overlays.sh"
 # shellcheck source=scripts/lib/registry-credentials.sh
@@ -129,11 +146,18 @@ Usage:
   ./start_wizard.sh doctor           Run a read-only health summary and exit.
   ./start_wizard.sh config-diagnostics
                                       Inspect .env host/URL wiring without printing secrets.
-  ./start_wizard.sh apply-flight-plan <plan-id> [--yes]
+  ./start_wizard.sh apply-flight-plan <plan-id> [--yes] [--redeploy] [--allow-downgrade]
                                       Stage a Flight Plan's component versions into .env
                                       with a backup, without opening the interactive menu.
                                       Without --yes, prints the impact and pending changes
                                       and exits without writing (dry run).
+                                      --redeploy then redeploys every product whose running
+                                      version differs from .env, in dependency order.
+                                      --allow-downgrade is required to apply a plan from an
+                                      older release family than the one running.
+  ./start_wizard.sh flight-plan-status
+                                      Show selected vs deployed Flight Plan versions and
+                                      which products need a redeploy.
   ./start_wizard.sh -h | --help      Show this message.
 
 Environment overrides:
@@ -153,22 +177,34 @@ EOF
 if [ -z "${WIZARD_NOMAIN:-}" ]; then
     case "${1:-}" in
         -h|--help) usage; exit 0 ;;
-        doctor|config-diagnostics|''|--accept-lab-use|apply-flight-plan) ;;
+        doctor|config-diagnostics|''|--accept-lab-use|apply-flight-plan|flight-plan-status) ;;
         *) error "Unsupported argument: ${1}"; usage >&2; exit 2 ;;
     esac
     if [ "${1:-}" = apply-flight-plan ]; then
         apply_flight_plan_id="${2:-}"
         apply_flight_plan_yes=0
-        case "${3:-}" in
-            --yes) apply_flight_plan_yes=1 ;;
-            "") ;;
-            *) error "Unsupported argument: ${3}"; usage >&2; exit 2 ;;
+        apply_flight_plan_redeploy=0
+        apply_flight_plan_allow_downgrade=0
+        case "$apply_flight_plan_id" in
+            ""|--*)
+                error "Usage: ./start_wizard.sh apply-flight-plan <plan-id> [--yes] [--redeploy] [--allow-downgrade]"
+                exit 2
+                ;;
         esac
-        if [ -z "$apply_flight_plan_id" ] || [ "$#" -gt 3 ]; then
-            error "Usage: ./start_wizard.sh apply-flight-plan <plan-id> [--yes]"
-            exit 2
-        fi
-        wizard_apply_flight_plan "$apply_flight_plan_id" "$apply_flight_plan_yes"
+        for apply_flight_plan_arg in "${@:3}"; do
+            case "$apply_flight_plan_arg" in
+                --yes) apply_flight_plan_yes=1 ;;
+                --redeploy) apply_flight_plan_redeploy=1 ;;
+                --allow-downgrade) apply_flight_plan_allow_downgrade=1 ;;
+                *) error "Unsupported argument: ${apply_flight_plan_arg}"; usage >&2; exit 2 ;;
+            esac
+        done
+        wizard_apply_flight_plan "$apply_flight_plan_id" "$apply_flight_plan_yes" \
+            "$apply_flight_plan_redeploy" "$apply_flight_plan_allow_downgrade"
+        exit $?
+    fi
+    if [ "${1:-}" = flight-plan-status ]; then
+        wizard_flight_plan_status
         exit $?
     fi
     if [ "$#" -gt 1 ]; then

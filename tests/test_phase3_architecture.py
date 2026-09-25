@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+import os
 
 
+# Never let sourced wizard code query a real cluster for deployed versions.
+os.environ.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
 ROOT = Path(__file__).resolve().parents[1]
 ADR = ROOT / "docs" / "adr" / "0002-python-runtime-migration.md"
 GUIDE = ROOT / "docs" / "development" / "phase-3-python-migration.md"

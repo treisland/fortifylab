@@ -7,6 +7,37 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Flight Plan redeploys: after a Flight Plan change the wizard detects which
+  deployed products run a chart or image other than `.env`, marks them
+  **needs redeploy** in the guided deployment, and offers to redeploy only
+  those, in dependency order. `apply-flight-plan --redeploy` does the same
+  non-interactively.
+- Deployed Flight Plan banner above every wizard screen: selected versus
+  running plan, products that need a redeploy, and when it was checked.
+- `./start_wizard.sh flight-plan-status` and a **Show deployed vs configured
+  versions** menu item.
+- `flight-plans.py relation` and `match-running` commands.
+
+### Changed
+
+- Downgrading to an older Flight Plan release family now requires typing the
+  plan id interactively, or `--allow-downgrade` with `apply-flight-plan --yes`.
+- A product's release overlay now follows its own chart version when `.env`
+  overrides it away from the selected Flight Plan.
+- Promoting a candidate keeps extra plan fields, and `show` marks local plans
+  that override a curated plan.
+
+### Fixed
+
+- Deploy verification waited only for replica counts, so a redeploy could be
+  verified against the previous pod. StatefulSets must now finish their rollout.
+- Applying a full Flight Plan now clears stale component drift markers.
+- Release discovery no longer matches family `25` to tags such as `250.1`.
+- Flight Plan tests no longer pick up local catalogs, `.env` backups, or a
+  live cluster from the developer machine.
+
 ## [0.2.0] - 2026-08-21
 
 ### Added

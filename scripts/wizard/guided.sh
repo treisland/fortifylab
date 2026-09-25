@@ -523,7 +523,11 @@ workload_ready() {
     cluster_reachable || return 1
     desired=$($KUBECTL -n "$namespace" get "$type" "$name" -o jsonpath='{.spec.replicas}' 2>/dev/null) || return 1
     ready=$($KUBECTL -n "$namespace" get "$type" "$name" -o jsonpath='{.status.readyReplicas}' 2>/dev/null) || return 1
-    [ -n "$desired" ] && [ "${ready:-0}" -ge "$desired" ]
+    [ -n "$desired" ] && [ "${ready:-0}" -ge "$desired" ] || return 1
+    [ "$type" = statefulset ] || return 0
+    declare -F health_statefulset_rollout_complete >/dev/null ||
+        source "$FORTIFY_HOME_K8S/scripts/lib/dependency-health.sh"
+    NAMESPACE="$namespace" health_statefulset_rollout_complete "$name"
 }
 
 statefulset_in_progress() {
@@ -778,7 +782,19 @@ guided_step_complete() {
     local probe
     probe=$(guided_step_probe "$1") || return 1
     [ -n "$probe" ] || return 1
-    "$probe"
+    "$probe" || return 1
+    ! guided_step_needs_redeploy "$1"
+}
+
+# A healthy Fortify product that runs a chart or image other than the one in
+# .env (for example after a Flight Plan change) is not complete: running the
+# step again redeploys it. Unknown versions (cluster unreachable, lookups
+# disabled) never block completion, so health alone decides as before.
+guided_step_needs_redeploy() {
+    declare -F deployed_status_for >/dev/null 2>&1 || return 1
+    [ -n "$(deployed_checks_for "$1")" ] || return 1
+    deployed_versions_ensure_fresh >/dev/null 2>&1 || true
+    [ "$(deployed_status_for "$1")" = needs-redeploy ]
 }
 
 guided_step_live_complete() {
@@ -810,7 +826,9 @@ guided_step_live_in_progress() {
 }
 
 guided_step_live_status() {
-    if guided_step_live_complete "$1"; then
+    if guided_step_live_complete "$1" && guided_step_needs_redeploy "$1"; then
+        printf '%sneeds redeploy%s' "$YELLOW" "$RESET"
+    elif guided_step_live_complete "$1"; then
         printf '%scomplete%s' "$GREEN" "$RESET"
     elif guided_step_live_in_progress "$1"; then
         printf '%sin progress%s' "$YELLOW" "$RESET"
@@ -825,6 +843,7 @@ guided_status_render() {
     case "$1" in
         complete) printf '%scomplete%s' "$GREEN" "$RESET" ;;
         in_progress) printf '%sin progress%s' "$YELLOW" "$RESET" ;;
+        needs_redeploy) printf '%sneeds redeploy%s' "$YELLOW" "$RESET" ;;
         manual) printf '%smanual%s' "$DIM" "$RESET" ;;
         failed) printf '%sfailed%s' "$RED" "$RESET" ;;
         skipped) printf '%sskipped%s' "$DIM" "$RESET" ;;
@@ -833,7 +852,9 @@ guided_status_render() {
 }
 
 guided_step_live_state() {
-    if guided_step_live_complete "$1"; then
+    if guided_step_live_complete "$1" && guided_step_needs_redeploy "$1"; then
+        printf '%s\n' needs_redeploy
+    elif guided_step_live_complete "$1"; then
         printf '%s\n' complete
     elif guided_step_live_in_progress "$1"; then
         printf '%s\n' in_progress
@@ -1095,7 +1116,9 @@ guided_step_progress_message() {
 
 guided_step_why_pending() {
     local id="$1"
-    if guided_step_complete "$id"; then
+    if guided_step_needs_redeploy "$id"; then
+        printf 'Running versions differ from .env (%s). Run this step again to redeploy.\n' "$(deployed_stale_detail "$id")"
+    elif guided_step_complete "$id"; then
         printf '%s\n' "Step is complete; no pending action is required."
     elif guided_step_in_progress "$id"; then
         printf '%s\n' "Step is in progress; continue watching verification before retrying."
@@ -1490,6 +1513,8 @@ wizard_deployment_plan() {
     for idx in "${!GUIDED_STEP_ID[@]}"; do
         if guided_step_complete "${GUIDED_STEP_ID[$idx]}"; then
             status=complete
+        elif guided_step_needs_redeploy "${GUIDED_STEP_ID[$idx]}"; then
+            status=redeploy
         else
             status=pending
         fi
@@ -1639,6 +1664,7 @@ guided_run_and_verify() {
     GUIDED_WAIT_LAST_STATE="running"
     guided_board_touch "$id" in_progress
     wizard_log_event "action=step_enter step=$id label=$label mode=${GUIDED_MODE_CONTEXT:-unknown} profile=$(guided_step_action_profile "$id")"
+    declare -F deployed_versions_invalidate >/dev/null 2>&1 && deployed_versions_invalidate
     if ! run_deployment_operation "$id"; then
         GUIDED_WAIT_LAST_STATE="failed"
         GUIDED_WAIT_LAST_FAILURE="$label operation failed before verification."

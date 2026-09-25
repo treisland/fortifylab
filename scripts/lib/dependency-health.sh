@@ -48,7 +48,29 @@ health_statefulset_ready() {
     ready=$($KUBECTL -n "$namespace" get statefulset "$statefulset" -o jsonpath='{.status.readyReplicas}' 2>/dev/null) || return 1
     # shellcheck disable=SC2086
     current=$($KUBECTL -n "$namespace" get statefulset "$statefulset" -o jsonpath='{.status.currentReplicas}' 2>/dev/null) || return 1
-    [ "${ready:-0}" -eq "$desired" ] && [ "${current:-0}" -eq "$desired" ]
+    [ "${ready:-0}" -eq "$desired" ] && [ "${current:-0}" -eq "$desired" ] || return 1
+    health_statefulset_rollout_complete "$statefulset"
+}
+
+# Right after `helm upgrade` the old pod is still Ready, so replica counts
+# alone would verify the previous version. Mirror `kubectl rollout status`:
+# the controller must have observed the latest spec and moved every pod to
+# the update revision.
+health_statefulset_rollout_complete() {
+    local statefulset="$1" namespace="${NAMESPACE:?NAMESPACE is required}" fields generation observed current_rev update_rev
+    # Callers have already read the StatefulSet's replicas; if the rollout
+    # fields cannot be read, keep their replica-based verdict.
+    # shellcheck disable=SC2086
+    fields=$($KUBECTL -n "$namespace" get statefulset "$statefulset" \
+        -o jsonpath='{.metadata.generation}|{.status.observedGeneration}|{.status.currentRevision}|{.status.updateRevision}' 2>/dev/null) || return 0
+    IFS='|' read -r generation observed current_rev update_rev <<<"$fields"
+    if [[ "$generation" =~ ^[0-9]+$ ]] && [[ "$observed" =~ ^[0-9]+$ ]]; then
+        [ "$observed" -ge "$generation" ] || return 1
+    fi
+    if [ -n "$current_rev" ] && [ -n "$update_rev" ]; then
+        [ "$current_rev" = "$update_rev" ] || return 1
+    fi
+    return 0
 }
 
 health_service_endpoints_ready() {

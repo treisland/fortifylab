@@ -65,9 +65,14 @@ a curated release bundle.
 4. Let the wizard create the normal `.env` backup and stage the selected Flight
    Plan values. Do not hand-edit `.env` during the same upgrade window unless
    you are intentionally testing drift.
-5. Start or upgrade components in dependency order from the guided workflow.
-   Watch the live wait screen, readiness probes, and known-issue hints before
-   moving to the next component.
+5. Redeploy the products whose versions changed. After you apply the plan, the
+   wizard lists each deployed product whose running chart or image differs
+   from `.env` and offers to redeploy them in dependency order (SSC, LIM,
+   ScanCentral SAST, ScanCentral DAST). Each product is verified, including a
+   finished rollout, before the next one starts. If you decline, those products
+   show **needs redeploy** in the guided deployment and in the banner until you
+   run them again. Watch the live wait screen, readiness probes, and known-issue
+   hints before moving to the next component.
 6. Export a sanitized diagnostics bundle after the upgrade if you need an audit
    trail or support evidence. Review the archive locally before sharing it.
 
@@ -89,6 +94,45 @@ candidate.
 5. Restore to the Flight Plan baseline as soon as the exception is no longer
    needed by reselecting the Flight Plan or reapplying its environment updates.
    Confirm the comparison no longer reports that component as drift.
+
+### Selected versus deployed Flight Plan
+
+`.env` records the *selected* Flight Plan. The cluster may still run another
+one until every product is redeployed. The wizard reads the running Helm chart
+versions and StatefulSet image tags and shows both:
+
+- A banner above every wizard screen, for example
+  `Flight Plan: selected fortify-26.2 · running fortify-25.2 · 2 of 4 products need redeploy (SSC, LIM) · checked 2 min ago`,
+  or `Flight Plan fortify-26.2 · deployed and current` when everything matches.
+  The banner reads a cached lookup; the main menu refreshes it when it is more
+  than five minutes old, and every deploy refreshes it. When the cluster cannot
+  be reached, it says the deployed version is unknown instead of guessing.
+- **Deployment Versions -> Show deployed vs configured versions** lists each
+  product as current, needs redeploy, or not deployed, with the running and
+  configured versions.
+- **Deployment Versions -> Redeploy products that need it** runs the same
+  ordered redeploy offered after an apply.
+- The guided deployment marks a healthy product that runs the wrong version as
+  **needs redeploy** rather than complete.
+
+From the command line, `./start_wizard.sh flight-plan-status` prints the same
+comparison and exits non-zero when a product needs a redeploy or the cluster
+cannot be read.
+
+Set `FORTIFY_DEPLOYED_VERSIONS=off` to disable the cluster lookups; the wizard
+then judges completion by health alone, as before. Set
+`FORTIFY_WIZARD_BANNER=off` to hide only the banner.
+
+### Downgrade guard
+
+A change to an older release family than the one running is a downgrade.
+SSC, LIM, and ScanCentral migrate their databases on upgrade, so a downgrade
+usually needs a data restore, not just older images. The wizard measures the
+change from the Flight Plan the cluster runs (or the selected plan when the
+running versions match none) and:
+
+- in the interactive menu, asks you to type the target plan id to confirm;
+- in `apply-flight-plan --yes`, refuses unless you add `--allow-downgrade`.
 
 ## Post-upgrade verification
 
@@ -125,7 +169,11 @@ apps/scdast/core/releases/26.2/overrides.sh
 apps/scdast/scanner/releases/26.2/overrides.sh
 ```
 
-The selected Flight Plan determines the `<major.minor>` baseline. During an app
+The selected Flight Plan determines the `<major.minor>` baseline. When `.env`
+overrides one product's chart version away from the selected plan (for example
+SSC `25.2.0-1` inside a `fortify-26.2` lab), that product's overlay follows the
+chart release actually being deployed (`25.2`), because overlays adapt to chart
+contracts. The upgrade preview always shows the target plan's own overlays. During an app
 start or upgrade, the app script sources the matching overlay when it exists.
 Missing overlays are normal and mean the shared deployment script is valid for
 that release. Selected overlays must pass `bash -n`; guided pre-flight and
@@ -253,9 +301,17 @@ Flight Plan's versions into your real `.env`, use the wizard's non-interactive
 `apply-flight-plan` command -- no need to open the interactive menu:
 
 ```bash
-./start_wizard.sh apply-flight-plan fortify-26.2          # dry run: shows impact and pending changes only
-./start_wizard.sh apply-flight-plan fortify-26.2 --yes    # writes .env with a backup first
+./start_wizard.sh apply-flight-plan fortify-26.2                     # dry run: shows impact and pending changes only
+./start_wizard.sh apply-flight-plan fortify-26.2 --yes               # writes .env with a backup first
+./start_wizard.sh apply-flight-plan fortify-26.2 --yes --redeploy    # ...then redeploys products that changed
+./start_wizard.sh apply-flight-plan fortify-25.2 --yes --allow-downgrade
+./start_wizard.sh flight-plan-status                                 # selected vs deployed versions
 ```
+
+Without `--redeploy`, `--yes` lists the products that now need a redeploy and
+leaves the cluster unchanged. With it, the wizard redeploys only those
+products, in dependency order, and stops at the first one that fails
+verification.
 
 This reuses the same staging, impact-preview, and backup-and-apply machinery
 as **Deployment Versions -> Upgrade full Flight Plan**. Without `--yes` it

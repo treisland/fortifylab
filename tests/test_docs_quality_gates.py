@@ -3,8 +3,11 @@
 from pathlib import Path
 import subprocess
 import unittest
+import os
 
 
+# Never let sourced wizard code query a real cluster for deployed versions.
+os.environ.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
 ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -8,6 +8,8 @@ import sys
 import unittest
 from pathlib import Path
 
+# Never let sourced wizard code query a real cluster for deployed versions.
+os.environ.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))

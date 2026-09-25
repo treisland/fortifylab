@@ -14,6 +14,17 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# ignore_patterns matches file names, not paths, so list bare names. These are
+# local, gitignored state that must never leak into an isolated repo copy.
+REPO_COPY_IGNORE = shutil.ignore_patterns(
+    ".git",
+    "tmp",
+    ".fortifylab",
+    ".env.backups",
+    ".env.rollback",
+    "flight-plans.local.toml",
+    "flight-plans.local.toml.bak",
+)
 CATALOG = ROOT / "config/flight-plans.toml"
 TOOL = ROOT / "scripts/tools/flight-plans.py"
 HELPER = ROOT / "scripts/lib/flight-plans.sh"
@@ -28,6 +39,7 @@ class FlightPlansTests(unittest.TestCase):
     def run_wizard_functions(self, body: str, user_input: str = "") -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory:
             env = os.environ.copy()
+            env.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
             env["XDG_CONFIG_HOME"] = str(Path(directory) / "config")
             env["HOME"] = str(Path(directory) / "home")
             return subprocess.run(
@@ -53,9 +65,10 @@ class FlightPlansTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fortify_home = repo or (Path(directory) / "repo")
             if repo is None:
-                shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp"))
+                shutil.copytree(ROOT, fortify_home, ignore=REPO_COPY_IGNORE)
                 shutil.copy(fortify_home / ".env.example", fortify_home / ".env")
             env = os.environ.copy()
+            env.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
             env["XDG_CONFIG_HOME"] = str(Path(directory) / "config")
             env["HOME"] = str(Path(directory) / "home")
             result = subprocess.run(
@@ -433,7 +446,8 @@ class FlightPlansTests(unittest.TestCase):
         self.assertEqual(releases_help.returncode, 0, releases_help.stderr)
         self.assertEqual(promote_help.returncode, 0, promote_help.stderr)
         self.assertEqual(curate_help.returncode, 0, curate_help.stderr)
-        self.assertIn("--release RELEASE, --family RELEASE", discover_help.stdout)
+        # argparse wording differs by Python version.
+        self.assertRegex(discover_help.stdout, r"--release( RELEASE)?, --family RELEASE")
         self.assertIn("Compatibility:", discover_help.stdout)
         self.assertIn("score candidate Flight Plan coverage", releases_help.stdout)
         self.assertIn("--write-complete", releases_help.stdout)
@@ -897,7 +911,7 @@ class FlightPlansTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tmp = Path(directory)
             fortify_home = tmp / "repo"
-            shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp", "config/flight-plans.local.toml"))
+            shutil.copytree(ROOT, fortify_home, ignore=REPO_COPY_IGNORE)
             candidate_dir = fortify_home / "tmp" / "flight-plan-candidates"
             candidate_dir.mkdir(parents=True, exist_ok=True)
             (candidate_dir / "fortify-26.3.toml").write_text(
@@ -923,6 +937,7 @@ class FlightPlansTests(unittest.TestCase):
                 encoding="utf-8",
             )
             env = os.environ.copy()
+            env.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
             env["XDG_CONFIG_HOME"] = str(tmp / "config")
             env["HOME"] = str(tmp / "home")
             result = subprocess.run(
@@ -954,7 +969,7 @@ class FlightPlansTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tmp = Path(directory)
             fortify_home = tmp / "repo"
-            shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp", "config/flight-plans.local.toml"))
+            shutil.copytree(ROOT, fortify_home, ignore=REPO_COPY_IGNORE)
             candidate_dir = fortify_home / "tmp" / "flight-plan-candidates"
             candidate_dir.mkdir(parents=True, exist_ok=True)
             (candidate_dir / "fortify-26.3.toml").write_text(
@@ -974,6 +989,7 @@ class FlightPlansTests(unittest.TestCase):
                 encoding="utf-8",
             )
             env = os.environ.copy()
+            env.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
             env["XDG_CONFIG_HOME"] = str(tmp / "config")
             env["HOME"] = str(tmp / "home")
             result = subprocess.run(
@@ -1004,7 +1020,7 @@ class FlightPlansTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tmp = Path(directory)
             fortify_home = tmp / "repo"
-            shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp", "config/flight-plans.local.toml"))
+            shutil.copytree(ROOT, fortify_home, ignore=REPO_COPY_IGNORE)
             candidate_dir = fortify_home / "tmp" / "flight-plan-candidates"
             candidate_dir.mkdir(parents=True, exist_ok=True)
             (candidate_dir / "fortify-26.3.toml").write_text(
@@ -1030,6 +1046,7 @@ class FlightPlansTests(unittest.TestCase):
                 encoding="utf-8",
             )
             env = os.environ.copy()
+            env.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
             env["XDG_CONFIG_HOME"] = str(tmp / "config")
             env["HOME"] = str(tmp / "home")
             result = subprocess.run(
@@ -1077,7 +1094,7 @@ class FlightPlansTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tmp = Path(directory)
             fortify_home = tmp / "repo"
-            shutil.copytree(ROOT, fortify_home, ignore=shutil.ignore_patterns(".git", "tmp", "config/flight-plans.local.toml"))
+            shutil.copytree(ROOT, fortify_home, ignore=REPO_COPY_IGNORE)
             candidate_dir = fortify_home / "tmp" / "flight-plan-candidates"
             candidate_dir.mkdir(parents=True, exist_ok=True)
             (candidate_dir / "fortify-26.3.toml").write_text(
@@ -1103,6 +1120,7 @@ class FlightPlansTests(unittest.TestCase):
                 encoding="utf-8",
             )
             env = os.environ.copy()
+            env.setdefault("FORTIFY_DEPLOYED_VERSIONS", "off")
             env["XDG_CONFIG_HOME"] = str(tmp / "config")
             env["HOME"] = str(tmp / "home")
             promote = subprocess.run(
@@ -1148,7 +1166,7 @@ class FlightPlansTests(unittest.TestCase):
 
     def test_remove_local_menu_reports_when_there_is_nothing_to_remove(self) -> None:
         result = self.run_wizard_functions(
-            'read -r _lab_ack; tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; cp -r config "$tmp/"; rm -f "$tmp/config/flight-plans.local.toml"; '
+            'read -r _lab_ack; tmp=$(mktemp -d); FORTIFY_HOME_K8S="$tmp"; cp -r config scripts "$tmp/"; rm -f "$tmp/config/flight-plans.local.toml"; '
             'flight_plan_remove_local_menu',
             user_input="\n",
         )
@@ -1184,7 +1202,7 @@ class FlightPlansTests(unittest.TestCase):
             user_input="26.3\nn\n\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("option 9", result.stdout)
+        self.assertIn("option 6", result.stdout)
         self.assertNotIn("PROMOTE_CALLED", result.stdout)
 
     def test_apply_flight_plan_cli_dry_run_does_not_write_env(self) -> None:

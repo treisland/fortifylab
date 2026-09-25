@@ -132,6 +132,9 @@ fortifylab_first_time_welcome_menu() {
 main_menu() {
     local choice
     while true; do
+        # Keep the deployed-version banner at most five minutes old; other
+        # screens only read the cache.
+        deployed_versions_ensure_fresh "${FORTIFY_BANNER_REFRESH_SECONDS:-300}" >/dev/null 2>&1 || true
         title "Fortify Lab"
         fortify_lab_menu_banner
         section "Status"
