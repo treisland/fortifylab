@@ -14,6 +14,97 @@ fortify_lab_hostnames_inline() {
     fortify_lab_hostnames | paste -sd ' ' -
 }
 
+fortify_local_hosts_block() {
+    local ip="$1" hosts="$2"
+    printf '%s\n' '# BEGIN FORTIFYLAB'
+    printf '%s %s\n' "$ip" "$hosts"
+    printf '%s\n' '# END FORTIFYLAB'
+}
+
+fortify_patch_local_hosts_file() {
+    local ip="$1" hosts="$2"
+    awk -v ip="$ip" -v hosts="$hosts" '
+        function print_block() {
+            print "# BEGIN FORTIFYLAB"
+            print ip " " hosts
+            print "# END FORTIFYLAB"
+        }
+        /^# BEGIN FORTIFYLAB$/ {
+            if (!printed) {
+                print_block()
+                printed=1
+            }
+            skip=1
+            next
+        }
+        /^# END FORTIFYLAB$/ { skip=0; next }
+        skip { next }
+        { print }
+        END {
+            if (!printed) {
+                if (NR > 0) print ""
+                print_block()
+            }
+        }
+    '
+}
+
+fortify_remove_local_hosts_block() {
+    awk '
+        /^# BEGIN FORTIFYLAB$/ { skip=1; next }
+        /^# END FORTIFYLAB$/ { skip=0; next }
+        skip { next }
+        { print }
+    '
+}
+
+fortify_local_hosts_apply_file() {
+    local file="$1" content="$2" backup
+    backup="${file}.fortifylab.$(date +%Y%m%d%H%M%S).bak"
+    if [ -w "$file" ]; then
+        cp "$file" "$backup" || return 1
+        printf '%s' "$content" > "$file"
+    else
+        sudo cp "$file" "$backup" || return 1
+        printf '%s' "$content" | sudo tee "$file" >/dev/null || return 1
+    fi
+    printf 'Updated %s; backup saved to %s\n' "$file" "$backup"
+}
+
+fortify_update_local_hosts() {
+    local ip="${1:-}" file="${FORTIFY_HOSTS_FILE:-/etc/hosts}" hosts current patched
+    [ -n "$ip" ] || ip=$(fortify_lab_node_ip)
+    hosts=$(fortify_lab_hostnames_inline)
+    if [ -z "$ip" ]; then
+        printf 'Could not determine the lab node IP for /etc/hosts. Enter it manually.\n' >&2
+        return 1
+    fi
+    current=$(cat "$file" 2>/dev/null) || {
+        printf 'Could not read %s.\n' "$file" >&2
+        return 1
+    }
+    patched=$(printf '%s\n' "$current" | fortify_patch_local_hosts_file "$ip" "$hosts")
+    if [ "$patched" = "$current" ]; then
+        printf '%s already contains the current FortifyLab hosts block.\n' "$file"
+        return 0
+    fi
+    fortify_local_hosts_apply_file "$file" "$patched"
+}
+
+fortify_remove_local_hosts() {
+    local file="${FORTIFY_HOSTS_FILE:-/etc/hosts}" current patched
+    current=$(cat "$file" 2>/dev/null) || {
+        printf 'Could not read %s.\n' "$file" >&2
+        return 1
+    }
+    patched=$(printf '%s\n' "$current" | fortify_remove_local_hosts_block)
+    if [ "$patched" = "$current" ]; then
+        printf '%s does not contain a FortifyLab hosts block.\n' "$file"
+        return 0
+    fi
+    fortify_local_hosts_apply_file "$file" "$patched"
+}
+
 fortify_patch_coredns_corefile() {
     local ip="$1" hosts="$2"
     awk -v ip="$ip" -v hosts="$hosts" '

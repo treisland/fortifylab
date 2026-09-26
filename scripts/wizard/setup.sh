@@ -578,7 +578,9 @@ Point these hostnames at the lab host IP from each client machine or DNS server:
   webgoat.$domain
   dvwa.$domain
 
-The wizard never edits remote client host files.
+Use the local hosts assistant to update this machine's /etc/hosts with a
+FortifyLab-managed block. Remote clients still need DNS, Pi-hole, or their own
+hosts-file entries.
 EOF
 }
 
@@ -614,6 +616,7 @@ setup_apply_pending_action() {
         refresh-registry) refresh_registry_credentials ;;
         export-root-ca) mkcert_root_ca_export ;;
         configure-fcli-trust) fcli_configure_lab_trust ;;
+        update-local-hosts) local_hosts_assistant ;;
         *) return 0 ;;
     esac
 }
@@ -633,6 +636,8 @@ setup_apply_pending() {
     if [ "${#SETUP_PENDING_UPDATES[@]}" -gt 0 ]; then
         env_apply_updates guided-setup "${SETUP_PENDING_UPDATES[@]}" || return 1
         SETUP_PENDING_UPDATES=()
+        # shellcheck disable=SC1090
+        source "$ENV_FILE"
     fi
     for action in "${SETUP_PENDING_ACTIONS[@]}"; do
         setup_apply_pending_action "$action" || rc=$?
@@ -727,7 +732,7 @@ guided_setup_step_screen() {
             printf '\nCurrent guidance\n'
             setup_hosts_guidance
             printf '\nImpact\n  DNS or hosts-file drift causes browsers and fcli to hit the wrong endpoint, Traefik default routes, or certificate names that do not match.\n'
-            printf '\nRecommended next action\n  Add these names to DNS or each client hosts file, then test from the client machine.\n'
+            printf '\nRecommended next action\n  Use the local hosts assistant for this machine, or add these names to DNS/client hosts files.\n'
             ;;
         8)
             setup_guidance_block \
@@ -756,7 +761,8 @@ guided_setup_edit_step() {
             value=${value,,}
             env_valid_domain "$value" || { error "Use a lowercase DNS-style domain such as fortifydemo.com or lab.example.internal."; return 1; }
             while IFS= read -r update; do setup_pending_set "${update%%=*}" "${update#*=}"; done < <(domain_url_updates "$value")
-            note "Domain and derived URL changes staged."
+            setup_pending_action_add update-local-hosts
+            note "Domain, derived URL, and local hosts update changes staged."
             ;;
         2)
             printf '\n  1. SSC only\n  2. SAST standalone\n  3. SAST full with SSC\n  4. DAST full\n  5. Full lab\n  6. Sample applications only\n'
@@ -774,7 +780,11 @@ guided_setup_edit_step() {
             case "$value" in 1) setup_registry_login ;; 2) setup_pending_action_add refresh-registry; note "Registry secret refresh staged." ;; [Bb]|"") return 0 ;; *) error "Invalid registry action"; return 1 ;; esac
             ;;
         6) setup_tls_assistant ;;
-        7) setup_hosts_guidance; press_any ;;
+        7)
+            wizard_vertical_footer "Hosts actions" "1. Open local /etc/hosts assistant" "2. Stage local hosts update for final review" "b. Back"
+            ask value "Select:"
+            case "$value" in 1) local_hosts_assistant ;; 2) setup_pending_action_add update-local-hosts; note "Local hosts update staged." ;; [Bb]|"") return 0 ;; *) error "Invalid hosts action"; return 1 ;; esac
+            ;;
         8) setup_pending_action_add configure-fcli-trust; note "fcli trust configuration staged." ;;
         9) setup_apply_pending ;;
         *) note "Nothing to edit on this step." ;;
