@@ -156,6 +156,7 @@ main_menu() {
         fi
 
         echo
+        echo "  i. Integrations (Jenkins CI)"
         echo "  ?. Help Center / Fortify Knowledge Center"
         echo "  m. More tools (all wizard menus)"
         echo "  q. Quit"
@@ -176,6 +177,7 @@ main_menu() {
                     sleep 1
                 fi
                 ;;
+            [Ii]) integrations_menu ;;
             "?") help_center ;;
             [Mm]) wizard_more_menu ;;
             [Qq]) clear; exit 0 ;;
@@ -281,6 +283,7 @@ wizard_more_menu() {
         echo "  19. Operational guidance and troubleshooting"
         echo "  20. View wizard log"
         echo "  21. First-scan one-click demo (SAST · IWA-Java)"
+        echo "  22. Integrations (Jenkins CI)"
 
         echo
         echo "   r. Return to essentials"
@@ -311,6 +314,7 @@ wizard_more_menu() {
            19)  operational_guidance_menu ;;
            20)  wizard_log_viewer ;;
            21)  scan_demo_menu ;;
+           22)  integrations_menu ;;
             [Rr]) return ;;
             [Qq]) clear; exit 0 ;;
             *)   error "Invalid choice"; sleep 1 ;;

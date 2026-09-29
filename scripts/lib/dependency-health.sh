@@ -165,6 +165,15 @@ health_postgresql_ready() {
         health_wait_for "PostgreSQL authenticated query" "$FORTIFY_HEALTH_TIMEOUT" health_postgresql_query
 }
 
+health_jenkins_statefulset_probe() { health_statefulset_ready jenkins; }
+health_jenkins_http_probe() { health_http_url "${JENKINS_URL:-https://jenkins.${DOMAIN:?DOMAIN is required}}/login"; }
+health_jenkins_probe() { health_jenkins_statefulset_probe && health_jenkins_http_probe; }
+
+health_jenkins_ready() {
+    health_wait_for "Jenkins StatefulSet" "$FORTIFY_HEALTH_TIMEOUT" health_jenkins_statefulset_probe &&
+        health_wait_for "Jenkins login page" "$FORTIFY_HEALTH_TIMEOUT" health_jenkins_http_probe
+}
+
 health_ssc_http_probe() { health_http_url "${SSC_URL:?SSC_URL is required}"; }
 health_lim_http_probe() { health_http_url "${LIM_URL:?LIM_URL is required}"; }
 health_dast_http_probe() { health_http_url "${SCDAST_URL:?SCDAST_URL is required}"; }

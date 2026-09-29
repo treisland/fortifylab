@@ -94,6 +94,7 @@ nav:
       - Versions and compatibility: operations/versions-and-compatibility.md
       - FCLI readiness: operations/fcli-readiness.md
       - First scan: operations/first-scan.md
+      - Jenkins CI integration: operations/jenkins.md
       - First-scan command examples: examples/first-scan/README.md
       - Runbook Library: operations/runbooks.md
       - FCLI runbooks: runbooks/fcli.md

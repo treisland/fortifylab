@@ -130,6 +130,7 @@ source_wizard_module guided.sh
 source_wizard_module runbooks.sh
 source_wizard_module setup.sh
 source_wizard_module scan-demo.sh
+source_wizard_module integrations.sh
 source_wizard_module menu.sh
 
 # ============================================================

@@ -19,6 +19,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - `./start_wizard.sh flight-plan-status` and a **Show deployed vs configured
   versions** menu item.
 - `flight-plans.py relation` and `match-running` commands.
+- Jenkins CI integration (**Integrations** menu): Jenkins at
+  `https://jenkins.<DOMAIN>` behind the lab TLS certificate, with Kubernetes
+  build agents that trust the lab root CA plus public CAs, and fcli installed
+  automatically (pinned and checksum-verified) or left to a manual install.
+  Agents also get Apache Maven (pinned, SHA-512-verified) on their JDK 21.
 
 ### Changed
 

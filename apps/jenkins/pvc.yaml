@@ -1,0 +1,35 @@
+# Jenkins volumes created outside Helm so `helm uninstall` never deletes
+# them; apps/jenkins/destroy.sh removes them only when data deletion is
+# confirmed.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-home
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: jenkins
+    app.kubernetes.io/part-of: fortifylab-integrations
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 8Gi
+---
+# Shared by every agent pod (ReadWriteMany): fcli and any tools users add.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-agent-tools
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: jenkins
+    app.kubernetes.io/part-of: fortifylab-integrations
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 2Gi

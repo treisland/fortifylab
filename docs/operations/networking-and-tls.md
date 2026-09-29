@@ -3,7 +3,9 @@
 The configured `DOMAIN` creates `ssc`, `sast`, `dast`, `lim`, and `dashboard`
 HTTPS names. Client DNS or hosts entries must point them to the MicroK8s lab
 node. Pods also need the repository's CoreDNS mapping so service-to-ingress
-traffic preserves the expected hostname.
+traffic preserves the expected hostname. The optional
+[Jenkins integration](jenkins.md) adds `jenkins` under the same `DOMAIN`; a
+bring-your-own certificate must cover it before Jenkins can start.
 
 TLS defaults to a lab-local mkcert CA. `scripts/create-certs.sh` creates the
 mkcert root material and a wildcard leaf for `DOMAIN` and `*.DOMAIN`;

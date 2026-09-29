@@ -7,7 +7,7 @@ fortify_lab_node_ip() {
 
 fortify_lab_hostnames() {
     local domain="${DOMAIN:-fortifydemo.com}"
-    printf '%s\n' "ssc.$domain" "sast.$domain" "dast.$domain" "lim.$domain" "dashboard.$domain" "juice-shop.$domain" "webgoat.$domain" "dvwa.$domain"
+    printf '%s\n' "ssc.$domain" "sast.$domain" "dast.$domain" "lim.$domain" "dashboard.$domain" "juice-shop.$domain" "webgoat.$domain" "dvwa.$domain" "jenkins.$domain"
 }
 
 fortify_lab_hostnames_inline() {
