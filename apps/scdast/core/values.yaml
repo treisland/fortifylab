@@ -281,6 +281,17 @@ utilityService:
   # -- Number of Pod(s) to deploy.  Values greater than '1' are not supported.
   replicas: 1
 
+#SCDast no longer allows running over unencrypted HTTP or basic ingress-terminated HTTPS as of 25.x
+  dast:
+    tls:
+      serverCertificate:
+        secretName: ""           # The mkcert secret we checked earlier
+        passwordSecretName: ""                 # Required if your certificate is an encrypted PFX bundle
+      clientCertificate:
+        secretName: ""           # The trusted root/client certificate for verification
+      authClients: false                        # Set to true only if enforcing strict dual-token client cert checks
+
+
   # Image configurations for the Utility Service container
   image:
     # -- Repository where to pull docker image from.

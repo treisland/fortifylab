@@ -33,6 +33,51 @@ FORTIFY_FIRST_SCAN_RELEASE="${FORTIFY_FIRST_SCAN_RELEASE:-my-first-scan}"
 FORTIFY_FIRST_SCAN_POLL_INTERVAL="${FORTIFY_FIRST_SCAN_POLL_INTERVAL:-15}"
 FORTIFY_FIRST_SCAN_POLL_TIMEOUT="${FORTIFY_FIRST_SCAN_POLL_TIMEOUT:-1800}"
 
+Resolve the concrete ScanCentral Client version currently associated with
+# FCLI's "latest" alias.
+#
+# Example fcli output:
+# sc-client 26.2.1 26.2, latest Yes N/A
+#
+# Prints only the concrete version, such as:
+# 26.2.1
+resolve_latest_sc_client_version() {
+local fcli_bin output version
+ 
+fcli_bin="$(fcli_path)" || {
+error "Cannot resolve ScanCentral Client version because fcli was not found."
+return 1
+}
+ 
+output="$("$fcli_bin" tool sc-client list 2>&1)" || {
+error "Could not query available ScanCentral Client versions:"
+printf '%s\n' "$output" >&2
+return 1
+}
+ 
+version="$(
+printf '%s\n' "$output" |
+awk '
+$1 == "sc-client" && $0 ~ /(^|[[:space:],])latest([[:space:],]|$)/ {
+print $2
+exit
+}
+'
+)"
+ 
+# Fail closed rather than accidentally handing arbitrary table text to
+# fcli tool env init.
+if ! printf '%s\n' "$version" |
+grep -Eq '^[0-9]+([.][0-9]+){1,3}([._-][[:alnum:]._-]+)?$'; then
+error "Could not determine the concrete version for the FCLI sc-client 'latest' alias."
+note "Available definitions reported by fcli:"
+printf '%s\n' "$output" >&2
+return 1
+fi
+ 
+printf '%s\n' "$version"
+}
+
 # ------------------------------------------------------------------
 # sast_iwa_java scan type
 # ------------------------------------------------------------------
@@ -171,14 +216,14 @@ scan_type_package_sast_iwa_java() {
     # common for a freshly created appversion. Skip the noisy detection
     # entirely by pinning the version fortifylab actually deployed, when
     # known.
-    local sc_client_version_args=()
-    if [ -n "${FORTIFY_SCSAST_WORKER_IMAGE_TAG:-}" ]; then
-        sc_client_version_args=(--sc-client-version "$FORTIFY_SCSAST_WORKER_IMAGE_TAG")
-    fi
+local sc_client_version
+
+sc_client_version="$(resolve_latest_sc_client_version)" || return 1
+note "Using latest available ScanCentral Client: $sc_client_version"
     "$fcli_bin" ssc action run --ssc-session="$FORTIFY_FIRST_SCAN_SSC_SESSION" package \
         --source-dir "$workdir/src" \
         --av "$av_name" \
-        "${sc_client_version_args[@]}" \
+        --sc-client-version "$sc_client_version" \
         --output "$workdir/$FORTIFY_FIRST_SCAN_APP.zip"
 }
 

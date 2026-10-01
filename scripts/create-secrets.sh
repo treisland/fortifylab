@@ -211,7 +211,9 @@ $KUBECTL -n "$NAMESPACE" delete secret --ignore-not-found \
   lim-jwt-security-key \
   lim-server-certificate \
   lim-signing-certificate \
-  lim-signing-certificate-password
+  lim-signing-certificate-password \
+  scdast-api-certificate \
+  scdast-api-certificate-password
 
 
 #--------------------------
@@ -273,7 +275,18 @@ $KUBECTL -n "$NAMESPACE" create secret generic tls-pfx-password \
 # as a server cert makes clients see a self-signed-certificate warning).
 # Reuses the same leaf/password as keystore.jks (tls-pfx-password).
 $KUBECTL -n "$NAMESPACE" create secret generic scdast-utilityservice-certificate \
-  --type=Opaque --from-file=tls.pfx="$KEYSTORE"
+  --type=Opaque \
+  --from-file=tls.pfx="$KEYSTORE" \
+  --from-literal=password="$DEFAULT_PASS"
+
+# SCDAST API certificate
+$KUBECTL -n "$NAMESPACE" create secret generic scdast-api-certificate \
+  --type=Opaque \
+  --from-file=tls.pfx="$KEYSTORE"
+
+$KUBECTL -n "$NAMESPACE" create secret generic scdast-api-certificate-password \
+  --type=Opaque \
+  --from-literal=password="$DEFAULT_PASS"
 
 # SCDAST DB users.
 $KUBECTL -n "$NAMESPACE" create secret generic scdast-db-owner \

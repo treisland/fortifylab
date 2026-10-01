@@ -51,3 +51,5 @@ config/flight-plans.local.toml.bak
 runbooks/local/*
 !runbooks/local/README.md
 fortify-sast-package.zip
+launcher.log
+scancentral.log

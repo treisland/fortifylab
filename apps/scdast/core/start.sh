@@ -31,6 +31,14 @@ health_lim_ready
 
 CURRENT_DIR="$( dirname "${BASH_SOURCE[0]}" )"
 
+#Need to create a service account
+# Create missing ServiceAccounts if they don't exist
+microk8s kubectl -n "$NAMESPACE" create serviceaccount sdast-core-scancentral-dast-core-api \
+  --dry-run=client -o yaml | microk8s kubectl apply -f -
+
+microk8s kubectl -n "$NAMESPACE" create serviceaccount sdast-core-scancentral-dast-core-globalservice \
+  --dry-run=client -o yaml | microk8s kubectl apply -f -
+
 microk8s helm -n "$NAMESPACE" upgrade -i \
 	sdast-core oci://registry-1.docker.io/fortifydocker/helm-scancentral-dast-core \
 	--create-namespace \
@@ -51,10 +59,14 @@ microk8s helm -n "$NAMESPACE" upgrade -i \
 	--set serviceTokenSecretName="scdast-service-token" \
 	--set limServiceAccountSecretName="lim-admin-credentials" \
 	--set limDefaultPoolSecretName="lim-pool" \
-	--set api.certificate.certificateSecretName=tls-pfx \
-	--set api.certificate.certificatePasswordSecretName=tls-pfx-password \
+	--set api.certificate.certificatePasswordSecretName=scdast-api-certificate-password \
 	--set utilityService.certificate.certificateSecretName=scdast-utilityservice-certificate \
 	--set utilityService.certificate.certificatePasswordSecretName=tls-pfx-password \
+	--set api.tls.serverCertificate.secretName=scdast-api-certificate \
+	--set utilityService.dast.tls.serverCertificate.secretName=scdast-utilityservice-certificate \
+	--set utilityService.dast.tls.serverCertificate.passwordSecretName=scdast-utilityservice-certificate \
+	--set api.tls.serverCertificate.secretName=scdast-api-certificate \
+	--set api.tls.serverCertificate.passwordSecretName=scdast-api-certificate-password \
 	--set api.certificate.enabled=false \
 	--set api.ingress.enabled=true \
 	--set api.ingress.className=public \
@@ -70,6 +82,12 @@ microk8s helm -n "$NAMESPACE" upgrade -i \
 microk8s kubectl -n "$NAMESPACE" scale statefulset sdast-core-scancentral-dast-core-api --replicas=1
 microk8s kubectl -n "$NAMESPACE" scale statefulset sdast-core-scancentral-dast-core-globalservice --replicas=1
 microk8s kubectl -n "$NAMESPACE" scale statefulset sdast-core-scancentral-dast-core-utilityservice --replicas=1
+
+#needed for traefik to communicate with the scdast api
+microk8s kubectl -n "$NAMESPACE" annotate service \
+sdast-core-scancentral-dast-core-api \
+traefik.ingress.kubernetes.io/service.serverstransport=fortify-fortify-insecure-backend@kubernetescrd \
+--overwrite
 
 # Grant the standard runtime user (dast_user) access to objects the DBO
 # (postgres) created via the upgradejob. The chart doesn't propagate these
